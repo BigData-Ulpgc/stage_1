@@ -28,3 +28,23 @@ TEST(Tokenizer, LastTokenIsKeptWithoutTrailingSeparator) {
 TEST(Tokenizer, DropsTokensShorterThanTwoCharacters) {
     EXPECT_EQ(tokenize("a 1 22 b7"), (Tokens{"22", "b7"}));
 }
+
+TEST(Tokenizer, RemovesStopwords) {
+    const std::unordered_set<std::string> stopwords = {"the", "is", "that"};
+    EXPECT_EQ(tokenize("The Dog's café, 2 cats!", stopwords), (Tokens{"dog", "caf", "cats"}));
+    // Theory example: 001 "the car is nice" -> only "car" and "nice" reach the index.
+    EXPECT_EQ(tokenize("the car is nice", stopwords), (Tokens{"car", "nice"}));
+}
+
+TEST(Tokenizer, StopwordsAreMatchedAfterLowercasing) {
+    EXPECT_EQ(tokenize("THE Car", {"the"}), (Tokens{"car"}));
+}
+
+TEST(Tokenizer, EmptyStopwordSetKeepsEverything) {
+    EXPECT_EQ(tokenize("the car", std::unordered_set<std::string>{}), tokenize("the car"));
+}
+
+TEST(Tokenizer, StopwordsOnlyMatchWholeTokens) {
+    // "theory" contains "the" but is a different token, so it must survive.
+    EXPECT_EQ(tokenize("theory the", {"the"}), (Tokens{"theory"}));
+}

@@ -144,3 +144,62 @@ module if it uses a different one.
   "C/C++: Reset IntelliSense Database" and reload the window. Opening the `cpp/` folder directly also avoids it.
 - Status: the compilation database was verified to contain `-I.../cpp/include`; the editor-side result was
   confirmed by the author.
+
+---
+
+## Entry 5 – Stopword loading (2026-09-20)
+
+### What was done
+- `include/stage1/stopwords.hpp` + `src/stopwords.cpp`:
+  `std::unordered_set<std::string> stage1::load_stopwords(const std::filesystem::path&)`.
+  Reads one word per line, ignores empty lines and lines starting with `#`, trims whitespace
+  (including a trailing `\r`), and throws `std::runtime_error` if the file cannot be opened.
+- `tests/stopwords_test.cpp`: 3 tests (comments/blank lines/CRLF, missing file, the real
+  `shared/stopwords.txt`).
+- `tests/CMakeLists.txt` defines `STAGE1_SHARED_DIR` so tests can read the shared contract files.
+- The tokenizer does **not** use the stopwords yet: that is the next step (2b).
+
+### Why
+- **`std::unordered_set` instead of a `vector`.** The tokenizer will ask "is this token a stopword?"
+  for every token of every book (millions of times). A hash set answers in O(1) on average;
+  scanning a vector would be O(number of stopwords) per token.
+- **Loading is separated from filtering.** File I/O and the tokenizing rules are different
+  responsibilities; the tokenizer stays a pure function that receives the set as a parameter,
+  which keeps it trivially testable and lets the benchmark load the list only once.
+- **Throw on a missing file instead of returning an empty set.** An empty set would silently keep
+  every stopword in the index and produce results different from Java and Python, with no visible
+  error. Failing loudly is safer for a comparison that must yield equivalent outputs.
+- **Tolerate `\r`, blank lines and comments** because SPEC section 1 says blank lines and `#`
+  lines are ignored in all shared files, and a file edited on Windows would carry `\r\n`.
+- **No lowercasing of the loaded words.** The SPEC states the file is already lowercase and the
+  tokenizer output is lowercase, so extra normalization would hide a broken file instead of exposing it.
+- **Test against the real shared file** so that a future edit of `shared/stopwords.txt` that breaks
+  the format is caught by the C++ tests as well.
+
+---
+
+## Entry 6 – Stopword filtering inside the tokenizer (2026-09-20)
+
+### What was done
+- Added the overload `tokenize(std::string_view, const std::unordered_set<std::string>& stopwords)`.
+  The original one-argument `tokenize(text)` now delegates to it with an empty set.
+- The filter lives in the existing `flush` lambda: a finished token is kept only if it is at least
+  2 characters long **and** is not in the stopword set.
+- 4 new tests: removal (including the theory example `the car is nice` -> `car`, `nice`),
+  matching after lowercasing, empty set = no filtering, and whole-token matching (`theory` survives `the`).
+- SPEC section 5 (tokenizer) is now fully implemented; the "set of terms per book" rule (step 6) is left
+  for the inverted-index phase.
+
+### Why
+- **Filter at token close time (`flush`), not as a second pass over the vector.** One traversal, no
+  temporary vector of unwanted tokens, and the single place that decides "keep or drop" stays in one spot.
+- **Overload + delegation instead of a default argument or a global stopword list.** The stopword set is
+  passed in explicitly, so there is no hidden global state; the query engine and the indexer will call
+  the same function with the same set, which guarantees identical rules on both sides (SPEC section 7).
+  The one-argument version keeps existing callers and tests unchanged.
+- **Reference to a `const` set, not a copy.** The set is loaded once and shared by every book; copying
+  it per call would cost far more than tokenizing a short text.
+- **Order of checks (length first, then hash lookup).** The cheap comparison runs first and `&&`
+  short-circuits, so one-character tokens never pay for a hash computation.
+- **Whole-token comparison only.** Stopwords are matched against complete tokens, never as substrings,
+  which is what "remove stopwords" means and what Java/Python do.

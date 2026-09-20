@@ -15,12 +15,17 @@ bool is_token_char(char c) {
 }  // namespace
 
 std::vector<std::string> tokenize(std::string_view text) {
+    return tokenize(text, std::unordered_set<std::string>{});
+}
+
+std::vector<std::string> tokenize(std::string_view text, const std::unordered_set<std::string>& stopwords) {
     std::vector<std::string> tokens;
     std::string current;
 
-    // Closes the token being built: keeps it if long enough, then starts a new one.
+    // Closes the token being built: keeps it if long enough and not a stopword,
+    // then starts a new one.
     auto flush = [&]() {
-        if (current.size() >= kMinTokenLength) {
+        if (current.size() >= kMinTokenLength && !stopwords.contains(current)) {
             tokens.push_back(std::move(current));
         }
         current.clear();

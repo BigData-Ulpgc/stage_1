@@ -45,7 +45,7 @@ target_link_libraries(stage1_deps INTERFACE
 target_compile_options(stage1_deps INTERFACE -Wall -Wextra -Wpedantic)
 
 # ---- Core library: all the project logic; shared by the executable and the tests ----
-add_library(stage1_core src/tokenizer.cpp)
+add_library(stage1_core src/tokenizer.cpp src/stopwords.cpp)
 target_link_libraries(stage1_core PUBLIC stage1_deps)
 
 # ---- Executable ----
