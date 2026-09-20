@@ -38,3 +38,21 @@ Thumbs.db
 # ---- Logs y temporales ----
 *.log
 *.tmp
+
+# ---- C++ / CMake ----
+cpp/build/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+CMakeUserPresets.json
+compile_commands.json
+.cache/
+*.o
+*.obj
+*.a
+*.so
+*.dylib
+*.dSYM/
+
+# ---- Data generated at runtime (datalake, datamarts, control) ----
+cpp/data/
