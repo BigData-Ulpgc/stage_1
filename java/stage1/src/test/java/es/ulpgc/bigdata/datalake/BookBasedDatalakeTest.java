@@ -8,6 +8,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -59,5 +60,33 @@ class BookBasedDatalakeTest {
 
         assertTrue(datalake.locate(1342).isPresent());
         assertEquals(1342, second.id());
+    }
+
+    @TempDir Path tmp;
+    @Test
+    void carpetaConCerosALaIzquierdaNoDuplicaElId() throws IOException {
+        Path root = tmp.resolve("book");
+        Datalake datalake = new BookBasedDatalake(root);
+        datalake.save(new RawBook(84, "H", "B"));
+        crearLibroFalso(root.resolve("0084"));
+
+        assertEquals(List.of(84), datalake.listBookIds());
+    }
+
+    @Test
+    void idDemasiadoGrandeNoRompeElListado() throws IOException {
+        Path root = tmp.resolve("book");
+        Datalake datalake = new BookBasedDatalake(root);
+        datalake.save(new RawBook(84, "H", "B"));
+        crearLibroFalso(root.resolve("99999999999"));
+
+        assertEquals(List.of(84), datalake.listBookIds());
+    }
+
+    /** Carpeta con header y body, como si fuera un libro, pero creada a mano. */
+    private static void crearLibroFalso(Path dir) throws IOException {
+        Files.createDirectories(dir);
+        Files.writeString(dir.resolve("header.txt"), "x");
+        Files.writeString(dir.resolve("body.txt"), "x");
     }
 }

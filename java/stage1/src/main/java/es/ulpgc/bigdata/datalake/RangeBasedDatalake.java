@@ -130,7 +130,7 @@ public class RangeBasedDatalake implements Datalake {
             throw new UncheckedIOException("No se pudo listar " + root, e);
         }
         Collections.sort(ids);
-        return ids;
+        return List.copyOf(ids);
     }
 
     // ------------------------------------------------------------------

@@ -145,7 +145,7 @@ public class TimeBasedDatalake implements Datalake {
                 throw new UncheckedIOException("No se pudo listar " + hourDir, e);
             }
         }
-        return new ArrayList<>(ids);
+        return List.copyOf(ids);
     }
 
     // ------------------------------------------------------------------

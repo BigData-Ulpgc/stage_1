@@ -72,8 +72,9 @@ public class BookBasedDatalake implements Datalake {
                     .filter(dir -> Files.exists(dir.resolve("header.txt"))
                             && Files.exists(dir.resolve("body.txt")))
                     .map(dir -> dir.getFileName().toString())
-                    .filter(name -> name.chars().allMatch(Character::isDigit))
+                    .filter(name -> name.matches("0|[1-9][0-9]{0,8}"))
                     .map(Integer::parseInt)
+                    .sorted()
                     .toList();
         } catch (IOException e) {
             throw new UncheckedIOException("No se pudo listar " + root, e);
