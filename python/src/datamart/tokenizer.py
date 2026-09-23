@@ -5,7 +5,7 @@ import re
 # Ruta al archivo de stopwords (relativa a este módulo, Sección 1 del SPEC)
 # ---------------------------------------------------------------------------
 _STOPWORDS_PATH = os.path.join(
-    os.path.dirname(__file__), "..", "..", "shared", "stopwords.txt"
+    os.path.dirname(__file__), "..", "..", "..", "shared", "stopwords.txt"
 )
 
 

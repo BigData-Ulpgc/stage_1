@@ -24,7 +24,7 @@ from typing import Optional
 # Rutas base (relativas a este módulo → src/)
 # ---------------------------------------------------------------------------
 _DATAMARTS_ROOT = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "data", "datamarts")
+    os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "datamarts")
 )
 
 _MONOLITHIC_PATH = os.path.join(_DATAMARTS_ROOT, "inverted_index.json")

@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Literal
 
 # Raíz del datalake relativa a la carpeta src/
-DATALAKE_ROOT = os.path.join(os.path.dirname(__file__), "..", "..", "data", "datalake")
+DATALAKE_ROOT = os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "datalake")
 
 DatalakeStructure = Literal["time", "book", "range"]
 

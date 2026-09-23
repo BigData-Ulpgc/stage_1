@@ -5,7 +5,7 @@ from typing import Optional
 
 # Ruta por defecto del datamart, relativa a la carpeta src/
 _DEFAULT_DB_PATH = os.path.join(
-    os.path.dirname(__file__), "..", "..", "data", "datamarts", "metadata.db"
+    os.path.dirname(__file__), "..", "..", "..", "data", "datamarts", "metadata.db"
 )
 
 # ---------------------------------------------------------------------------

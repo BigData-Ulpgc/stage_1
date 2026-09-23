@@ -73,3 +73,5 @@ __pycache__/
 
 # Índice JSON local
 *.json
+
+data/
