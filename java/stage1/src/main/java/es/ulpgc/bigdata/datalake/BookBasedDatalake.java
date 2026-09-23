@@ -5,10 +5,10 @@ import es.ulpgc.bigdata.model.RawBook;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Stream;
 
@@ -18,12 +18,13 @@ import java.util.stream.Stream;
  *   <root>/<id>/header.txt
  *   <root>/<id>/body.txt
  */
-public class BookBasedDatalake implements Datalake {
+public class BookBasedDatalake extends AbstractFileDatalake {
 
-    private final Path root;
+    private static final String HEADER_FILE = "header.txt";
+    private static final String BODY_FILE = "body.txt";
 
     public BookBasedDatalake(Path root) {
-        this.root = root;
+        super(root);
     }
 
     @Override
@@ -33,51 +34,39 @@ public class BookBasedDatalake implements Datalake {
 
     @Override
     public BookLocation save(RawBook book) {
-        Path bookDir = root.resolve(String.valueOf(book.id()));
-        Path headerPath = bookDir.resolve("header.txt");
-        Path bodyPath = bookDir.resolve("body.txt");
-
-        try {
-            Files.createDirectories(bookDir);
-            Files.writeString(headerPath, book.header(), StandardCharsets.UTF_8);
-            Files.writeString(bodyPath, book.body(), StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            throw new UncheckedIOException(
-                    "No se pudo guardar el libro " + book.id(), e);
-        }
-
-        return new BookLocation(book.id(), headerPath, bodyPath);
+        return writeBook(book, headerPath(book.id()), bodyPath(book.id()));
     }
 
     @Override
     public Optional<BookLocation> locate(int bookId) {
-        Path bookDir = root.resolve(String.valueOf(bookId));
-        Path headerPath = bookDir.resolve("header.txt");
-        Path bodyPath = bookDir.resolve("body.txt");
-
-        if (Files.exists(headerPath) && Files.exists(bodyPath)) {
-            return Optional.of(new BookLocation(bookId, headerPath, bodyPath));
+        if (bookId < 0) {
+            return Optional.empty();
         }
-        return Optional.empty();
+        return completeBook(bookId, headerPath(bookId), bodyPath(bookId));
     }
 
     @Override
     public List<Integer> listBookIds() {
-        if (!Files.exists(root)) {
+        if (!Files.isDirectory(root)) {
             return List.of();
         }
         try (Stream<Path> entries = Files.list(root)) {
             return entries
-                    .filter(Files::isDirectory)
-                    .filter(dir -> Files.exists(dir.resolve("header.txt"))
-                            && Files.exists(dir.resolve("body.txt")))
-                    .map(dir -> dir.getFileName().toString())
-                    .filter(name -> name.matches("0|[1-9][0-9]{0,8}"))
-                    .map(Integer::parseInt)
+                    .map(entry -> parseCanonicalId(entry.getFileName().toString()))
+                    .filter(Objects::nonNull)
+                    .filter(id -> locate(id).isPresent())
                     .sorted()
                     .toList();
         } catch (IOException e) {
             throw new UncheckedIOException("No se pudo listar " + root, e);
         }
+    }
+
+    private Path headerPath(int bookId) {
+        return root.resolve(String.valueOf(bookId)).resolve(HEADER_FILE);
+    }
+
+    private Path bodyPath(int bookId) {
+        return root.resolve(String.valueOf(bookId)).resolve(BODY_FILE);
     }
 }

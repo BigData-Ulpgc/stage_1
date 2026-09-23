@@ -195,4 +195,40 @@ class DatalakeContractTest {
         Collections.sort(esperado);
         assertEquals(esperado, d.listBookIds());
     }
+
+    // ------------------------------------------------------------------
+    // Reto 11: interrupciones durante save
+    // ------------------------------------------------------------------
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("structures")
+    void interrupcionAntesDeMoverElBodyNoDejaLibroValido(String name, Function<Path, Datalake> factory)
+            throws IOException {
+        Datalake d = create(name, factory);
+        d.save(new RawBook(1, "H", "B"));
+        BookLocation loc = d.save(new RawBook(1342, "H", "B"));
+
+        // Simula que el proceso murió después de escribir body.tmp pero antes de moverlo:
+        // el header está en su sitio y el body sólo existe como .tmp.
+        Files.move(loc.bodyPath(), Path.of(loc.bodyPath() + ".tmp"));
+
+        assertTrue(d.locate(1342).isEmpty());
+        assertEquals(List.of(1), d.listBookIds());
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("structures")
+    void reintentarTrasLaInterrupcionRecuperaElLibro(String name, Function<Path, Datalake> factory)
+            throws IOException {
+        Datalake d = create(name, factory);
+        BookLocation loc = d.save(new RawBook(1342, "H", "B"));
+        Files.move(loc.bodyPath(), Path.of(loc.bodyPath() + ".tmp"));
+
+        BookLocation again = d.save(new RawBook(1342, "H", "B definitivo"));
+
+        assertEquals(List.of(1342), d.listBookIds());
+        assertEquals("B definitivo",
+                Files.readString(d.locate(1342).orElseThrow().bodyPath(), StandardCharsets.UTF_8));
+        assertFalse(Files.exists(Path.of(again.bodyPath() + ".tmp")));
+    }
 }
