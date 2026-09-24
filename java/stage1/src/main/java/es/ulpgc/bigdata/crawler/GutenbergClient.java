@@ -13,7 +13,7 @@ import java.util.Optional;
  * de Project Gutenberg dado su id. No separa header/body ni guarda nada
  * en disco: eso es responsabilidad de otras clases (BookSplitter, Datalake).
  */
-public class GutenbergClient {
+public class GutenbergClient implements BookSource {
 
     private static final String URL_TEMPLATE =
             "https://www.gutenberg.org/cache/epub/%d/pg%d.txt";
@@ -36,6 +36,7 @@ public class GutenbergClient {
      *         Optional.empty() si el libro no está disponible o hay un
      *         fallo de red/timeout.
      */
+    @Override
     public Optional<String> fetch(int bookId) {
         URI uri = URI.create(String.format(URL_TEMPLATE, bookId, bookId));
 
