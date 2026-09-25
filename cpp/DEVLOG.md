@@ -203,3 +203,39 @@ module if it uses a different one.
   short-circuits, so one-character tokens never pay for a hash computation.
 - **Whole-token comparison only.** Stopwords are matched against complete tokens, never as substrings,
   which is what "remove stopwords" means and what Java/Python do.
+
+---
+
+## Entry 7 – Header/body split (2026-09-20)
+
+### What was done
+- `include/stage1/book_splitter.hpp` + `src/book_splitter.cpp`:
+  `std::optional<SplitBook> stage1::split_book(std::string_view raw_text)` implements SPEC section 2
+  (CRLF normalization, THE/THIS markers, header = before START, body = from the end of the START line
+  to the END marker, footer discarded, `nullopt` if a marker is missing).
+- `include/stage1/text_utils.hpp`: `stage1::trim`, extracted from `stopwords.cpp` because a second module
+  now needs it. `load_stopwords` was refactored to use it (behaviour unchanged, its tests still pass).
+- `tests/book_splitter_test.cpp`: 7 tests (normal split, THIS variant, CRLF, missing START, missing END,
+  END before START, empty body). Suite total: 22 tests.
+- Deliberately **not** done yet: downloading with libcurl and writing to the datalake. This step works
+  on an in-memory string only.
+
+### Why
+- **Pure function over a string, not tied to the network.** Splitting can be tested with tiny hand-made
+  books, and later the benchmarks can feed already-downloaded books (SPEC section 9 requires
+  measuring writes without network noise).
+- **`std::optional` instead of an exception or a bool + out-parameters.** A book without markers is an
+  expected situation (SPEC: "the book is discarded"), not an error; `optional` forces the caller to handle it.
+- **END marker searched only after the START line.** Otherwise an END text appearing earlier (or inside
+  the header) would produce a negative-length body. There is a test for it.
+- **Body starts after the START line, not right after the marker text.** SPEC section 2 says so; the rest of
+  that line is the book title and would pollute the index. (The Python example in the course PDF splits
+  right after the marker, so the shared SPEC is stricter than the PDF: all three languages must follow the SPEC.)
+- **`trim` returns a `string_view`.** No allocation for the intermediate result; the only copies are the two
+  final strings that the `SplitBook` owns.
+- **`trim` extracted rather than duplicated.** Two copies of the whitespace rule could drift apart and
+  silently make headers/stopwords differ.
+- **Open point for the group:** "trim" differs slightly between languages (Java `trim()` strips all
+  characters <= U+0020, Python `strip()` strips Unicode whitespace, this C++ version strips
+  space, \t, \r, \n, \f, \v). For Gutenberg texts the difference should not show up, but it is worth
+  comparing the outputs of the three implementations on the sample dataset.
