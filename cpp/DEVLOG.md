@@ -239,3 +239,133 @@ module if it uses a different one.
   characters <= U+0020, Python `strip()` strips Unicode whitespace, this C++ version strips
   space, \t, \r, \n, \f, \v). For Gutenberg texts the difference should not show up, but it is worth
   comparing the outputs of the three implementations on the sample dataset.
+
+---
+
+## Entry 8 – Download result type (2026-09-25)
+
+### What was done
+- `include/stage1/download_result.hpp`: header-only `stage1::DownloadResult`, a small "either" type
+  that holds the downloaded text on success or an error message on failure, never both. Built through
+  named factories `success(text)` / `failure(message)`; `ok()` says which case it is; `text()`/`error()`
+  throw `std::logic_error` if called on the wrong case.
+- `tests/download_result_test.cpp`: 4 tests (success path, failure path, misuse of `text()` on a
+  failure, misuse of `error()` on a success). Suite total: 26 tests.
+- No libcurl code yet: this is only the vocabulary the download function (next step) will return.
+
+### Why
+- **A dedicated result type instead of throwing on every network error.** A failed HTTP download
+  (a 404, a timeout, no network) is an expected, frequent outcome when crawling thousands of books,
+  not a programming bug; the control layer (SPEC section 8) must be able to see it and move on to the
+  next book instead of unwinding the stack. `std::optional`, used for `split_book`, was not enough
+  here because on failure we also want to keep *why* it failed, not just the absence of a value.
+- **Private constructor + named factories (`success`/`failure`) instead of a public two-field struct.**
+  A public `{bool ok; std::string value;}` lets calling code build an inconsistent object by mistake
+  (e.g. `ok = true` with an error string in `value`) and gives no name to which meaning `value` has.
+  The factories make every construction site self-describing and keep the invariant "success carries
+  text XOR failure carries a message" impossible to violate from outside the class.
+- **Throwing on misuse (`text()` on a failure) rather than returning an empty string.** An empty string
+  returned silently would be indistinguishable from "downloaded an empty file" and would hide a bug in
+  the caller (forgetting to check `ok()` first); failing loudly matches the same reasoning already used
+  for `load_stopwords` on a missing file.
+- **Header-only.** The type has no state beyond two members and no file or network access, so there is
+  nothing to put in a `.cpp`; consistent with `text_utils.hpp`.
+
+---
+
+## Entry 9 – Downloading books with libcurl (2026-09-27)
+
+### What was done
+- `include/stage1/gutenberg_client.hpp` + `src/gutenberg_client.cpp`:
+  - `book_download_url(book_id)` — pure function, builds the SPEC section 2 URL, no network.
+  - `http_get(url)` — performs one HTTP GET with libcurl and returns a `DownloadResult`.
+  - `download_book(book_id)` — convenience: `http_get(book_download_url(book_id))`.
+  - Internal `CurlHandle`: a small RAII wrapper around the library's `CURL*` handle.
+  - Internal `write_callback`: the function libcurl calls with each chunk of the response body.
+- `tests/gutenberg_client_test.cpp`: 2 URL-construction tests (no network) and 1 test that
+  downloads book 1342 for real and checks its title appears in the body; it `GTEST_SKIP`s
+  instead of failing if the download itself fails, since that would be an environment
+  limitation, not a bug in our code. All 3 passed here, including the real download (1.91s).
+  Suite total: 29 tests.
+
+### Why
+- **Split into three functions instead of one big `download_book`.** `book_download_url` needs no
+  network and no mocking to test, so the URL format (an exact match to SPEC section 2) is checked on
+  every run. `http_get` is reusable if later stages need to GET something that is not a Gutenberg book.
+- **`CurlHandle` (RAII) instead of calling `curl_easy_init`/`curl_easy_cleanup` by hand inside
+  `http_get`.** A `CURL*` is an opaque pointer the library hands us — the same idea as the `sqlite3*`
+  from the environment smoke test — and it must be released exactly once. Wrapping it in a class means
+  the handle is freed automatically when the function returns, on every path, including if a
+  `curl_easy_setopt` call were to throw; copying is deleted so two `CurlHandle`s can never fight over
+  freeing the same pointer.
+- **`write_callback` as a free function, not a lambda with captures.** libcurl is a C library: it calls
+  the callback through a plain function pointer and has no notion of a C++ capture. The place to pass
+  "our" data is the separate `void*` in `CURLOPT_WRITEDATA`, which we set to the address of the
+  `std::string` we want filled, and `static_cast` it back to `std::string*` inside the callback.
+- **Returning `DownloadResult` (Entry 8) instead of throwing on every failure.** A 404 or a network
+  timeout is an expected, frequent event when crawling thousands of books; the caller decides whether
+  that is fatal or just "skip this book" without paying for exception handling on the common path.
+- **Checking the HTTP status code, not only `curl_easy_perform`'s return value.** `curl_easy_perform`
+  reports transport-level problems (DNS failure, connection refused, timeout); a 404 page is
+  transported successfully, so it must be checked separately via `CURLINFO_RESPONSE_CODE`. Without
+  this check a missing book would silently "succeed" with an HTML error page as its body.
+- **`CURLOPT_FOLLOWLOCATION` enabled.** Gutenberg can redirect between `http`/`https` or mirror hosts;
+  without following redirects those cases would surface as an unexpected non-2xx status.
+- **No explicit `curl_global_init`.** libcurl performs that setup automatically on the first
+  `curl_easy_init` when the program is single-threaded, which matches this stage's pipeline; if a later
+  stage introduces concurrent downloads, an explicit `curl_global_init(CURL_GLOBAL_DEFAULT)` once at
+  `main` start becomes necessary (libcurl's own global init is not thread-safe to call implicitly from
+  multiple threads at once).
+- **The real-network test skips instead of failing on a download error.** Whether the grading machine
+  or a teammate's machine has outbound internet is outside our code's control; failing the whole suite
+  for that reason would be misleading. The two URL-format tests still run unconditionally and catch a
+  real regression in `book_download_url`.
+
+---
+
+## Entry 10 – Generalizing the client and the book source (2026-09-27)
+
+### What was done
+Refactor on top of Entry 9, requested by the user so any future stage can swap the HTTP
+transport or add a second book provider without touching existing code:
+- `include/stage1/http_client.hpp`: abstract `HttpClient` with one pure virtual method,
+  `get(url) -> DownloadResult`. Contract for "fetch whatever is at this URL".
+- `include/stage1/curl_http_client.hpp` + `src/curl_http_client.cpp`: `CurlHttpClient`, the only
+  `HttpClient` implementation so far. Holds the `CurlHandle` RAII wrapper and `write_callback`
+  moved unchanged from `gutenberg_client.cpp` (Entry 9); logic itself did not change.
+- `include/stage1/book_source.hpp`: abstract `BookSource` with one pure virtual method,
+  `fetch(book_id) -> DownloadResult`. Contract for "get a book's raw text, from wherever it lives".
+- `include/stage1/gutenberg_client.hpp` / `src/gutenberg_client.cpp`: kept `book_download_url`
+  unchanged; replaced the old free functions `http_get`/`download_book` with `GutenbergSource`,
+  a `BookSource` that takes an `HttpClient&` in its constructor (dependency injection) instead of
+  creating its own `CurlHttpClient`.
+- `tests/fakes/fake_http_client.hpp`: `FakeHttpClient`, a test-only `HttpClient` that returns a
+  canned `DownloadResult` and records every URL it was asked for. Test-only code, not part of
+  `stage1_core`.
+- `tests/gutenberg_client_test.cpp` rewritten: the 2 URL tests are unchanged; 2 new tests use
+  `FakeHttpClient` to check `GutenbergSource` builds the right URL and propagates both success and
+  failure, with no network involved; the real-network test now goes through `CurlHttpClient` +
+  `GutenbergSource` together. Suite total: 31 tests, including the real download (1.55s here).
+
+### Why
+- **Two separate interfaces, not one.** `HttpClient` answers "how do I speak HTTP" (reusable for any
+  URL, any future stage); `BookSource` answers "how do I get book N's text" (reusable across book
+  providers, each of which will use an `HttpClient` underneath). Collapsing them into one interface
+  would force every new book provider to also reimplement HTTP transport, even though that part never
+  changes.
+- **`GutenbergSource` receives `HttpClient&` instead of constructing a `CurlHttpClient` itself.** This
+  is dependency injection: the class does not decide who it talks to, the caller does. It is what makes
+  `FakeHttpClient` usable in tests without touching `GutenbergSource`'s code, and it is what a second
+  book source (e.g. a different catalog) would reuse verbatim — only `book_download_url`-equivalent
+  logic changes per provider, never the transport.
+- **`FakeHttpClient` records `requested_urls()` instead of just returning a canned result.** Being able
+  to assert the exact URL the code under test asked for is what makes
+  `GutenbergSourceTest.AsksTheInjectedClientForTheRightUrl` a real test of `GutenbergSource`'s logic,
+  not just of `book_download_url`.
+- **`CurlHandle`/`write_callback` moved, not rewritten.** The libcurl mechanics from Entry 9 were
+  already tested and explained; this entry is purely about where that code lives and who is allowed to
+  call it (only `CurlHttpClient::get`), so nothing about how HTTP is performed changed.
+- **Deliberately not adding a second `BookSource` yet (e.g. archive.org).** SPEC section 2 requires only
+  Project Gutenberg. Adding a second implementation now, with nothing to plug it into, would be
+  speculative generality (YAGNI). The point of this refactor is that adding one later costs one small
+  class, not a rewrite of `GutenbergSource` or `CurlHttpClient`.

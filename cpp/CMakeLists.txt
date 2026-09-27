@@ -48,7 +48,9 @@ target_compile_options(stage1_deps INTERFACE -Wall -Wextra -Wpedantic)
 add_library(stage1_core
   src/tokenizer.cpp
   src/stopwords.cpp
-  src/book_splitter.cpp)
+  src/book_splitter.cpp
+  src/curl_http_client.cpp
+  src/gutenberg_client.cpp)
 target_link_libraries(stage1_core PUBLIC stage1_deps)
 
 # ---- Executable ----
