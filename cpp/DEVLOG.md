@@ -369,3 +369,130 @@ transport or add a second book provider without touching existing code:
   Project Gutenberg. Adding a second implementation now, with nothing to plug it into, would be
   speculative generality (YAGNI). The point of this refactor is that adding one later costs one small
   class, not a rewrite of `GutenbergSource` or `CurlHttpClient`.
+
+---
+
+## Entry 11 – Metadata extraction with regex (2026-09-27)
+
+### What was done
+- `include/stage1/metadata.hpp`: `BookMetadata` struct (`title`, `author`, `release_date`, `language`,
+  each `std::optional<std::string>`) and `extract_metadata(header) -> BookMetadata`.
+- `src/metadata.cpp`: implements SPEC section 4's four regexes with `std::regex`, using the
+  `multiline` flag so `^`/`$` match line boundaries instead of the whole header, and `ECMAScript`
+  (the library default grammar) explicitly alongside it.
+- 7 tests: all four fields present, release date with/without the `[...]` note, a missing field
+  (nullopt), an empty header (all nullopt), first occurrence wins when a field repeats, and
+  whitespace trimming around the value. Suite total: 38 tests.
+- Persisting this into SQLite (the `books` table from SPEC section 4) is the next step, not this one.
+
+### Why
+- **`std::regex` with `multiline`, applied to the whole header, instead of splitting into lines and
+  matching each one.** SPEC labels the patterns "multilínea" and anchors them with `^`/`$`; the
+  `multiline` flag makes `std::regex` implement exactly that semantics (line boundaries, not string
+  boundaries), so the code mirrors the spec instead of re-deriving equivalent behaviour by hand.
+  Because `.` never matches a newline in ECMAScript grammar, "only the first line of the value" comes
+  for free from the regex itself, before our own `trim()` even runs.
+- **`std::optional<std::string>` per field, not `std::string` with an empty string for "missing".**
+  SPEC explicitly distinguishes "missing" (-> SQL `NULL`) from "present but empty"; collapsing both
+  into `""` would make that distinction unrepresentable and would silently insert a wrong value into
+  the `books` table later.
+- **`extract_field` is a private helper, one per call, not one big regex with four groups.** Each SPEC
+  field is independent (a book can have `Title` but not `Language`); a single combined regex would
+  force all four to be present/absent together, which the spec does not require. It also keeps each
+  pattern individually testable and readable, matching the SPEC table one row at a time.
+- **`static const std::regex` per pattern, function-local.** Compiling a regex pattern is not free;
+  building the four of them once (on the first call, initialized on demand and reused afterwards
+  during the program's whole run) instead of on every call matters when this function runs once per
+  downloaded book.
+- **`std::cmatch` over `const char*` pointers instead of converting `header` to `std::string` first.**
+  `header` already comes in as a `string_view` from `split_book`; matching directly against its raw
+  pointers avoids an extra full copy of the header text.
+- **Release date pattern kept as SPEC wrote it, with the optional bracket group made non-capturing
+  (`(?:...)`)** since we only need group 1; behaviour is identical to the spec's version, only the
+  unused second capture is dropped.
+- **Known limitation, matching Entry 7's note on `trim`:** the fields are compared case-sensitively
+  against the exact strings `Title:`, `Author:`, `Release date:`, `Language:`, as SPEC specifies; a
+  header using different capitalization would leave that field as `NULL` rather than matching loosely,
+  which keeps behaviour predictable and identical across the three languages.
+
+---
+
+## Entry 12 – Persisting metadata into SQLite (2026-09-27)
+
+### What was done
+- `include/stage1/metadata_store.hpp` + `src/metadata_store.cpp`: `MetadataStore`, a class owning a
+  SQLite connection. Its constructor creates the `books` table and the two indexes from SPEC section 4
+  with `CREATE ... IF NOT EXISTS`. `insert_book(id, metadata, body_path, header_path)` writes one row
+  (`INSERT OR REPLACE`); `find_by_id(id)` reads one row back as `std::optional<StoredBook>`.
+- Internal `Statement`: RAII wrapper around `sqlite3_stmt*`, the same pattern as `CurlHandle` (Entry 9)
+  applied to a different opaque C pointer.
+- All SQL uses **parameter binding** (`?` placeholders + `sqlite3_bind_*`), never string concatenation.
+- 6 tests: round trip of a full row, a missing id, `NULL` fields round-tripping as `nullopt`,
+  `INSERT OR REPLACE` overwriting an existing id, values containing apostrophes, and reopening the same
+  database file to confirm `IF NOT EXISTS` makes construction idempotent. Suite total: 44 tests.
+- Phase 3 (SPEC section 4, metadata) is now complete: extraction (Entry 11) + persistence (this entry).
+
+### Why
+- **`sqlite3` forward-declared in the header, `<sqlite3.h>` only included in the `.cpp`.** Nothing
+  outside `metadata_store.cpp` needs to know SQLite's C API; this mirrors the earlier decision to keep
+  `<curl/curl.h>` inside `curl_http_client.cpp` only, and keeps `MetadataStore`'s header light for
+  anyone who just wants to call `insert_book`/`find_by_id`.
+- **Parameter binding (`?` + `sqlite3_bind_text`) instead of building the SQL string with `+`.** A book
+  title or author can contain an apostrophe (`O'Brien`, `Bob's Book`) or any other character; string
+  concatenation would either produce invalid SQL or, in a worse case elsewhere, be a SQL injection
+  vector. Binding lets SQLite treat the value purely as data, never as SQL syntax, regardless of its
+  content — the dedicated test with apostrophes exists specifically to catch a regression back into
+  concatenation.
+- **`Statement` (RAII) reused for both `insert_book` and `find_by_id`.** A `sqlite3_stmt*` must be
+  finalized exactly once, same reasoning as `CurlHandle`; wrapping it once, deleting its copy operations,
+  removes the risk of forgetting `sqlite3_finalize` on an early `return` or a thrown exception.
+- **`bind_optional_text`/`column_optional_text` centralize the `nullopt <-> SQL NULL` mapping.** Every
+  metadata field goes through the same two functions, so "missing means NULL" (SPEC section 4) is
+  enforced in one place instead of four repeated `if` statements.
+- **`SQLITE_TRANSIENT` when binding text.** It tells SQLite to copy the string into its own memory
+  immediately; the alternative, `SQLITE_STATIC`, would keep a pointer into our `std::string`, which is
+  only guaranteed to be alive until `insert_book` returns — using `SQLITE_STATIC` here would be a
+  dangling-pointer bug the moment SQLite read the value after that.
+- **`INSERT OR REPLACE` instead of plain `INSERT`.** At this stage there is no control layer yet
+  (that is Phase 8) to guarantee a book is only ever indexed once; letting a repeated `book_id` replace
+  the row instead of throwing a `UNIQUE` constraint error keeps development and testing (and safe
+  reruns of the pipeline before Phase 8 exists) simple. This choice should be revisited once the
+  control layer exists, since silently replacing could also hide a real bug upstream.
+- **`body_path`/`header_path` are plain `std::string`, not `std::optional`.** SPEC section 4's schema
+  allows them to be `NULL` in principle, but in this pipeline a row is only ever inserted after a
+  successful `split_book`, so both paths are always known; keeping them non-optional makes that
+  guarantee visible in the type instead of forcing every caller to unwrap an `optional` that is never
+  actually empty in practice.
+
+---
+
+## Entry 13 – Open decision: generalizing MetadataStore (2026-09-28)
+
+### What was discussed (no code change)
+Whether to extract a `MetadataRepository` interface (mirroring `HttpClient`/`BookSource` from Entry 10)
+around `MetadataStore`, so a future PostgreSQL/MySQL or MongoDB metadata backend could be swapped in
+without touching callers. This is the optional "Metadata Storage Comparison" from the course PDF
+section 4.1 (SQLite vs PostgreSQL/MySQL vs MongoDB/Redis) — `shared/SPEC.md` section 4 itself only
+requires SQLite, so nothing here is a hard requirement.
+
+### Decision
+**Deferred, not applied.** Revisit only if the group actually decides to benchmark alternative
+metadata backends (which would also need mirroring in Java and Python for a fair comparison, per
+SPEC's cross-language contract).
+
+### Why (the two benefits `HttpClient` gave us don't both apply here)
+- **Testability benefit does not apply.** `HttpClient` needed a fake because the real network is slow,
+  flaky, and not always available (the download test uses `GTEST_SKIP` for exactly that reason).
+  SQLite's `":memory:"` mode is already fast, deterministic and dependency-free, so `MetadataStore`'s
+  tests already have the equivalent of a "fake" for free, at zero extra cost.
+- **Swap-without-rewrite benefit applies only partially.** Unlike swapping one HTTP library for another
+  (both just "GET a URL"), PostgreSQL/MySQL use an entirely different C client API from SQLite (network
+  connection, auth, its own API) and MongoDB is not even SQL (document model). An interface would spare
+  *callers* of `MetadataStore` from changing, but the new backend class itself would still have to be
+  written in full either way — the interface saves less future work here than it did for `HttpClient`.
+- **Not required by `shared/SPEC.md`.** The comparison is explicitly optional in the course PDF; adding
+  the abstraction now, with only one implementation and no concrete plan to add a second, would be
+  speculative generality (YAGNI) with a smaller payoff than the `HttpClient` case had.
+- **If revisited:** the sketch discussed was `class MetadataRepository { virtual insert_book(...) = 0;
+  virtual find_by_id(...) = 0; }` with the current `MetadataStore` renamed to `SqliteMetadataRepository`
+  implementing it — a small, mechanical change to apply later if the group commits to the comparison.

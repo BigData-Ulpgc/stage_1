@@ -50,7 +50,9 @@ add_library(stage1_core
   src/stopwords.cpp
   src/book_splitter.cpp
   src/curl_http_client.cpp
-  src/gutenberg_client.cpp)
+  src/gutenberg_client.cpp
+  src/metadata.cpp
+  src/metadata_store.cpp)
 target_link_libraries(stage1_core PUBLIC stage1_deps)
 
 # ---- Executable ----
