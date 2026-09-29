@@ -628,3 +628,49 @@ SPEC's cross-language contract).
   is the standard way to confirm `SystemClock` is genuinely wired to `std::chrono::system_clock` and not,
   say, accidentally returning a fixed epoch value, while staying robust to however many microseconds the
   test itself takes to run.
+
+---
+
+## Entry 17 – In-memory inverted index (2026-09-29)
+
+### What was done
+- `include/stage1/inverted_index.hpp` + `src/inverted_index.cpp`: `InvertedIndex`, holding
+  `term -> std::set<int>` (a `std::unordered_map` keyed by term, each value an ordered,
+  de-duplicated `std::set` of book ids). `add_book(book_id, tokens)` indexes every *distinct*
+  term of `tokens`; `postings(term)` returns the ids as a sorted `std::vector<int>` (empty, not
+  an error, if the term is unknown); `term_count()` returns the number of distinct terms.
+- 8 tests: empty index, indexing a book's terms, an unknown term, postings sorted regardless of
+  insertion order, a repeated term within one book counted once, re-indexing the same book not
+  duplicating its id, `term_count` counting only distinct terms, and a full example built directly
+  from `tokenize()`'s output using the theory exercise from the start of this project (the
+  `car`/`nice`/`that`/`the`/`is` documents). Suite total: 67 tests.
+- Persisting this structure to disk (monolithic/hierarchical/Mongo, SPEC section 6) is the next phase.
+
+### Why
+- **`add_book` takes `tokenize()`'s raw output (with repeats) and de-duplicates internally**, instead
+  of requiring the caller to pass an already-deduplicated set. SPEC section 5 point 6 says a book
+  contributes the *set* of its terms, not a bag with repeats; putting that rule inside `InvertedIndex`
+  means the pipeline can simply call `index.add_book(id, tokenize(body, stopwords))`, and the rule is
+  enforced in exactly one place instead of trusted to every caller.
+- **A local `std::unordered_set<std::string> seen`, scoped to one `add_book` call, guards the inserts.**
+  Without it, a common word appearing hundreds of times in one book would call
+  `std::set<int>::insert(book_id)` hundreds of times for the same id; each call is a no-op after the
+  first (a `std::set` already refuses duplicates) but still costs an O(log n) tree lookup. Checking
+  membership in a hash set first (O(1) average) before ever touching the postings set makes indexing a
+  large book cheap instead of proportional to its word count times the size of its vocabulary.
+- **`std::set<int>` as the postings container, not `std::vector<int>` sorted afterwards.** SPEC section
+  6 requires postings "ordered ascending, without duplicates"; a `std::set` keeps both invariants
+  automatically on every insert, so there is no separate sort/dedup pass to remember (or forget) when
+  the index is later exported to any of the three on-disk formats.
+- **`postings` returns `std::vector<int>`, not the internal `std::set<int>&`.** A `std::vector` is
+  what the query engine (a later phase, SPEC section 7: intersecting postings lists) and the disk
+  writers will actually want to iterate and combine; returning it by value also means callers cannot
+  accidentally mutate the index's internal state through a leaked reference.
+- **An unknown term returns an empty list rather than throwing.** Looking up a word that appears in no
+  book is an entirely normal outcome of a query (SPEC section 7), not a programming mistake — the
+  opposite reasoning from `DownloadResult::text()` on a failure (Entry 8), which throws because that
+  really is a misuse of the API.
+- **The last test builds the index straight from `tokenize()`, using the exact three-document example
+  from the very first explanation of this project.** It exercises the seam between two phases already
+  built independently (tokenizing and indexing) together for the first time, and ties the code back to
+  the mental model the project started from.

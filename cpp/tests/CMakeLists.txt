@@ -12,7 +12,8 @@ add_executable(stage1_tests
   metadata_store_test.cpp
   book_based_datalake_test.cpp
   range_based_datalake_test.cpp
-  time_based_datalake_test.cpp)
+  time_based_datalake_test.cpp
+  inverted_index_test.cpp)
 target_link_libraries(stage1_tests PRIVATE stage1_core GTest::gtest_main)
 # Lets tests read the shared contract files (stopwords, queries, book ids)
 target_compile_definitions(stage1_tests PRIVATE
