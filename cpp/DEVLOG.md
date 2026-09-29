@@ -891,3 +891,106 @@ against the real `docker compose up -d` MongoDB the next time this runs on a mac
 - **The final test re-runs the project's very first exercise end to end** (index the three theory
   documents, then AND-query "car nice"), now through real code instead of by hand, tying tokenizing,
   indexing and querying together for the first time in one place.
+
+---
+
+## Entry 23 – Control log (2026-09-29)
+
+### What was done
+- `include/stage1/control_log.hpp` + `src/control_log.cpp`: `ControlLog`, one class reused for both
+  `downloaded_books.txt` and `indexed_books.txt` (SPEC section 8). Loads existing ids into an
+  in-memory `std::unordered_set<int>` on construction; `contains(id)` is an in-memory check;
+  `mark(id)` appends to the file and updates memory, but is a no-op if `id` was already recorded.
+- 7 tests: starts empty for a missing file, `mark` writes to disk and updates memory, a reload after
+  "restarting" still sees a previously marked id, marking the same id twice does not duplicate the
+  line, several ids all survive a reload, blank lines in a hand-edited file are ignored while loading,
+  and missing parent directories (`control/`) are created. Suite total: 94 tests.
+- Not done yet: the actual decision logic ("what should the pipeline do next", SPEC section 8.2) that
+  uses two `ControlLog`s together — planned as the next step of this phase.
+
+### Why
+- **One class for both files, not two separate ones ("DownloadedBooksLog", "IndexedBooksLog").** The
+  two files have identical rules (SPEC section 8: one id per line, append-only, no duplicates); the only
+  difference is which path each is constructed with. A single, path-parameterized class avoids
+  duplicating that logic and keeps it in one place to test.
+- **`mark(id)` is a no-op when `id` is already recorded, instead of always appending.** This is what
+  makes the "write the work, then mark it" discipline (discussed before writing any code for this
+  phase) actually safe to retry: if the pipeline crashes right after `mark()` succeeded but before the
+  caller could move on, or if a caller mistakenly calls `mark()` twice for the same id, the file never
+  grows a duplicate line. SPEC section 8 states this guarantee explicitly ("recuperación sin pérdidas
+  ni duplicados"); this is the piece of code that enforces the "sin duplicados" half of it.
+- **An in-memory `std::unordered_set<int>`, not re-reading the file on every `contains()` call.** The
+  control layer will call `contains()` once per candidate book on every pipeline step (SPEC section
+  8.2's decision logic); re-parsing a file that can grow to tens of thousands of lines on every check
+  would make that decision loop itself a bottleneck, exactly the kind of cost Phase 9's benchmarks
+  would otherwise have to explain away as an artifact of this class rather than of the structures being
+  compared.
+- **`std::from_chars` instead of `std::stoi`.** `std::stoi` throws `std::invalid_argument` on anything
+  it cannot parse, which would need a `try`/`catch` around every line just to skip a malformed one;
+  `std::from_chars` reports failure through its return value, matching the `sqlite3_open`/`curl_easy_
+  perform`-style "check the result, don't rely on exceptions for expected outcomes" reasoning already
+  used elsewhere (Entries 9, 12) for common, not-truly-exceptional situations — and a stray blank or
+  malformed line in a control file, from a manual edit or an interrupted write, is exactly that.
+- **Blank lines silently skipped while loading, no special handling for `#` comments.** SPEC section 8
+  does not mention comments for control files (unlike section 1's shared dataset files, which
+  explicitly do); skipping blanks defensively costs nothing and guards against a stray trailing newline,
+  while not inventing a comment syntax the SPEC never asked for.
+- **Directories created in the constructor, not in `mark()`.** `control/` needs to exist before the
+  first `mark()` call regardless of whether any id ends up being recorded in a given run; doing it once
+  up front, mirroring the PDF's own pseudocode (`CONTROL_PATH.mkdir(parents=True, exist_ok=True)`),
+  keeps `mark()` itself focused on the one thing its name says it does.
+
+---
+
+## Entry 24 – Control decision logic and the shared book id list (2026-09-29)
+
+### What was done
+- `include/stage1/book_id_list.hpp` + `src/book_id_list.cpp`: `load_book_ids(path)`, reading
+  `shared/book_ids.txt` in file order (order matters: "mismo orden en los tres lenguajes", SPEC
+  section 1), skipping blank/`#` lines, reusing `trim` and `std::from_chars` exactly like
+  `load_stopwords` (Entry 5) and `ControlLog`'s own loading (Entry 23). Deliberately used **instead**
+  of the course PDF's `random.randint(1, TOTAL_BOOKS)` approach for picking a new candidate: SPEC
+  itself already supplies a deterministic, ordered dataset shared across all three languages, and using
+  it keeps the comparison fair the same way Entry 7 chose SPEC's stricter body-start rule over the
+  PDF's simpler example.
+- `control_log.hpp`/`control_log.cpp` extended with `ControlAction` (`IndexBook`/`DownloadBook`/
+  `Nothing`), `ControlDecision` (an action plus a `book_id`), and `next_control_action(candidate_ids,
+  downloaded, indexed)`: a pure function (with respect to I/O — it only calls `contains()`, it performs
+  no action) implementing SPEC section 8.2 / the PDF's `control_pipeline_step`: index the first
+  downloaded-but-not-indexed candidate if one exists, otherwise download the first not-yet-downloaded
+  candidate, otherwise there is nothing left to do.
+- 9 new tests: 4 for `load_book_ids` (order preserved, comments/blanks skipped, missing file throws, the
+  real `shared/book_ids.txt` loads correctly) and 5 for `next_control_action` (pure download pick,
+  skipping an already-downloaded candidate, preferring indexing when something is ready, indexing
+  taking priority even when other candidates could still be downloaded, and the terminal "nothing to
+  do" state). Suite total: 103 tests.
+- Not done yet: wiring this decision to the real components (`BookSource`, `Datalake`,
+  `MetadataStore`, `InvertedIndex`, `IndexWriter`) into an actual runnable pipeline in `main.cpp` — that
+  assembly is a separate, larger task from the control layer's own logic and its own step.
+
+### Why
+- **`next_control_action` takes `candidate_ids`, `downloaded` and `indexed` and returns a decision,
+  instead of performing the download/index itself.** Separating "decide what to do" from "do it" keeps
+  this function pure and trivially testable with real (TempDir-backed) `ControlLog`s and no network,
+  filesystem writes beyond the control files themselves, or index/datalake machinery — the same
+  "decide vs. execute" split already used for `DownloadResult` (a result the caller acts on) and for
+  `GutenbergSource` (decides nothing about storage, only fetches).
+- **Real `ControlLog` instances in the tests, not a fake/mock.** `ControlLog` is already fast,
+  deterministic and self-contained (a `TempDir`-backed file), exactly the same reasoning Entry 13 used
+  to justify *not* building a fake for `MetadataStore`'s SQLite: a test double earns its cost only when
+  the real thing is slow, flaky, or unavailable, none of which apply here.
+- **Indexing checked before downloading, in that exact order.** SPEC section 8.2 (and the PDF's own
+  pseudocode) gives indexing priority: a book already sitting on disk, downloaded but not yet indexed,
+  represents work that is closer to finished and cheaper to complete than fetching a brand new book
+  over the network; `IndexingTakesPriorityEvenWhenOtherCandidatesCouldStillBeDownloaded` exists
+  specifically to pin this ordering down, since swapping the two loops would still pass every other test.
+- **`candidate_ids` order decides which book to pick, rather than "any" downloaded-but-not-indexed
+  book.** SPEC's shared dataset is deliberately ordered identically across the three languages; picking
+  deterministically by that order (instead of, say, whichever id a hash set happens to iterate first)
+  keeps which book gets processed next reproducible run to run and comparable language to language,
+  which matters for the benchmarks in Phase 9 to be measuring the same work in every language.
+- **`ControlDecision::book_id` documented as "meaningful only when action != Nothing"**, rather than
+  wrapping it in `std::optional<int>`. `Nothing` already carries no useful `book_id`by construction (no
+  candidate qualifies), and every caller must switch on `action` first regardless; an `optional` here
+  would only add a second way to represent the same "there is nothing to act on" fact already carried
+  by the enum, without preventing any additional mistake.

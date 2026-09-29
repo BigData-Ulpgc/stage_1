@@ -64,7 +64,9 @@ add_library(stage1_core
   src/monolithic_index_writer.cpp
   src/hierarchical_index_writer.cpp
   src/mongo_index_writer.cpp
-  src/query_engine.cpp)
+  src/query_engine.cpp
+  src/control_log.cpp
+  src/book_id_list.cpp)
 target_link_libraries(stage1_core PUBLIC stage1_deps)
 
 # ---- Executable ----
