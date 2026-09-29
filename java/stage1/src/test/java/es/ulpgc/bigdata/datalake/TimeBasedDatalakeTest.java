@@ -154,4 +154,17 @@ class TimeBasedDatalakeTest {
         assertEquals(List.of(), d.listBookIds());
         assertTrue(d.locate(1).isEmpty());
     }
+
+    @Test
+    void nombresNumericosInvalidosSeIgnoran() throws IOException {
+        Datalake d = at(2026, 9, 23, 14, 5);
+        d.save(new RawBook(84, "H", "B"));
+        Path hora = time("20260923/14");
+        for (String id : List.of("084", "99999999999")) {
+            Files.writeString(hora.resolve(id + ".header.txt"), "x");
+            Files.writeString(hora.resolve(id + ".body.txt"), "x");
+        }
+
+        assertEquals(List.of(84), d.listBookIds());
+    }
 }

@@ -115,4 +115,16 @@ class RangeBasedDatalakeTest {
     void datalakeVacioNoFalla() {
         assertEquals(List.of(), datalake.listBookIds());
     }
+
+    @Test
+    void nombresNumericosInvalidosSeIgnoran() throws IOException {
+        datalake.save(new RawBook(84, "H", "B"));
+        Path dir = rangeRoot.resolve("00000-00999");
+        for (String id : List.of("084", "99999999999")) {
+            Files.writeString(dir.resolve(id + ".header.txt"), "x");
+            Files.writeString(dir.resolve(id + ".body.txt"), "x");
+        }
+
+        assertEquals(List.of(84), datalake.listBookIds());
+    }
 }
