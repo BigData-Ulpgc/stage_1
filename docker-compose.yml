@@ -1,0 +1,25 @@
+# MongoDB for the "mongo" inverted-index structure (shared/SPEC.md section 6).
+# Shared across the three language implementations: run once, all of Java,
+# Python and C++ connect to the same instance at mongodb://localhost:27017.
+#
+# Usage:
+#   docker compose up -d      # start MongoDB in the background
+#   docker compose down       # stop it, keep the data
+#   docker compose down -v    # stop it and wipe the data (useful before a
+#                              # clean benchmark run of index_build)
+services:
+  mongo:
+    image: mongo:8.2.12
+    container_name: stage1-mongo
+    ports:
+      - "127.0.0.1:27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+ 
+volumes:
+  mongo-data:
