@@ -8,6 +8,14 @@
 
 namespace stage1 {
 
+// One term and its ascending, de-duplicated postings list, as produced by
+// InvertedIndex::entries(). Mirrors the {"term": "...", "postings": [...]}
+// shape used by the on-disk formats (SPEC section 6).
+struct IndexEntry {
+    std::string term;
+    std::vector<int> postings;
+};
+
 // An in-memory inverted index: term -> ascending, de-duplicated list of book ids
 // that contain it (shared/SPEC.md section 6). Built incrementally, one book at a
 // time; writing it to disk (monolithic/hierarchical/Mongo) is a later phase.
@@ -26,6 +34,10 @@ public:
 
     // Number of distinct terms currently indexed.
     std::size_t term_count() const;
+
+    // Every term currently indexed, each with its postings. Order is
+    // unspecified. Meant for writers that persist the whole index to disk.
+    std::vector<IndexEntry> entries() const;
 
 private:
     std::unordered_map<std::string, std::set<int>> index_;

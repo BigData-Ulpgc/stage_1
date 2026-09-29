@@ -674,3 +674,46 @@ SPEC's cross-language contract).
   from the very first explanation of this project.** It exercises the seam between two phases already
   built independently (tokenizing and indexing) together for the first time, and ties the code back to
   the mental model the project started from.
+
+---
+
+## Entry 18 – Index persistence: interface and the monolithic JSON writer (2026-09-29)
+
+### What was done
+- `InvertedIndex` extended with `IndexEntry` (a `term` + its `postings`) and `entries()`, which
+  snapshots every term with its sorted postings as `std::vector<IndexEntry>`. Needed because, until
+  now, the index could only be queried term by term; a writer needs to walk the whole thing. Added a
+  matching test (`EntriesReturnsEveryTermWithSortedPostings`, order-independent via a `std::map`).
+- `include/stage1/index_writer.hpp`: abstract `IndexWriter`, one method `write(const InvertedIndex&)`.
+  Mirrors `Datalake` (Entry 14): SPEC section 6 explicitly requires comparing three on-disk structures
+  for the index, same reasoning as the three datalake layouts.
+- `include/stage1/monolithic_index_writer.hpp` + `src/monolithic_index_writer.cpp`:
+  `MonolithicIndexWriter`, the first `IndexWriter`. Writes the whole index as one JSON object
+  (`{"term": [id1, id2, ...], ...}`) using `nlohmann::json`, reusing `write_text_file` (Entry 14).
+- `tests/monolithic_index_writer_test.cpp`: 3 tests (postings round-trip correctly through the JSON
+  file, an empty index writes `{}` rather than `null`, missing parent directories get created).
+  Suite total: 71 tests.
+
+### Why
+- **`entries()` returns a snapshot (`std::vector<IndexEntry>`), not iterators into `index_`.** Exposing
+  `index_.begin()/end()` directly would leak the internal `std::unordered_map<std::string, std::set<int>>`
+  type to every writer, coupling them to an implementation detail that might change (e.g. if the index
+  were later reorganized for performance); a plain vector of a small public struct is a stable contract.
+- **`IndexWriter` as an interface, unlike `MetadataRepository` (Entry 13, deferred).** Same reasoning as
+  `Datalake`: SPEC section 6 requires comparing monolithic/hierarchical/Mongo against each other, so
+  the abstraction is not speculative here, it is the object of the comparison itself. A concrete writer
+  takes an `InvertedIndex` (not, say, the raw `index_` map), keeping every writer's contract identical
+  regardless of how the in-memory index is stored internally.
+- **`nlohmann::json::object()` explicitly, instead of a default-constructed `nlohmann::json`.** A
+  default `nlohmann::json` is a `null` value; assigning nothing to it (an index with zero terms) would
+  `dump()` as the string `"null"`, not `"{}"`. The dedicated empty-index test exists to catch exactly
+  this if it regressed.
+- **Compact `dump()`, no pretty-printing.** SPEC section 6 does not ask for the file to be
+  human-readable, and this file is written and read by programs, potentially with hundreds of
+  thousands of terms; indentation would only add parsing cost and disk usage for no benefit, which
+  matters directly for the `index_disk`/`datalake_storage`-style benchmarks in Phase 9.
+- **`MonolithicIndexWriter(path).write(index)` takes the path in the constructor, `write` takes only
+  the index.** The output location is a property of *which* writer you built (where the monolithic file
+  goes), not of each call; this mirrors `BookBasedDatalake`/`RangeBasedDatalake` taking `root` in their
+  constructor and `write` taking only what varies per book.
+

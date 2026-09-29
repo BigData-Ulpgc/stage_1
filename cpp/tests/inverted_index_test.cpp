@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <map>
+
 #include "stage1/inverted_index.hpp"
 #include "stage1/tokenizer.hpp"
 
@@ -73,4 +75,19 @@ TEST(InvertedIndex, WorksDirectlyWithTokenizeOutput) {
     EXPECT_EQ(index.postings("car"), (std::vector<int>{1, 2, 3}));
     EXPECT_EQ(index.postings("nice"), std::vector<int>{1});
     EXPECT_EQ(index.postings("best"), std::vector<int>{3});
+}
+
+TEST(InvertedIndex, EntriesReturnsEveryTermWithSortedPostings) {
+    InvertedIndex index;
+    index.add_book(3, {"car", "nice"});
+    index.add_book(1, {"car"});
+
+    std::map<std::string, std::vector<int>> by_term;
+    for (const auto& entry : index.entries()) {
+        by_term[entry.term] = entry.postings;
+    }
+
+    ASSERT_EQ(by_term.size(), 2u);
+    EXPECT_EQ(by_term["car"], (std::vector<int>{1, 3}));
+    EXPECT_EQ(by_term["nice"], std::vector<int>{3});
 }

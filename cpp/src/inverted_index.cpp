@@ -25,4 +25,13 @@ std::vector<int> InvertedIndex::postings(const std::string& term) const {
 
 std::size_t InvertedIndex::term_count() const { return index_.size(); }
 
+std::vector<IndexEntry> InvertedIndex::entries() const {
+    std::vector<IndexEntry> result;
+    result.reserve(index_.size());
+    for (const auto& [term, term_postings] : index_) {
+        result.push_back(IndexEntry{term, std::vector<int>(term_postings.begin(), term_postings.end())});
+    }
+    return result;
+}
+
 }  // namespace stage1
