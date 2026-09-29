@@ -28,7 +28,9 @@ class InvertedIndexContractTest {
      */
     static Stream<Arguments> indexes() {
         return Stream.of(
-                Arguments.of("memory", (Function<Path, InvertedIndex>) dir -> new InMemoryInvertedIndex()));
+                Arguments.of("memory", (Function<Path, InvertedIndex>) dir -> new InMemoryInvertedIndex()),
+                Arguments.of("monolithic", (Function<Path, InvertedIndex>)
+                        dir -> new MonolithicJsonIndex(dir.resolve("inverted_index.json"))));
     }
 
     private InvertedIndex create(Function<Path, InvertedIndex> factory) {
