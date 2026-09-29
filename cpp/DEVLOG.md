@@ -780,3 +780,74 @@ deferred.
   a host:port (typically `localhost:27017`); the eventual `MongoIndexWriter` connects the same way
   whether MongoDB runs natively or inside Docker, so this decision does not affect the design already
   in place (`IndexWriter`), only how the database is started for development, testing and grading.
+
+---
+
+## Entry 21 – MongoDB index writer, and a real bug caught by testing (2026-09-29)
+
+### What was done
+- `docker-compose.yml` (repository root, shared by the whole group): a single `mongo:7` service on
+  port 27017 with a named volume, `docker compose up -d` / `down -v` as documented in the file itself.
+- Installed the official `mongo-cxx-driver` (and its `mongo-c-driver` dependency) via Homebrew; wired
+  `find_package(mongocxx REQUIRED)` / `find_package(bsoncxx REQUIRED)` and linked
+  `mongo::mongocxx_shared` / `mongo::bsoncxx_shared` into `stage1_deps`. Unlike `nlohmann_json` and
+  `googletest`, this is **not** fetched via `FetchContent`: it is a large driver with its own native
+  dependencies (TLS, SASL), and Homebrew already ships a prebuilt, versioned bottle for it, the same
+  reasoning already applied to `SQLite3`/`CURL`.
+- `include/stage1/mongo_index_writer.hpp` + `src/mongo_index_writer.cpp`: `MongoIndexWriter`, the third
+  `IndexWriter`. Connects to a URI (default `mongodb://localhost:27017`), writes to database
+  `search_engine`, collection `inverted_index`, one document per term
+  (`{"term": "...", "postings": [ids...]}`), with a unique index on `term`; `write()` clears the
+  collection first, so repeated calls fully replace its contents, matching how the other two writers
+  overwrite rather than append. MongoDB-specific exceptions are caught and rethrown as
+  `std::runtime_error`, keeping one error type across all three writers.
+- `ensure_mongo_driver_initialized()`, declared in the header, defined once in the `.cpp`: the driver
+  requires exactly one `mongocxx::instance` alive per process, created before any other mongocxx
+  object; every place that touches mongocxx (the writer, and the test file's own read-back client)
+  calls this single function instead of each creating its own.
+- `tests/mongo_index_writer_test.cpp`: 3 tests. Two need a reachable MongoDB and `GTEST_SKIP` if there
+  is none (same pattern as the real Gutenberg download test), checking a full write/read-back round
+  trip and that a second `write()` replaces the first. The third needs MongoDB to be *unreachable* by
+  design (a bad URI with a short `serverSelectionTimeoutMS`) and always runs, checking the
+  `std::runtime_error` translation. Suite total: 80 tests.
+
+### A real bug this caught
+The first version had **two separate** function-local `static mongocxx::instance` variables: one
+inside `mongo_index_writer.cpp`, another inside the test file (which also needs mongocxx to read the
+collection back). Running the tests through `ctest` looked fine, because `gtest_discover_tests` runs
+every `TEST()` as its **own process**, so the two statics never coexisted. Running the whole test
+binary directly in one process (`./stage1_tests --gtest_filter="MongoIndexWriter.*"`) crashed
+immediately with `cannot create a mongocxx::instance object if one has already been created`, because
+both statics got constructed in the same process. Fixed by exposing one shared
+`ensure_mongo_driver_initialized()` from the library itself and having every caller, including the
+test file, go through it — so there is exactly one function-local static in the whole program, no
+matter how many places call the function.
+
+### Verification
+No Docker on this machine, so the code could not be exercised against the group's actual
+`docker-compose.yml`; verified instead against a temporary local `mongod` (Homebrew-installed,
+`--dbpath` in `/tmp`, stopped and its data directory removed afterward) — equivalent from the driver's
+point of view, since `MongoIndexWriter` only ever sees a URI, exactly the reasoning in Entry 20. All
+80 tests passed against it, including the two that need a live server. This should be re-verified
+against the real `docker compose up -d` MongoDB the next time this runs on a machine that has Docker.
+
+### Why
+- **Homebrew instead of `FetchContent` for this one dependency**, breaking the pattern used for
+  `nlohmann_json`/`googletest`. Building `mongo-cxx-driver` from source pulls in `mongo-c-driver`, TLS
+  and SASL as further dependencies and is known to be slow and finicky to configure via CMake; a
+  prebuilt bottle avoids all of that at the cost of one extra install step documented for teammates.
+- **`ensure_mongo_driver_initialized()` exposed from the header, not hidden as a private implementation
+  detail.** It has to be callable from outside the class (the test file needs it too), and hiding it
+  would only tempt a second, incompatible definition to reappear elsewhere later, exactly the bug this
+  entry describes.
+- **Catching `mongocxx::exception` and rethrowing `std::runtime_error`.** Callers of `IndexWriter::write`
+  (the future indexing pipeline, and benchmarks) should not need to know or `#include` mongocxx-specific
+  exception types to handle a failure from any of the three writers uniformly.
+- **`delete_many` + reinsert on every `write()`, not an incremental diff.** SPEC section 6's benchmark
+  considerations explicitly want *update* performance measured separately from *build* performance
+  (Phase 9); keeping `write()` as "replace everything" now, matching the other two writers, keeps all
+  three comparable on the same operation, and an incremental update path can be added later as its own
+  benchmarked operation rather than folded silently into `write()`.
+- **The unreachable-server test always runs (no `GTEST_SKIP`), unlike the other two.** It needs
+  MongoDB to be absent to prove anything, the opposite precondition from the round-trip tests, so it is
+  the one MongoDB test that is meaningful and stable in every environment, Docker or not.

@@ -27,8 +27,10 @@ set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(nlohmann_json googletest)
 
 # ---- System dependencies ----
-find_package(SQLite3 REQUIRED) # metadata store
-find_package(CURL REQUIRED)    # downloads from Project Gutenberg
+find_package(SQLite3 REQUIRED)     # metadata store
+find_package(CURL REQUIRED)        # downloads from Project Gutenberg
+find_package(mongocxx REQUIRED)    # "mongo" inverted-index structure (SPEC section 6)
+find_package(bsoncxx REQUIRED)     # BSON documents used by mongocxx
 
 # Recent CMake (seen with 4.4.3) deprecates SQLite::SQLite3 for SQLite3::SQLite3; support both
 if(TARGET SQLite3::SQLite3)
@@ -41,7 +43,8 @@ endif()
 add_library(stage1_deps INTERFACE)
 target_include_directories(stage1_deps INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(stage1_deps INTERFACE
-  nlohmann_json::nlohmann_json ${STAGE1_SQLITE_TARGET} CURL::libcurl)
+  nlohmann_json::nlohmann_json ${STAGE1_SQLITE_TARGET} CURL::libcurl
+  mongo::mongocxx_shared mongo::bsoncxx_shared)
 target_compile_options(stage1_deps INTERFACE -Wall -Wextra -Wpedantic)
 
 # ---- Core library: all the project logic; shared by the executable and the tests ----
@@ -59,7 +62,8 @@ add_library(stage1_core
   src/time_based_datalake.cpp
   src/inverted_index.cpp
   src/monolithic_index_writer.cpp
-  src/hierarchical_index_writer.cpp)
+  src/hierarchical_index_writer.cpp
+  src/mongo_index_writer.cpp)
 target_link_libraries(stage1_core PUBLIC stage1_deps)
 
 # ---- Executable ----
