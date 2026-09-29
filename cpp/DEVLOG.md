@@ -576,3 +576,55 @@ SPEC's cross-language contract).
 - **A dedicated test for the "range start is its own first member" case (`range_folder_name(1000)`).**
   It is the classic boundary where a `<` vs `<=` (or, here, an integer-division rounding direction)
   mistake would show up first; the SPEC's own worked example (1342) does not exercise this boundary.
+
+---
+
+## Entry 16 – Time-based datalake layout, and testing code that depends on the clock (2026-09-29)
+
+### What was done
+- `include/stage1/time_based_datalake.hpp`: `Clock` (abstract, one method `now()`), `SystemClock`
+  (the real implementation), `time_folder_name(time_point) -> "YYYYMMDD/HH"` (pure), and
+  `TimeBasedDatalake : public Datalake`, which takes a `Clock&` in its constructor (dependency
+  injection, same shape as `GutenbergSource(HttpClient&)`).
+- `src/time_based_datalake.cpp`: `time_folder_name` converts the time point to local calendar time
+  with `localtime_r` (POSIX) / `localtime_s` (Windows) — the thread-safe variants of `std::localtime`
+  — then formats it with `snprintf`. `TimeBasedDatalake::write` asks `clock_.now()`, builds
+  `<root>/YYYYMMDD/HH/<ID>.body.txt` and `.header.txt`, and reuses `write_text_file`.
+- `tests/fakes/fake_clock.hpp`: `FakeClock`, a `Clock` that always returns a fixed time chosen by the
+  test (same idea as `FakeHttpClient`).
+- `tests/time_based_datalake_test.cpp`: 6 tests. Two exercise `time_folder_name` directly through a
+  `make_local_time(year, month, day, hour)` test helper; one confirms `SystemClock` is actually wired
+  to the real clock (`before <= now() <= after`); three exercise `TimeBasedDatalake::write` with
+  `FakeClock`, including two books written in different hours landing in different folders.
+  Suite total: 59 tests. This closes Phase 4 (all three datalake layouts from SPEC section 3).
+
+### Why
+- **`Clock` interface + `SystemClock`/`FakeClock`, mirroring `HttpClient`/`CurlHttpClient`/
+  `FakeHttpClient`.** The real clock is exactly the kind of dependency that makes a test
+  non-deterministic if called directly: `time_folder_name(std::chrono::system_clock::now())` would
+  produce a different, unpredictable folder name depending on the second the test happened to run,
+  and would need special-casing around midnight. Injecting the "what time is it" question, the same
+  way we injected "how do I fetch a URL", removes that non-determinism entirely.
+- **`time_folder_name` still takes a `time_point` as a plain argument, not a `Clock&`.** Only
+  `TimeBasedDatalake::write` needs to ask "what time is it right now"; the formatting logic itself has
+  nothing to do with clocks and is more directly testable as a pure function of its input, exactly like
+  `range_folder_name` needed no `Datalake` to be tested on its own.
+- **`make_local_time` builds its `time_point` via `std::mktime`, and `time_folder_name` reads it back
+  via `localtime_r`/`localtime_s` — the same local-time conversion, run in both directions on whichever
+  machine the tests happen to execute on.** This is what makes the tests deterministic across timezones
+  without needing to inject or hardcode a specific timezone: whatever local rules the test machine (or
+  the grading machine) uses, the round trip through those same rules must return the fields we started
+  with. Hardcoding an expected `"20260905/08"` string derived from a UTC timestamp would instead be
+  correct only on machines set to one specific timezone, and would fail — or worse, silently pass by
+  coincidence — elsewhere.
+- **`localtime_r`/`localtime_s` instead of `std::localtime`.** `std::localtime` writes its result into
+  a single buffer shared by the whole process and is not safe to call from more than one thread at
+  once; this stage's pipeline is single-threaded, so it would work today, but unlike the earlier
+  decision to defer `curl_global_init`'s thread-safety (Entry 9, where getting it right later requires
+  one extra call at `main`), using the safe variant here costs nothing extra now and removes the trap
+  entirely rather than deferring it.
+- **`SystemClockTest` checks `before <= now() <= after` instead of an exact value.** There is no way to
+  assert a wall-clock reading exactly without a race; bracketing it between two calls to the real clock
+  is the standard way to confirm `SystemClock` is genuinely wired to `std::chrono::system_clock` and not,
+  say, accidentally returning a fixed epoch value, while staying robust to however many microseconds the
+  test itself takes to run.
