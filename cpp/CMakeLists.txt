@@ -58,7 +58,8 @@ add_library(stage1_core
   src/range_based_datalake.cpp
   src/time_based_datalake.cpp
   src/inverted_index.cpp
-  src/monolithic_index_writer.cpp)
+  src/monolithic_index_writer.cpp
+  src/hierarchical_index_writer.cpp)
 target_link_libraries(stage1_core PUBLIC stage1_deps)
 
 # ---- Executable ----

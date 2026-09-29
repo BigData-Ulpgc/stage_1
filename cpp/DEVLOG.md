@@ -717,3 +717,66 @@ SPEC's cross-language contract).
   goes), not of each call; this mirrors `BookBasedDatalake`/`RangeBasedDatalake` taking `root` in their
   constructor and `write` taking only what varies per book.
 
+---
+
+## Entry 19 – Hierarchical index writer (2026-09-29)
+
+### What was done
+- `include/stage1/hierarchical_index_writer.hpp` + `src/hierarchical_index_writer.cpp`:
+  - `hierarchical_folder_name(term)` — pure function, no filesystem access, uppercases `term`'s
+    first character (`"car"` -> `"C"`; a leading digit uppercases to itself, so `"1876"` -> `"1"`).
+  - `HierarchicalIndexWriter : public IndexWriter` — writes `<root>/<LETTER>/<term>.txt`, one book
+    id per line, reusing `write_text_file` (Entry 14).
+- `tests/hierarchical_index_writer_test.cpp`: 2 tests for `hierarchical_folder_name` alone (a normal
+  letter, a leading digit) and 4 for the writer (postings written one per line, two terms sharing a
+  first letter landing in the same folder without colliding, two different letters getting separate
+  folders, an empty index writing nothing and not throwing). Suite total: 77 tests.
+- Phase 6 now has two of its three required writers (monolithic, hierarchical); MongoDB is the
+  remaining optional one, per SPEC section 6 ("al menos 3", with Mongo explicitly listed as one option).
+
+### Why
+- **`hierarchical_folder_name` split out as a pure function, same shape as `range_folder_name` (Entry
+  15) and `book_download_url` (Entry 9).** The one part of this writer that is easy to get subtly
+  wrong is the folder-name rule itself (what happens to a digit, to case); isolating it lets the two
+  edge cases be checked without touching a filesystem, the same reasoning applied three times now
+  across the project.
+- **Trusting that every `term` contains only `[a-z0-9]`, instead of validating or sanitizing it inside
+  this writer.** This is a different situation from `MetadataStore`'s SQL binding (Entry 12): a book's
+  title comes from an external, untrusted source (Project Gutenberg) and could contain anything, so it
+  had to be defended against explicitly. A `term` here is never external — it only ever comes from
+  `stage1::tokenize`'s own output, which the Phase 1 tokenizer already guarantees is restricted to
+  `[a-z0-9]` (Entry 3). Re-validating an invariant that is already enforced, and enforced by code in
+  the same project, would be redundant; the comment on `hierarchical_folder_name` documents the
+  assumption explicitly instead, so it stays visible if `tokenize`'s contract ever changes.
+- **`unsigned char` before calling `std::toupper`.** `char` can be negative on this platform for a
+  non-ASCII byte, and `std::toupper`'s behavior for such a value is undefined by the C standard. Not
+  reachable through the real pipeline (see the point above), but costs nothing to get right in the
+  function itself, in the same spirit as using `localtime_r` over `std::localtime` even though the
+  pipeline is single-threaded today (Entry 16).
+- **One `write_text_file` call per term, no attempt to batch or hold multiple files open at once.**
+  Keeps this writer as simple as `MonolithicIndexWriter`, reusing the exact same building block; SPEC
+  section 6 itself frames the many-small-files cost ("a very large number of small files can overwhelm
+  the filesystem") as something to *measure* in Phase 9, not to optimize away before it is measured.
+
+---
+
+## Entry 20 – Group decision: MongoDB runs via Docker (2026-09-29)
+
+### What was decided (no code yet)
+The group has decided that, when the optional MongoDB index structure (SPEC section 6) is built, it
+will run inside a Docker container rather than each member installing MongoDB natively. This entry
+records the decision and its rationale for the report's design-decisions section; the actual
+`MongoIndexWriter` implementation (behind the existing `IndexWriter` interface, Entry 18) is still
+deferred.
+
+### Why
+- **Reproducibility across the group and the grading machine.** Three people (Java, Python, C++) and
+  the professor's machine all get the exact same MongoDB version and configuration from one
+  `docker-compose.yml`, instead of each environment's native install potentially drifting.
+- **Disposable state for benchmarks.** Phase 9's benchmarks need a clean, empty index to measure
+  writes from scratch repeatedly; a container can be torn down and recreated in seconds, without
+  leftover data or needing to manually `DROP` collections on a shared local install.
+- **No change to application code.** From C++'s point of view, MongoDB is just a server reachable at
+  a host:port (typically `localhost:27017`); the eventual `MongoIndexWriter` connects the same way
+  whether MongoDB runs natively or inside Docker, so this decision does not affect the design already
+  in place (`IndexWriter`), only how the database is started for development, testing and grading.
