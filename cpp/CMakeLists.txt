@@ -52,7 +52,10 @@ add_library(stage1_core
   src/curl_http_client.cpp
   src/gutenberg_client.cpp
   src/metadata.cpp
-  src/metadata_store.cpp)
+  src/metadata_store.cpp
+  src/file_io.cpp
+  src/book_based_datalake.cpp
+  src/range_based_datalake.cpp)
 target_link_libraries(stage1_core PUBLIC stage1_deps)
 
 # ---- Executable ----

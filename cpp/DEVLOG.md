@@ -496,3 +496,83 @@ SPEC's cross-language contract).
 - **If revisited:** the sketch discussed was `class MetadataRepository { virtual insert_book(...) = 0;
   virtual find_by_id(...) = 0; }` with the current `MetadataStore` renamed to `SqliteMetadataRepository`
   implementing it — a small, mechanical change to apply later if the group commits to the comparison.
+
+---
+
+## Entry 14 – Datalake interface and the book-based layout (2026-09-28)
+
+### What was done
+- `include/stage1/datalake.hpp`: `BookLocation` (the two paths a write produced) and the abstract
+  `Datalake` interface, one pure virtual method: `write(book_id, header, body) -> BookLocation`.
+- `include/stage1/file_io.hpp` + `src/file_io.cpp`: `write_text_file(path, content)`, shared by every
+  datalake layout — creates missing parent directories, then writes the file; throws
+  `std::runtime_error` on any I/O failure.
+- `include/stage1/book_based_datalake.hpp` + `src/book_based_datalake.cpp`: `BookBasedDatalake`, the
+  first `Datalake` implementation, for the `book` layout from SPEC section 3
+  (`<root>/<ID>/body.txt`, `<root>/<ID>/header.txt`).
+- `tests/support/temp_dir.hpp`: `TempDir`, an RAII temporary directory, factored out now because the
+  three upcoming datalake tests (book/range/time) all need one, unlike earlier one-off temp files.
+- `tests/book_based_datalake_test.cpp`: 3 tests (paths and content are correct, two ids get separate
+  directories, writing the same id again replaces the content). Suite total: 47 tests.
+- Not done yet: `RangeBasedDatalake`, `TimeBasedDatalake` (next steps of this phase).
+
+### Why
+- **`Datalake` as an interface from the start, unlike `MetadataRepository` (Entry 13, deferred).**
+  This is the opposite situation: SPEC section 3 explicitly requires comparing three layouts
+  (`time`/`book`/`range`) against each other, so a shared interface is not speculative here — it is
+  the thing being benchmarked. The Java teammate independently reached the same design ("Reto 7:
+  extrae el contrato Datalake"), which confirms this is the natural shape for this specific SPEC
+  requirement, not just a preference of this module.
+- **`write_text_file` shared instead of duplicated in each layout.** All three layouts do the same two
+  things — "make sure the directory exists" and "write a file" — with only the *path* differing between
+  them; duplicating that would risk the three layouts handling I/O errors inconsistently.
+- **`Datalake::write` returns `BookLocation` instead of `void`.** The caller (later, `MetadataStore`)
+  needs `body_path`/`header_path` to store in the `books` table; computing them again outside the
+  datalake would duplicate the exact layout logic that only the concrete `Datalake` knows.
+- **Throwing on I/O failure, not returning a bool/optional.** A book that cannot be written (disk full,
+  permissions) must not be silently treated as if it were: the sample dataset benchmarks in Phase 9
+  need to know a write genuinely failed, and swallowing the error would corrupt the
+  `downloaded_books.txt` bookkeeping of a later phase (Phase 8) if it marked something as done that
+  never landed on disk.
+- **`TempDir` extracted into `tests/support/` now, ahead of the range/time tests.** Unlike the
+  `MetadataRepository` case, this reuse is concrete and immediate (the very next two steps need the
+  exact same helper), not speculative.
+- **`BookBasedDatalake` written first, not `TimeBasedDatalake`.** It is the layout with no extra logic
+  beyond string concatenation, so `Datalake`'s contract and the write-then-read-back testing pattern
+  get verified on the simplest case before adding range arithmetic or a clock dependency.
+
+---
+
+## Entry 15 – Range-based datalake layout (2026-09-29)
+
+### What was done
+- `include/stage1/range_based_datalake.hpp` + `src/range_based_datalake.cpp`:
+  - `range_folder_name(book_id)` — pure function, no filesystem access, computes `"<INI>-<FIN>"`
+    (`INI = (book_id / 1000) * 1000`, `FIN = INI + 999`, both zero-padded to 5 digits) per SPEC section 3.
+  - `RangeBasedDatalake : public Datalake` — writes `<root>/<INI>-<FIN>/<ID>.body.txt` and
+    `<ID>.header.txt`, reusing `write_text_file` (Entry 14).
+- `tests/range_based_datalake_test.cpp`: 4 tests for `range_folder_name` alone (the SPEC example,
+  the first range's boundaries, a range start being its own first member, a 5-digit id near the
+  current size of Project Gutenberg) and 3 for `RangeBasedDatalake::write` (paths and content,
+  two books sharing one range folder without colliding, two books in different ranges getting
+  separate folders). Suite total: 54 tests.
+
+### Why
+- **`range_folder_name` split out as its own free function, same shape as `book_download_url`
+  (Entry 9).** The only genuinely error-prone part of this layout is the integer arithmetic and the
+  zero-padding, not the file writing (already covered by `write_text_file`'s own tests); isolating it
+  means the 4 arithmetic edge cases (range boundaries, a large id) are checked without touching a
+  filesystem at all, and a mistake there cannot hide behind an I/O failure.
+- **Integer division (`book_id / 1000`) instead of computing digits by hand.** C++ integer division
+  truncates toward zero, so `1342 / 1000 == 1`, `999 / 1000 == 0`; for Gutenberg's positive ids this is
+  exactly the "floor to the nearest thousand" SPEC section 3 asks for, and is simpler and less
+  error-prone than string-slicing the id.
+- **`snprintf("%05d", ...)` for zero-padding instead of manual string building.** It is the standard,
+  well-tested way to pad a number in C/C++; hand-rolling padding (prepending `'0'` characters in a
+  loop) would be more code for no benefit and another place to get an off-by-one wrong.
+- **`zero_pad5` kept in the anonymous namespace of the `.cpp`, not exposed in the header.** Nothing
+  outside this file needs to zero-pad a number in isolation; only the combined `"INI-FIN"` string
+  is part of the layout's public contract.
+- **A dedicated test for the "range start is its own first member" case (`range_folder_name(1000)`).**
+  It is the classic boundary where a `<` vs `<=` (or, here, an integer-division rounding direction)
+  mistake would show up first; the SPEC's own worked example (1342) does not exercise this boundary.
