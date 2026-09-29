@@ -851,3 +851,43 @@ against the real `docker compose up -d` MongoDB the next time this runs on a mac
 - **The unreachable-server test always runs (no `GTEST_SKIP`), unlike the other two.** It needs
   MongoDB to be absent to prove anything, the opposite precondition from the round-trip tests, so it is
   the one MongoDB test that is meaningful and stable in every environment, Docker or not.
+
+---
+
+## Entry 22 – AND query engine (2026-09-29)
+
+### What was done
+- `include/stage1/query_engine.hpp` + `src/query_engine.cpp`: `query_and(index, terms)`, implementing
+  SPEC section 7. De-duplicates `terms`, fetches each distinct term's postings from `InvertedIndex`,
+  sorts the lists smallest-first, and folds them together with `std::set_intersection`, short-circuiting
+  as soon as the running result is empty.
+- 7 tests: a single term, a real intersection (`car`+`nice`), an unknown term collapsing the whole
+  query to empty, an empty term list, a repeated term behaving like one, a three-term query staying
+  sorted, and — closing the loop again — the exact `query_and(index, tokenize("car nice", stopwords))`
+  example this project started from, now returning `{1}` for real. Suite total: 87 tests.
+
+### Why
+- **Takes `terms` (already tokenized), not a raw query string plus a stopword set.** Same reasoning as
+  `InvertedIndex::add_book`: tokenizing and indexing/querying are separate concerns, so a caller does
+  `query_and(index, tokenize(query_text, stopwords))` — SPEC section 7's "the query is tokenized with
+  the same tokenizer" is satisfied by *reusing* `tokenize`, not by `query_and` reimplementing it.
+- **Empty `terms` returns no results, not every book.** The intersection of zero sets is mathematically
+  undefined (it would be "the universe"); for a search engine, a query with no meaningful terms (an
+  empty string, or only stopwords) has nothing to search for, so returning nothing is the sensible,
+  unsurprising behavior, and is the interpretation a user would expect.
+- **Query terms de-duplicated before any postings lookup.** `query_and(index, {"car", "car"})` must
+  behave exactly like `{"car"}`; without de-duplicating first, the same postings list would be fetched
+  and intersected with itself for no benefit, wasted work that grows with how many times a common word
+  repeats in a real query.
+- **Smallest postings list first, short-circuiting on an empty result.** This is the standard technique
+  for AND queries over sorted postings: once the running intersection is empty, no later term can add
+  anything back, so remaining (possibly much larger) lists are never even touched. It directly reduces
+  the cost SPEC section 9's `index_query` benchmark measures, and a rare term combined with a very
+  common one is exactly the case a search engine sees most often.
+- **`std::set_intersection` over two sorted ranges, not a hash-set-based intersection.** `postings()`
+  already guarantees ascending order (Entry 17); a linear merge of two sorted sequences is the natural,
+  allocation-light way to intersect them, and keeps the result sorted automatically without a separate
+  sort step, unlike building a hash set that would need sorting again before comparison or output.
+- **The final test re-runs the project's very first exercise end to end** (index the three theory
+  documents, then AND-query "car nice"), now through real code instead of by hand, tying tokenizing,
+  indexing and querying together for the first time in one place.

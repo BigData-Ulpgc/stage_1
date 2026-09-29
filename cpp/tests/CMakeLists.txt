@@ -16,7 +16,8 @@ add_executable(stage1_tests
   inverted_index_test.cpp
   monolithic_index_writer_test.cpp
   hierarchical_index_writer_test.cpp
-  mongo_index_writer_test.cpp)
+  mongo_index_writer_test.cpp
+  query_engine_test.cpp)
 target_link_libraries(stage1_tests PRIVATE stage1_core GTest::gtest_main)
 # Lets tests read the shared contract files (stopwords, queries, book ids)
 target_compile_definitions(stage1_tests PRIVATE
