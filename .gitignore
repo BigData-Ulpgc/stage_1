@@ -12,9 +12,10 @@ dependency-reduced-pom.xml
 .gradle/
 build/
 
-# ---- Python (por si otra implementacion lo usa) ----
+# ---- Python ----
 __pycache__/
 *.py[cod]
+*.pyc
 .venv/
 venv/
 env/
@@ -35,9 +36,10 @@ nbproject/private/
 Thumbs.db
 *~
 
-# ---- Logs y temporales ----
+# ---- Logs, Benchmarks y temporales ----
 *.log
 *.tmp
+*.csv
 
 # ---- C++ / CMake ----
 cpp/build/
@@ -53,25 +55,10 @@ compile_commands.json
 *.so
 *.dylib
 *.dSYM/
-
-# ---- Data generated at runtime (datalake, datamarts, control) ----
 cpp/data/
 
-
-
-#------------Python-----------------------------
-# Entornos virtuales
-venv/
-env/
-__pycache__/
-*.pyc
-
-# Datos y Bases de datos locales
-../data/
-*.db
-*.sqlite3
-
-# Índice JSON local
-*.json
-
+# ---- Datos del Proyecto y Bases de Datos (¡CRÍTICO!) ----
 data/
+*.db
+*.sqlite
+*.sqlite3

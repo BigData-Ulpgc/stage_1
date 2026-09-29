@@ -1,61 +1,61 @@
 """
-Script de verificación rápida de los tres índices invertidos.
-Ejecutar desde stage_1/python/:  python src/test_indices.py
+Quick verification script for the three inverted indexes.
+Run from stage_1/python/:  python src/test_indices.py
 """
 
 import json
 import os
 import sys
 
-# Forzar UTF-8 en la salida para evitar errores con cp1252 en Windows
+# Force UTF-8 output to avoid cp1252 errors on Windows
 sys.stdout.reconfigure(encoding="utf-8")
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-DATAMARTS = os.path.join(SCRIPT_DIR, "..", "..", "data", "datamarts")
+DATAMARTS = os.path.join(SCRIPT_DIR, "..", "..", "..", "..", "..", "data", "datamarts")
 
 # =====================================================================
-# 1. ÍNDICE MONOLÍTICO (inverted_index.json)
+# 1. MONOLITHIC INDEX (inverted_index.json)
 # =====================================================================
 print("=" * 60)
-print("  1. ÍNDICE MONOLÍTICO  (inverted_index.json)")
+print("  1. MONOLITHIC INDEX  (inverted_index.json)")
 print("=" * 60)
 
 mono_path = os.path.join(DATAMARTS, "inverted_index.json")
 with open(mono_path, encoding="utf-8") as f:
     idx = json.load(f)
 
-print(f"  Total de términos: {len(idx)}")
+print(f"  Total terms: {len(idx)}")
 print()
 
-# Búsqueda de ejemplo
+# Example search
 search_words = ["whale", "darcy", "alice", "monster", "love", "sea", "war"]
-print("  Búsquedas de ejemplo:")
+print("  Example searches:")
 for word in search_words:
     if word in idx:
-        print(f"    \"{word}\" → libros: {idx[word]}")
+        print(f"    \"{word}\" → books: {idx[word]}")
     else:
-        print(f"    \"{word}\" → no encontrado")
+        print(f"    \"{word}\" → not found")
 
 print()
 
-# Top 10 términos más comunes
+# Top 10 most common terms
 top = sorted(idx.items(), key=lambda x: len(x[1]), reverse=True)[:10]
-print("  Top 10 términos (presentes en más libros):")
+print("  Top 10 terms (present in the most books):")
 for term, ids in top:
-    print(f"    \"{term}\" → {len(ids)} libros: {ids}")
+    print(f"    \"{term}\" → {len(ids)} books: {ids}")
 
 
 # =====================================================================
-# 2. ÍNDICE JERÁRQUICO  (inverted_index/<LETRA>/<term>.txt)
+# 2. HIERARCHICAL INDEX  (inverted_index/<LETTER>/<term>.txt)
 # =====================================================================
 print()
 print("=" * 60)
-print("  2. ÍNDICE JERÁRQUICO  (inverted_index/<LETRA>/<term>.txt)")
+print("  2. HIERARCHICAL INDEX  (inverted_index/<LETTER>/<term>.txt)")
 print("=" * 60)
 
 hier_base = os.path.join(DATAMARTS, "inverted_index")
 subdirs = sorted(os.listdir(hier_base))
-print(f"  Subcarpetas: {subdirs}")
+print(f"  Subdirectories: {subdirs}")
 
 total_files = 0
 for sd in subdirs:
@@ -63,12 +63,12 @@ for sd in subdirs:
     if os.path.isdir(sd_path):
         count = len(os.listdir(sd_path))
         total_files += count
-print(f"  Total de archivos (= términos): {total_files}")
+print(f"  Total files (= terms): {total_files}")
 print()
 
-# Leer algunos archivos de ejemplo
+# Read some example files
 example_terms = ["whale", "darcy", "alice", "love"]
-print("  Verificando archivos de ejemplo:")
+print("  Verifying example files:")
 for term in example_terms:
     first = term[0].upper()
     fpath = os.path.join(hier_base, first, f"{term}.txt")
@@ -78,15 +78,15 @@ for term in example_terms:
         ids = content.split("\n")
         print(f"    {first}/{term}.txt → IDs: {ids}")
     else:
-        print(f"    {first}/{term}.txt → no existe")
+        print(f"    {first}/{term}.txt → does not exist")
 
 
 # =====================================================================
-# 3. COMPARACIÓN — ¿coinciden ambos índices?
+# 3. COMPARISON — do both indexes match?
 # =====================================================================
 print()
 print("=" * 60)
-print("  3. COMPARACIÓN MONOLÍTICO vs JERÁRQUICO")
+print("  3. COMPARISON MONOLITHIC vs HIERARCHICAL")
 print("=" * 60)
 
 mismatches = 0
@@ -109,11 +109,11 @@ for term in example_terms:
 
 print()
 if mismatches == 0:
-    print("  ✓ Los índices monolítico y jerárquico coinciden perfectamente.")
+    print("  ✓ The monolithic and hierarchical indexes match perfectly.")
 else:
-    print(f"  ✗ Se encontraron {mismatches} discrepancias.")
+    print(f"  ✗ Found {mismatches} mismatches.")
 
 print()
 print("=" * 60)
-print("  Verificación completada.")
+print("  Verification completed.")
 print("=" * 60)

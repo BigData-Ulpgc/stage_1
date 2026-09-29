@@ -3,8 +3,8 @@ from typing import Set
 
 class ControlLayer:
     """
-    Gestión del estado de los libros procesados (descargados e indexados),
-    según la Sección 8 del contrato común (SPEC.md).
+    Manages the state of processed books (downloaded and indexed),
+    as defined in Section 8 of the common contract (SPEC.md).
     """
 
     def __init__(self, base_dir: str = "../data/control"):
@@ -14,16 +14,16 @@ class ControlLayer:
         self._ensure_dir()
         
     def _ensure_dir(self):
-        """Asegura que el directorio de control exista."""
+        """Ensures the control directory exists."""
         os.makedirs(self.base_dir, exist_ok=True)
-        # Crear archivos vacíos si no existen
+        # Create empty files if they do not exist
         if not os.path.exists(self.downloaded_file):
             open(self.downloaded_file, 'a').close()
         if not os.path.exists(self.indexed_file):
             open(self.indexed_file, 'a').close()
 
     def _read_ids(self, filepath: str) -> Set[int]:
-        """Lee un archivo y devuelve un conjunto de IDs."""
+        """Reads a file and returns a set of IDs."""
         ids = set()
         if os.path.exists(filepath):
             with open(filepath, "r", encoding="utf-8") as f:
@@ -34,38 +34,38 @@ class ControlLayer:
         return ids
 
     def _add_id(self, filepath: str, book_id: int):
-        """Añade de forma segura (append) un ID al archivo especificado."""
+        """Safely appends an ID to the specified file."""
         with open(filepath, "a", encoding="utf-8") as f:
             f.write(f"{book_id}\n")
 
     def get_downloaded_books(self) -> Set[int]:
-        """Obtiene el conjunto de IDs de los libros ya descargados."""
+        """Returns the set of IDs of already downloaded books."""
         return self._read_ids(self.downloaded_file)
 
     def is_downloaded(self, book_id: int) -> bool:
-        """Verifica si un libro ya está descargado."""
+        """Checks whether a book has already been downloaded."""
         return book_id in self.get_downloaded_books()
 
     def mark_as_downloaded(self, book_id: int):
         """
-        Marca un libro como descargado añadiéndolo a downloaded_books.txt.
-        Debe llamarse SÓLO después de que el archivo se haya escrito correctamente.
+        Marks a book as downloaded by appending it to downloaded_books.txt.
+        Must be called ONLY after the file has been written successfully.
         """
         if not self.is_downloaded(book_id):
             self._add_id(self.downloaded_file, book_id)
 
     def get_indexed_books(self) -> Set[int]:
-        """Obtiene el conjunto de IDs de los libros ya indexados."""
+        """Returns the set of IDs of already indexed books."""
         return self._read_ids(self.indexed_file)
 
     def is_indexed(self, book_id: int) -> bool:
-        """Verifica si un libro ya está indexado."""
+        """Checks whether a book has already been indexed."""
         return book_id in self.get_indexed_books()
 
     def mark_as_indexed(self, book_id: int):
         """
-        Marca un libro como indexado añadiéndolo a indexed_books.txt.
-        Debe llamarse SÓLO después de que el índice se haya actualizado correctamente.
+        Marks a book as indexed by appending it to indexed_books.txt.
+        Must be called ONLY after the index has been updated successfully.
         """
         if not self.is_indexed(book_id):
             self._add_id(self.indexed_file, book_id)
