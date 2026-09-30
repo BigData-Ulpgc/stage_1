@@ -1,33 +1,19 @@
 package es.ulpgc.bigdata;
 
 import es.ulpgc.bigdata.config.AppConfig;
-import es.ulpgc.bigdata.config.DatalakeFactory;
-import es.ulpgc.bigdata.config.InvertedIndexFactory;
 import es.ulpgc.bigdata.control.BookIdList;
 import es.ulpgc.bigdata.control.ControlFiles;
-import es.ulpgc.bigdata.control.PipelineController;
 import es.ulpgc.bigdata.control.StepResult;
-import es.ulpgc.bigdata.crawler.BookDownloader;
-import es.ulpgc.bigdata.crawler.BookSplitter;
-import es.ulpgc.bigdata.crawler.GutenbergClient;
-import es.ulpgc.bigdata.datalake.Datalake;
-import es.ulpgc.bigdata.datamart.index.Indexer;
-import es.ulpgc.bigdata.datamart.index.InvertedIndex;
-import es.ulpgc.bigdata.datamart.index.Tokenizer;
-import es.ulpgc.bigdata.datamart.metadata.MetadataParser;
-import es.ulpgc.bigdata.datamart.metadata.MetadataRepository;
-import es.ulpgc.bigdata.datamart.metadata.SqliteMetadataRepository;
 import es.ulpgc.bigdata.model.BookMetadata;
-import es.ulpgc.bigdata.query.SearchService;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Capa fina: interpreta el comando, carga AppConfig, pide las piezas a las factories,
- * las conecta y muestra el resultado. Aquí NO hay lógica de negocio: qué descargar,
- * cómo indexar o cómo intersecar viven en PipelineController, Indexer y SearchService.
+ * Capa fina: interpreta el comando, carga AppConfig, pide el sistema montado a
+ * SearchEngine (que usa las factories) y muestra el resultado. Aquí NO hay lógica de negocio:
+ * qué descargar, cómo indexar o cómo intersecar viven en PipelineController, Indexer y SearchService.
  *
  * Uso:  java ... Main [--config fichero.properties] <comando>
  *   pipeline [pasos]    descarga/indexa como mucho 'pasos' libros (por defecto 10)
@@ -81,18 +67,9 @@ public final class Main {
     // ------------------------------------------------------------------
 
     private static void pipeline(AppConfig config, int steps) {
-        Datalake datalake = DatalakeFactory.create(config);
-        Tokenizer tokenizer = Tokenizer.fromStopwordsFile(config.stopwordsFile());
-        try (MetadataRepository metadata = new SqliteMetadataRepository(config.metadataDb());
-             InvertedIndex index = InvertedIndexFactory.create(config)) {
-            BookDownloader downloader = new BookDownloader(
-                    new GutenbergClient(config.connectTimeout(), config.requestTimeout()), new BookSplitter(), datalake);
-            Indexer indexer = new Indexer(datalake, new MetadataParser(), metadata, tokenizer, index);
-            PipelineController controller = new PipelineController(
-                    new ControlFiles(config.controlDir()), downloader, indexer, BookIdList.load(config.bookIdsFile()));
-
-            System.out.println("datalake=" + datalake.name() + "  index=" + index.name());
-            List<StepResult> results = controller.runUntilIdle(steps);
+        try (SearchEngine engine = SearchEngine.open(config)) {
+            System.out.println("datalake=" + engine.datalake().name() + "  index=" + engine.index().name());
+            List<StepResult> results = engine.pipeline().runUntilIdle(steps);
             for (StepResult r : results) {
                 System.out.println(r.action() + " " + r.bookId() + (r.detail().isEmpty() ? "" : "  " + r.detail()));
             }
@@ -103,13 +80,11 @@ public final class Main {
     }
 
     private static void search(AppConfig config, String query) {
-        Tokenizer tokenizer = Tokenizer.fromStopwordsFile(config.stopwordsFile());
-        try (MetadataRepository metadata = new SqliteMetadataRepository(config.metadataDb());
-             InvertedIndex index = InvertedIndexFactory.create(config)) {
-            List<Integer> ids = new SearchService(tokenizer, index).search(query);
-            System.out.println(ids.size() + " libros para \"" + query + "\" (index=" + index.name() + ")");
+        try (SearchEngine engine = SearchEngine.open(config)) {
+            List<Integer> ids = engine.search().search(query);
+            System.out.println(ids.size() + " libros para \"" + query + "\" (index=" + engine.index().name() + ")");
             for (int id : ids) {
-                String title = metadata.findById(id).map(BookMetadata::title).orElse("(sin metadatos)");
+                String title = engine.metadata().findById(id).map(BookMetadata::title).orElse("(sin metadatos)");
                 System.out.println("  " + id + "  " + title);
             }
         }
