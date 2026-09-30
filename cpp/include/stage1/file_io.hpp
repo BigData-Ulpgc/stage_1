@@ -11,4 +11,8 @@ namespace stage1 {
 // be opened or written.
 void write_text_file(const std::filesystem::path& path, const std::string& content);
 
+// Reads the whole contents of `path` into a string. Throws std::runtime_error
+// if the file cannot be opened.
+std::string read_text_file(const std::filesystem::path& path);
+
 }  // namespace stage1

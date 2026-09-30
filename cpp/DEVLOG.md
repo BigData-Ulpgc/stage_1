@@ -994,3 +994,152 @@ against the real `docker compose up -d` MongoDB the next time this runs on a mac
   candidate qualifies), and every caller must switch on `action` first regardless; an `optional` here
   would only add a second way to represent the same "there is nothing to act on" fact already carried
   by the enum, without preventing any additional mistake.
+
+---
+
+## Entry 25 – main.cpp: wiring everything into a runnable pipeline (2026-09-30)
+
+### What was done
+- `include/stage1/file_io.hpp`/`.cpp`: added `read_text_file(path)`, the missing symmetric
+  counterpart to `write_text_file` (Entry 14), needed to read a book's body back off the datalake
+  before indexing it.
+- `include/stage1/pipeline.hpp` + `src/pipeline.cpp`: `run_pipeline_step(candidate_ids, downloaded,
+  indexed, source, datalake, metadata, index, index_writer, stopwords)`. Calls
+  `next_control_action` (Entry 24) and performs exactly one of:
+  - **Download**: `source.fetch` -> `split_book` -> `datalake.write` -> `extract_metadata` ->
+    `metadata.insert_book` -> `downloaded.mark`. A failed fetch or a book missing its START/END
+    markers is left unmarked on purpose (retried on a future run), never throws.
+  - **Index**: `metadata.find_by_id` -> `read_text_file` the stored body -> `tokenize` -> `index.
+    add_book` -> `index_writer.write` (rewrites the whole structure) -> `indexed.mark`.
+  - **Nothing**: no-op.
+  Every dependency is a reference parameter (`BookSource&`, `Datalake&`, `MetadataStore&`,
+  `InvertedIndex&`, `IndexWriter&`), the same shape used everywhere else in this project, so it can
+  be exercised with fakes and temporary directories instead of the real network or database.
+- `src/main.cpp` rewritten: a thin CLI (`search_engine_stage1 pipeline <N>`, mirroring the Java
+  module's `pipeline <N>` command) that wires the real components — `CurlHttpClient` +
+  `GutenbergSource`, `BookBasedDatalake`, `MetadataStore` (SQLite), `MonolithicIndexWriter` (JSON) —
+  loads `shared/stopwords.txt` and `shared/book_ids.txt`, rebuilds the in-memory `InvertedIndex` from
+  every already-indexed book's stored body (there is no on-disk index *reader*, only writers, so this
+  is the simplest correct way to resume with a populated index), then calls `run_pipeline_step` up to
+  `N` times, stopping early once there is nothing left to do.
+- `tests/pipeline_test.cpp`: 5 tests against a `PipelineFixture` (temp directories, in-memory SQLite
+  path, a `FakeHttpClient` returning a small but realistic Gutenberg-shaped fake book) — a full
+  download-then-index round trip through every component, "nothing left to do" once both steps are
+  done, and a failed download / a markerless book each left unmarked. Suite total, before the fix
+  below: 108.
+- `CMakeLists.txt`: `pipeline.cpp` added to `stage1_core`; `STAGE1_SHARED_DIR`/`STAGE1_DATA_DIR`
+  compile definitions added to the **executable** (mirroring the tests' own `STAGE1_SHARED_DIR`), so
+  the binary finds `shared/` and its own `data/` directory regardless of the working directory it is
+  launched from.
+
+### A real bug this caught: `MetadataStore` never created its own directory
+Running the assembled binary for real (`./search_engine_stage1 pipeline 4`, real network, a fresh
+`cpp/data/`) failed immediately: `cannot open metadata database: unable to open database file`.
+`MetadataStore`'s constructor (Entry 12) opened `sqlite3_open` directly, unlike every other
+path-taking constructor in the project (`ControlLog`, `write_text_file`'s callers), which all create
+missing parent directories first. Its own unit tests never caught this because they always used
+`":memory:"` or a path directly inside an already-created `TempDir`, never a path with a
+not-yet-existing subdirectory like `datamarts/metadata.db`. Fixed by creating the parent directory in
+the constructor (skipped for `":memory:"`, whose `parent_path()` is empty), and added
+`MetadataStore.CreatesMissingParentDirectories`, the same test shape already used for `ControlLog`
+and `MonolithicIndexWriter`. Suite total after the fix: 109.
+
+### Verification
+After the fix, `./search_engine_stage1 pipeline 4` ran against the real network end to end and
+downloaded, split, stored the metadata of, and indexed two real books (1342, *Pride and Prejudice*;
+84, *Frankenstein*), producing a correct `control/`, `datalake/book/`, `datamarts/metadata.db` and
+`datamarts/inverted_index.json` (10114 terms) under `cpp/data/` (git-ignored). Spot-checked: `"whale"`
+-> `[84]` only; `"elizabeth"` -> `[84, 1342]` (a character in both books — a nice, unplanned
+confirmation that indexing and querying are both working on real text). The data directory was
+removed afterward; it was only a verification artifact, not a deliverable.
+
+### Why
+- **`run_pipeline_step` lives in `stage1_core`, `main.cpp` stays thin and untested.** All of this
+  phase's real logic is a testable library function taking references, exactly like every other piece
+  of this project (`GutenbergSource`, `next_control_action`, ...); `main.cpp` only wires concrete
+  types together and drives a loop, with nothing left in it worth a unit test of its own.
+- **A failed download or a markerless book is never marked, and does not throw.** This is the
+  "write first, mark after" discipline (discussed before Phase 8's first line of code) applied at the
+  level that actually matters: the pipeline's job is to make progress on what it *can* do and quietly
+  leave problem books for a future retry, not to crash the whole run over one bad id.
+- **The in-memory index is rebuilt from stored bodies on every startup, not loaded from a saved
+  snapshot.** This stage built writers for the three on-disk index formats but no matching readers;
+  reading each already-indexed book's body back and re-tokenizing it is slower but requires no new
+  format-specific parsing code, and is correct by construction since it goes through the exact same
+  `tokenize`/`add_book` path indexing itself uses. Documented as a known cost, not hidden: a real
+  pipeline resuming a large, already-indexed collection would pay for this every restart, and adding
+  an index reader (or a private fast snapshot format) would be a natural improvement for a later stage.
+- **`index_writer.write(index)` rewrites the entire index on every single indexed book, not an
+  incremental update.** Direct consequence of `IndexWriter`'s existing contract (Entry 18: "write()
+  means make the structure match this index, not append"); correct, but means indexing N books costs
+  more here than it would with a true incremental writer. SPEC section 9 explicitly asks for
+  `index_update` to be benchmarked as its own operation — this pipeline's current behavior is exactly
+  the kind of cost that benchmark exists to surface, not something to silently optimize away before it
+  is measured.
+- **`BookBasedDatalake` and `MonolithicIndexWriter` chosen as `main`'s defaults, not because they are
+  "the best" ones.** Any `Datalake`/`IndexWriter` works identically from the pipeline's point of view
+  (it always goes through the interface, never a concrete type), since indexing always reads the body
+  back via the path `MetadataStore` stored rather than assuming a particular layout. Swapping either
+  default is a two-line change in `main.cpp`; Phase 9's benchmarks are what will actually exercise and
+  compare all three alternatives of each, not this single operational pipeline.
+- **CLI shape (`pipeline <N>`) mirrors the Java module's own `pipeline <N>` command** (see the root
+  `README.md`), keeping how the three language implementations are invoked recognizably similar for
+  whoever runs and compares them, including the grader.
+
+*(Addendum to Entry 25)* Also fixed `Makefile`'s `run` target, left stale by the CLI change above: it
+called the binary with no arguments, which now just prints usage and exits 1. It now runs
+`pipeline 5` by default, overridable with `make run ARGS="pipeline 20"`.
+
+---
+
+## Entry 26 – Benchmark infrastructure: the timer and the shared CSV writer (2026-09-30)
+
+### What was done
+- `include/stage1/benchmark.hpp` + `src/benchmark.cpp`:
+  - `BenchmarkResult`: one struct per SPEC section 9's CSV columns (`language`, `experiment`,
+    `structure`, `dataset_size`, `repetition`, `metric`, `value`, `unit`).
+  - `write_benchmark_results(path, results)`: writes the shared header plus one row per result,
+    fixed-point with 3 decimals, reusing `write_text_file` (Entry 14).
+  - `measure_elapsed_ms(operation, warmup_runs=2, measured_runs=5)`: runs `operation` (any
+    zero-argument callable) `warmup_runs` times and discards those, then `measured_runs` times,
+    timing each with `std::chrono::steady_clock`, and returns the measured elapsed times in
+    milliseconds. Defaults are exactly SPEC section 9's shared methodology (N_WARMUP=2, N_RUNS=5).
+- 7 tests: the CSV round-trips exactly (including the fixed 3-decimal formatting), an empty result
+  list still writes the header alone, missing parent directories are created, the returned vector has
+  exactly `measured_runs` entries, the defaults call the operation `2 + 5` times total, a custom
+  warmup/measured pair calls it that many times total, and every measured value is non-negative.
+  Suite total: 116 tests.
+- Not done yet: the actual per-experiment benchmarks (`datalake_write`, `index_build`, `index_query`,
+  ...) that will call `measure_elapsed_ms` and feed its output into `write_benchmark_results` — planned
+  as the next steps of this phase, one or a few experiments at a time.
+
+### Why
+- **A separate, reusable `measure_elapsed_ms` instead of hand-timing each experiment.** SPEC section 9
+  fixes one methodology (2 discarded warmup runs, 5 measured runs) for every experiment in every
+  language; writing that loop once here means every later benchmark shares the exact same warmup/
+  measurement discipline by construction, instead of each experiment's code having to remember to
+  replicate it correctly.
+- **`std::chrono::steady_clock`, not `system_clock` (the one `TimeBasedDatalake`'s `Clock` uses).**
+  `steady_clock` is guaranteed to never jump backward (e.g. from a system clock adjustment or daylight
+  saving) and is meant specifically for measuring durations; `system_clock` is for knowing what time it
+  is, which is why `TimeBasedDatalake` (Entry 16) uses it for calendar dates and this uses the other
+  for elapsed time — the two clocks solve different problems even though both come from `<chrono>`.
+- **Takes a `std::function<void()>`, so it works for any experiment.** A datalake write, an index
+  build, a metadata query — every one of SPEC section 9's experiments is, from the timer's point of
+  view, "some operation to run and time"; the operation being generic here is what avoids writing a
+  bespoke timing loop for each of the twelve named experiments.
+- **Fixed-point, 3-decimal CSV output instead of the stream's default formatting.** `double`'s default
+  `operator<<` formatting switches to scientific notation for some values (`1.23e+04`), which a naive
+  CSV/spreadsheet reader would need to special-case; three decimals keeps microsecond resolution on
+  millisecond-scale timings (this project's realistic range) while always being one plain, readable
+  number.
+- **No CSV quoting/escaping for the string fields.** Every field written here (`language`, `experiment`,
+  `structure`, `metric`, `unit`) is always one of this project's own fixed identifiers, never text from
+  an external, untrusted source (unlike, say, a book title from Gutenberg, which is exactly why
+  `MetadataStore`, Entry 12, needed SQL parameter binding); there is nothing here that could ever
+  contain a stray comma to corrupt the format.
+- **`write_benchmark_results` reuses `write_text_file` rather than writing incrementally row by row.**
+  Consistent with every other writer in this project (`MonolithicIndexWriter`, `HierarchicalIndexWriter`):
+  build the full content, then write it once. A benchmark run produces at most a few dozen rows (5
+  measured repetitions per structure per experiment), so there is no realistic case where building the
+  string first would matter for memory.

@@ -78,6 +78,17 @@ constexpr const char* kCreateTitleIndexSql = "CREATE INDEX IF NOT EXISTS idx_boo
 }  // namespace
 
 MetadataStore::MetadataStore(const std::filesystem::path& db_path) {
+    // Skipped for ":memory:" and similar special SQLite names, which have no
+    // real parent directory: their parent_path() is empty, so this is a no-op.
+    const std::filesystem::path parent = db_path.parent_path();
+    if (!parent.empty()) {
+        std::error_code error;
+        std::filesystem::create_directories(parent, error);
+        if (error) {
+            throw std::runtime_error("cannot create directory " + parent.string() + ": " + error.message());
+        }
+    }
+
     if (sqlite3_open(db_path.string().c_str(), &db_) != SQLITE_OK) {
         const std::string message = sqlite3_errmsg(db_);
         sqlite3_close(db_);

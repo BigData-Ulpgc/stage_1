@@ -1,6 +1,7 @@
 #include "stage1/file_io.hpp"
 
 #include <fstream>
+#include <sstream>
 #include <stdexcept>
 
 namespace stage1 {
@@ -20,6 +21,16 @@ void write_text_file(const std::filesystem::path& path, const std::string& conte
     if (!file) {
         throw std::runtime_error("failed writing file: " + path.string());
     }
+}
+
+std::string read_text_file(const std::filesystem::path& path) {
+    std::ifstream file(path, std::ios::binary);
+    if (!file) {
+        throw std::runtime_error("cannot open file for reading: " + path.string());
+    }
+    std::ostringstream contents;
+    contents << file.rdbuf();
+    return contents.str();
 }
 
 }  // namespace stage1

@@ -98,3 +98,14 @@ TEST(MetadataStore, ReopeningTheSameDatabaseFileKeepsTheSchemaAndData) {
     ASSERT_TRUE(book.has_value());
     EXPECT_EQ(book->title, "Title");
 }
+
+TEST(MetadataStore, CreatesMissingParentDirectories) {
+    TempDbPath db_path;
+    const auto nested_path = db_path.path().parent_path() / "datamarts" / "metadata.db";
+
+    MetadataStore store(nested_path);  // must not throw
+    store.insert_book(1, BookMetadata{"Title", std::nullopt, std::nullopt, std::nullopt}, "b", "h");
+
+    EXPECT_TRUE(std::filesystem::exists(nested_path));
+    std::filesystem::remove_all(db_path.path().parent_path() / "datamarts");
+}

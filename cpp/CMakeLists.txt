@@ -66,12 +66,20 @@ add_library(stage1_core
   src/mongo_index_writer.cpp
   src/query_engine.cpp
   src/control_log.cpp
-  src/book_id_list.cpp)
+  src/book_id_list.cpp
+  src/pipeline.cpp
+  src/benchmark.cpp)
 target_link_libraries(stage1_core PUBLIC stage1_deps)
 
 # ---- Executable ----
 add_executable(search_engine_stage1 src/main.cpp)
 target_link_libraries(search_engine_stage1 PRIVATE stage1_core)
+# Lets main.cpp find shared/ and its own data/ directory regardless of the
+# working directory it is launched from (same pattern as the tests' own
+# STAGE1_SHARED_DIR, see tests/CMakeLists.txt).
+target_compile_definitions(search_engine_stage1 PRIVATE
+  STAGE1_SHARED_DIR="${CMAKE_SOURCE_DIR}/../shared"
+  STAGE1_DATA_DIR="${CMAKE_SOURCE_DIR}/data")
 
 # ---- Tests ----
 enable_testing()

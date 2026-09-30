@@ -13,7 +13,7 @@ test: build
 	ctest --preset $(PRESET)
 
 run: build
-	./build/$(PRESET)/search_engine_stage1
+	./build/$(PRESET)/search_engine_stage1 $(if $(ARGS),$(ARGS),pipeline 5)
 
 clean:
 	rm -rf build
