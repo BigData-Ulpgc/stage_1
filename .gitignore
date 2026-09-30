@@ -38,3 +38,7 @@ Thumbs.db
 # ---- Logs y temporales ----
 *.log
 *.tmp
+
+# ---- Datos generados por la implementación Java ----
+java/stage1/data/
+java/stage1/benchmarks/work/

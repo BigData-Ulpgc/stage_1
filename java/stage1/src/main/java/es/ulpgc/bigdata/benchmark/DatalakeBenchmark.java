@@ -1,11 +1,11 @@
 package es.ulpgc.bigdata.benchmark;
 
 import es.ulpgc.bigdata.benchmark.BenchmarkRunner.Scenario;
+import es.ulpgc.bigdata.config.AppConfig;
+import es.ulpgc.bigdata.config.DatalakeFactory;
 import es.ulpgc.bigdata.datalake.BookBasedDatalake;
 import es.ulpgc.bigdata.datalake.Datalake;
 import es.ulpgc.bigdata.datalake.DatalakeStats;
-import es.ulpgc.bigdata.datalake.RangeBasedDatalake;
-import es.ulpgc.bigdata.datalake.TimeBasedDatalake;
 import es.ulpgc.bigdata.model.BookLocation;
 import es.ulpgc.bigdata.model.RawBook;
 
@@ -50,12 +50,14 @@ public class DatalakeBenchmark {
     public record Structure(String name, Function<Path, Datalake> factory) {
     }
 
-    /** book, range y time; time con un reloj simulado (10 libros por hora), igual en cada repetición. */
+    /**
+     * Todas las estructuras de DatalakeFactory. "time" recibe un reloj simulado (10 libros por hora)
+     * nuevo en cada creación, así cada repetición es idéntica; las demás lo ignoran.
+     */
     public static List<Structure> defaultStructures() {
-        return List.of(
-                new Structure("book", BookBasedDatalake::new),
-                new Structure("range", RangeBasedDatalake::new),
-                new Structure("time", dir -> new TimeBasedDatalake(dir, SimulatedClock.tenBooksPerHour())));
+        return DatalakeFactory.NAMES.stream()
+                .map(name -> new Structure(name, dir -> DatalakeFactory.create(name, dir, SimulatedClock.tenBooksPerHour())))
+                .toList();
     }
 
     private final BenchmarkRunner runner;
@@ -365,16 +367,18 @@ public class DatalakeBenchmark {
     // ------------------------------------------------------------------
 
     /**
-     * Uso:  DatalakeBenchmark <datalake_book_con_los_libros> [carpeta_trabajo] [carpeta_resultados]
+     * Uso:  DatalakeBenchmark [datalake_book_con_los_libros]
      *   p. ej. data/datalake/book  (lo que dejó el pipeline, o sample_dataset/ en estructura book)
      * Sin argumentos usa 200 libros sintéticos de 300 KB.
+     * Carpetas de trabajo y resultados: AppConfig (benchmarks.dir).
      */
     public static void main(String[] args) {
+        AppConfig config = AppConfig.load();
         List<RawBook> books = args.length > 0
                 ? BenchmarkBooks.fromDatalake(new BookBasedDatalake(Path.of(args[0])))
                 : BenchmarkBooks.synthetic(200, 300, 1);
-        Path work = Path.of(args.length > 1 ? args[1] : "benchmarks/work/datalake");
-        Path results = Path.of(args.length > 2 ? args[2] : "benchmarks/results");
+        Path work = config.benchmarkWorkDir("datalake");
+        Path results = config.benchmarkResultsDir();
 
         System.out.println("Libros: " + books.size());
         DatalakeBenchmark benchmark = new DatalakeBenchmark(BenchmarkRunner.standard(), work, defaultStructures());

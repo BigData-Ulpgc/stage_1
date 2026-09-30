@@ -1,6 +1,7 @@
 package es.ulpgc.bigdata.benchmark;
 
 import es.ulpgc.bigdata.benchmark.BenchmarkRunner.Scenario;
+import es.ulpgc.bigdata.config.AppConfig;
 import es.ulpgc.bigdata.datamart.metadata.MetadataRepository;
 import es.ulpgc.bigdata.datamart.metadata.SqliteMetadataRepository;
 import es.ulpgc.bigdata.datamart.metadata.SqliteSchema;
@@ -278,10 +279,11 @@ public class MetadataBenchmark {
         }
         int max = sizes.stream().mapToInt(Integer::intValue).max().orElseThrow();
 
+        AppConfig config = AppConfig.load();
         MetadataBenchmark benchmark = new MetadataBenchmark(BenchmarkRunner.standard(),
-                Path.of("benchmarks/work/metadata"), defaultBackends(), DEFAULT_BATCH_SIZE, DEFAULT_QUERIES);
+                config.benchmarkWorkDir("metadata"), defaultBackends(), DEFAULT_BATCH_SIZE, DEFAULT_QUERIES);
         Map<String, List<BenchmarkRow>> results = benchmark.runAll(syntheticDataset(max), sizes);
-        writeResults(Path.of("benchmarks/results"), results);
+        writeResults(config.benchmarkResultsDir(), results);
         results.forEach((experiment, rows) -> System.out.println(experiment + ": " + rows.size() + " filas"));
     }
 }

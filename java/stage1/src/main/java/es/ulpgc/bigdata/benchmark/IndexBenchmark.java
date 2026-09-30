@@ -5,13 +5,13 @@ import com.mongodb.MongoClientSettings;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import es.ulpgc.bigdata.benchmark.BenchmarkRunner.Scenario;
+import es.ulpgc.bigdata.config.AppConfig;
+import es.ulpgc.bigdata.config.InvertedIndexFactory;
 import es.ulpgc.bigdata.datalake.BookBasedDatalake;
 import es.ulpgc.bigdata.datalake.DatalakeStats;
-import es.ulpgc.bigdata.datamart.index.HierarchicalFolderIndex;
 import es.ulpgc.bigdata.datamart.index.InMemoryInvertedIndex;
 import es.ulpgc.bigdata.datamart.index.InvertedIndex;
 import es.ulpgc.bigdata.datamart.index.MongoInvertedIndex;
-import es.ulpgc.bigdata.datamart.index.MonolithicJsonIndex;
 import es.ulpgc.bigdata.datamart.index.Tokenizer;
 import es.ulpgc.bigdata.model.RawBook;
 import es.ulpgc.bigdata.query.SearchService;
@@ -76,11 +76,15 @@ public class IndexBenchmark {
     public record Backend(String name, Function<Path, InvertedIndex> open) {
     }
 
-    /** monolithic -> <dir>/inverted_index.json ; hierarchical -> <dir>/inverted_index/ */
+    /**
+     * monolithic y hierarchical, creados por InvertedIndexFactory con la carpeta de datos
+     * apuntando a 'dir': las rutas de dentro (datamarts/inverted_index.json...) las decide AppConfig.
+     */
     public static List<Backend> fileBackends() {
-        return List.of(
-                new Backend("monolithic", dir -> new MonolithicJsonIndex(dir.resolve("inverted_index.json"))),
-                new Backend("hierarchical", dir -> new HierarchicalFolderIndex(dir.resolve("inverted_index"))));
+        AppConfig base = AppConfig.defaults();
+        return List.of("monolithic", "hierarchical").stream()
+                .map(name -> new Backend(name, dir -> InvertedIndexFactory.create(name, base.withDataDir(dir))))
+                .toList();
     }
 
     /** Mongo no usa la carpeta: siempre la misma colección, que freshIndex vacía. */
@@ -483,8 +487,8 @@ public class IndexBenchmark {
      * Uso:  IndexBenchmark [tamaños] [datalake_book]
      *   tamaños        separados por comas (por defecto 50,100,200; unos 10 min con mongo)
      *   datalake_book  libros reales ya descargados; sin él, libros sintéticos (Zipf)
-     * shared/ se busca en ../../shared (cambiar con -Dshared.dir=...).
-     * Mongo: variable MONGO_URI o mongodb://localhost:27017; si no responde, se salta.
+     * shared/, benchmarks/ y la dirección de Mongo salen de AppConfig. Si Mongo no responde, se salta.
+     * Mongo usa la base BENCH_DATABASE, nunca la del índice real.
      */
     public static void main(String[] args) {
         List<Integer> sizes = new ArrayList<>();
@@ -492,9 +496,9 @@ public class IndexBenchmark {
             sizes.add(Integer.parseInt(s.strip()));
         }
         int max = sizes.stream().mapToInt(Integer::intValue).max().orElseThrow();
-        Path shared = Path.of(System.getProperty("shared.dir", "../../shared"));
-        Tokenizer tokenizer = Tokenizer.fromStopwordsFile(shared.resolve("stopwords.txt"));
-        List<String> queries = readQueries(shared.resolve("queries.txt"));
+        AppConfig config = AppConfig.load();
+        Tokenizer tokenizer = Tokenizer.fromStopwordsFile(config.stopwordsFile());
+        List<String> queries = readQueries(config.queriesFile());
 
         List<RawBook> raw = args.length > 1
                 ? BenchmarkBooks.fromDatalake(new BookBasedDatalake(Path.of(args[1])))
@@ -503,19 +507,19 @@ public class IndexBenchmark {
         raw = null;                                                          // el texto ya no hace falta
 
         List<Backend> backends = new ArrayList<>(fileBackends());
-        String uri = System.getenv().getOrDefault("MONGO_URI", "mongodb://localhost:27017");
+        String uri = config.mongoUri();
         if (mongoAvailable(uri)) {
-            backends.add(mongoBackend(uri, BENCH_DATABASE, MongoInvertedIndex.DEFAULT_COLLECTION));
+            backends.add(mongoBackend(uri, BENCH_DATABASE, config.mongoCollection()));
         } else {
             System.out.println("AVISO: MongoDB no responde en " + uri + ": se mide sin mongo");
         }
 
         System.out.println("Libros tokenizados: " + dataset.size() + "  tamaños: " + sizes
                 + "  backends: " + backends.stream().map(Backend::name).toList());
-        IndexBenchmark benchmark = new IndexBenchmark(BenchmarkRunner.standard(), Path.of("benchmarks/work/index"),
+        IndexBenchmark benchmark = new IndexBenchmark(BenchmarkRunner.standard(), config.benchmarkWorkDir("index"),
                 backends, tokenizer, queries, DEFAULT_QUERY_ROUNDS);
         Map<String, List<BenchmarkRow>> results = benchmark.runAll(dataset, sizes);
-        writeResults(Path.of("benchmarks/results"), results);
+        writeResults(config.benchmarkResultsDir(), results);
         results.forEach((experiment, rows) -> System.out.println(experiment + ": " + rows.size() + " filas"));
     }
 }
