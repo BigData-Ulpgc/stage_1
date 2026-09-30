@@ -172,12 +172,21 @@ public class MongoInvertedIndex implements InvertedIndex {
     /**
      * Bytes que Mongo dice ocupar en disco para esta colección: datos (storageSize)
      * más índices (totalIndexSize). 0 si la colección no existe.
+     *
+     * Antes se pide un fsync: WiredTiger sólo pasa los datos al fichero de la colección
+     * en cada checkpoint (unos 60 s); justo después de escribir, storageSize aún sería
+     * el de la colección casi vacía.
      */
     @Override
     public long diskUsageBytes() {
         List<String> names = database.listCollectionNames().into(new ArrayList<>());
         if (!names.contains(collectionName)) {
             return 0;
+        }
+        try {
+            client.getDatabase("admin").runCommand(new Document("fsync", 1));
+        } catch (RuntimeException e) {
+            // Sin permisos para fsync (p. ej. un Mongo gestionado): el número puede ir retrasado.
         }
         Document stats = collection.aggregate(List.of(
                 new Document("$collStats", new Document("storageStats", new Document())))).first();
