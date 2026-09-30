@@ -17,6 +17,12 @@ namespace stage1 {
 // rule the moment two of them ran in the same process.
 void ensure_mongo_driver_initialized();
 
+// True if a MongoDB server responds to a ping at `uri` within its (short,
+// caller-controlled) serverSelectionTimeoutMS. Lets code skip Mongo-dependent
+// work gracefully -- e.g. a benchmark run without Docker/mongod available --
+// instead of waiting out the driver's default ~30s timeout or crashing.
+bool mongo_is_reachable(const std::string& uri = "mongodb://localhost:27017/?serverSelectionTimeoutMS=1000");
+
 // Writes the whole index into MongoDB (shared/SPEC.md section 6): database
 // "search_engine", collection "inverted_index", one document per term,
 // {"term": "...", "postings": [id1, id2, ...]}, with a unique index on `term`.

@@ -28,6 +28,17 @@ void ensure_mongo_driver_initialized() {
     static mongocxx::instance instance{};
 }
 
+bool mongo_is_reachable(const std::string& uri) {
+    ensure_mongo_driver_initialized();
+    try {
+        mongocxx::client client{mongocxx::uri{uri}};
+        client["admin"].run_command(make_document(kvp("ping", 1)));
+        return true;
+    } catch (const mongocxx::exception&) {
+        return false;
+    }
+}
+
 MongoIndexWriter::MongoIndexWriter(std::string uri) : uri_(std::move(uri)) { ensure_mongo_driver_initialized(); }
 
 void MongoIndexWriter::write(const InvertedIndex& index) {

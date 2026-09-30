@@ -68,7 +68,8 @@ add_library(stage1_core
   src/control_log.cpp
   src/book_id_list.cpp
   src/pipeline.cpp
-  src/benchmark.cpp)
+  src/benchmark.cpp
+  src/index_build_benchmark.cpp)
 target_link_libraries(stage1_core PUBLIC stage1_deps)
 
 # ---- Executable ----

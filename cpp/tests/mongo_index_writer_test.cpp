@@ -24,21 +24,10 @@ namespace {
 // already used for the real Gutenberg download test.
 constexpr const char* kTestUri = "mongodb://localhost:27017/?serverSelectionTimeoutMS=1000";
 
-bool mongo_is_reachable() {
-    stage1::ensure_mongo_driver_initialized();
-    try {
-        mongocxx::client client{mongocxx::uri{kTestUri}};
-        client["admin"].run_command(make_document(kvp("ping", 1)));
-        return true;
-    } catch (const mongocxx::exception&) {
-        return false;
-    }
-}
-
 }  // namespace
 
 TEST(MongoIndexWriter, WritesTermsAsDocumentsWithSortedPostings) {
-    if (!mongo_is_reachable()) {
+    if (!stage1::mongo_is_reachable(kTestUri)) {
         GTEST_SKIP() << "no MongoDB reachable at " << kTestUri << " (start it with `docker compose up -d`)";
     }
 
@@ -60,7 +49,7 @@ TEST(MongoIndexWriter, WritesTermsAsDocumentsWithSortedPostings) {
 }
 
 TEST(MongoIndexWriter, WritingAgainReplacesThePreviousContents) {
-    if (!mongo_is_reachable()) {
+    if (!stage1::mongo_is_reachable(kTestUri)) {
         GTEST_SKIP() << "no MongoDB reachable at " << kTestUri;
     }
 
@@ -86,4 +75,8 @@ TEST(MongoIndexWriter, UnreachableServerThrowsRuntimeError) {
     index.add_book(1, {"car"});
 
     EXPECT_THROW(writer.write(index), std::runtime_error);
+}
+
+TEST(MongoIsReachable, ReturnsFalseForAnUnreachableAddressWithoutThrowing) {
+    EXPECT_FALSE(stage1::mongo_is_reachable("mongodb://localhost:1/?serverSelectionTimeoutMS=500"));
 }

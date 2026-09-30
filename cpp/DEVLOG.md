@@ -1143,3 +1143,62 @@ called the binary with no arguments, which now just prints usage and exits 1. It
   build the full content, then write it once. A benchmark run produces at most a few dozen rows (5
   measured repetitions per structure per experiment), so there is no realistic case where building the
   string first would matter for memory.
+
+---
+
+## Entry 27 – First real experiment: index_build (2026-09-30)
+
+### What was done
+- `mongo_is_reachable(uri)` promoted from a test-only helper (Entry 21) to the library
+  (`mongo_index_writer.hpp`/`.cpp`): a quick ping with a short `serverSelectionTimeoutMS`, so code can
+  skip Mongo-dependent work gracefully instead of waiting out the driver's ~30s default timeout or
+  crashing. `mongo_index_writer_test.cpp` now calls this shared function instead of its own copy, and
+  gained its own direct test (`MongoIsReachable.ReturnsFalseForAnUnreachableAddressWithoutThrowing`).
+- `include/stage1/index_build_benchmark.hpp` + `src/index_build_benchmark.cpp`: `SampleBook` (an
+  already-downloaded, already-split book — id + body, no network involved) and
+  `benchmark_index_build(language, books, stopwords, output_dir)`, SPEC section 9's `index_build`
+  experiment. For each required structure — monolithic, hierarchical, and mongo only if
+  `mongo_is_reachable()` — it runs `measure_elapsed_ms`'s default 2+5 repetitions of "build a fresh
+  `InvertedIndex` from `books` and persist it through that structure's `IndexWriter`", and appends one
+  `BenchmarkResult` per measured run. Mongo unreachable is a silent skip, not a failure: the other two
+  structures still get benchmarked.
+- 3 tests (`tests/index_build_benchmark_test.cpp`) with a small in-memory corpus (no network, no
+  `sample_dataset/`, which does not exist in the repository yet — see below): five measured rows each
+  for monolithic/hierarchical with the right shape (language, experiment, dataset_size, metric, unit,
+  ascending repetition numbers, non-negative values), Mongo rows present or absent depending on whether
+  it happens to be reachable at test time, and the resulting monolithic JSON file re-read and checked
+  for correct content. Suite total: 120 tests.
+- **Known gap, not filled by this step:** `sample_dataset/` (mentioned in the root `README.md` and
+  required by SPEC section 9's own methodology: "las descargas de red se miden aparte... se parte de
+  los libros ya descargados en `sample_dataset/`") does not exist anywhere in the repository yet, in any
+  of the three languages. This function is deliberately corpus-agnostic (it takes `books` as a plain
+  parameter) so it does not need that decision made to be written and tested; wiring an actual CLI
+  command that loads real books from `sample_dataset/` (or, meanwhile, from an already-populated
+  `cpp/data/datalake/`) is separate follow-up work once the group settles on where that shared sample
+  lives.
+
+### Why
+- **`mongo_is_reachable` moved to the library instead of staying duplicated per test file.** A second
+  caller (this benchmark) needing the exact same check is precisely the point where a test-local helper
+  earns its place in `stage1_core` instead — the same threshold already crossed by `TempDir` (Entry 14)
+  and `FakeHttpClient`/`FakeClock` once a second test needed them, except this time the second caller is
+  production code, not another test.
+- **Mongo skipped, not required, for this experiment to produce results.** SPEC's own benchmark
+  methodology explicitly separates network-dependent setup from what is measured; requiring a live
+  MongoDB (via Docker or a local `mongod`) just to get *any* `index_build` numbers would make the
+  benchmark unusable on a machine without either, exactly this machine's situation today (no Docker).
+  The two required, always-available structures still produce full results.
+- **Each repetition rebuilds the `InvertedIndex` from scratch (tokenize + `add_book` for every book),
+  not just the `write()` call.** SPEC/the course PDF describe `index_build` as "time required to build
+  the inverted index from a given dataset" — the whole path from raw text to a persisted structure, not
+  only its final write step. Re-tokenizing on every repetition costs little compared to persisting (the
+  part that actually differs across the three structures) and keeps each measured run fully
+  self-contained, with nothing carried over between repetitions that could quietly bias later ones.
+- **`benchmark_index_build` takes `books` as a plain `std::vector<SampleBook>` parameter, with no
+  opinion on where they came from.** Exactly the same reasoning as `Datalake`/`IndexWriter` being
+  interfaces the pipeline depends on rather than concrete choices: this function can be tested today
+  with a two-book fixture, and pointed at `sample_dataset/`, at `cpp/data/datalake/`, or at anything
+  else later, without changing a line of it.
+- **Each structure writes under its own subdirectory of `output_dir`** (`monolithic/`, `hierarchical/`),
+  so a single benchmark run's three structures never collide on the same path, and the output can be
+  inspected structure by structure afterward.
