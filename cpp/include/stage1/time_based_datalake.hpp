@@ -5,6 +5,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "stage1/datalake.hpp"
 
@@ -48,6 +49,13 @@ public:
     // it must remember internally -- see written_ below. A fresh instance
     // (e.g. after the program restarts) knows nothing until it writes again.
     std::optional<BookLocation> locate(int book_id) const override;
+
+    // Unlike locate(), this walks the real directory tree (every YYYYMMDD,
+    // then every HH inside it), so it needs no memory of past writes and
+    // works from a brand new instance too -- see DEVLOG entry 32 for how
+    // this differs from the Java module's own locate(), which takes the
+    // opposite approach (always scan, never remember).
+    std::vector<int> list_book_ids() const override;
 
 private:
     std::filesystem::path root_;

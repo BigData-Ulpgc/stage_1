@@ -74,7 +74,8 @@ add_library(stage1_core
   src/query_list.cpp
   src/index_query_benchmark.cpp
   src/datalake_write_benchmark.cpp
-  src/datalake_lookup_benchmark.cpp)
+  src/datalake_lookup_benchmark.cpp
+  src/datalake_incremental_benchmark.cpp)
 target_link_libraries(stage1_core PUBLIC stage1_deps)
 
 # ---- Executable ----

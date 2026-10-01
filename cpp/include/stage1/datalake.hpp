@@ -2,6 +2,7 @@
 
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace stage1 {
 
@@ -34,6 +35,16 @@ public:
     // that internally -- there is no way to compute "what hour was this
     // written in" from the id alone.
     virtual std::optional<BookLocation> locate(int book_id) const = 0;
+
+    // Every book id this Datalake currently has both a body and a header
+    // file for, found by walking its own directory structure -- no external
+    // bookkeeping needed (unlike locate() for the time layout, this does not
+    // depend on remembering anything: it looks at what is really on disk, so
+    // it works even from a brand new instance). Order is unspecified.
+    // SPEC section 9's "datalake_incremental" experiment measures how
+    // expensive this scan is for each layout, which is also what makes it
+    // meaningfully different per layout, unlike locate()'s book/range case.
+    virtual std::vector<int> list_book_ids() const = 0;
 };
 
 }  // namespace stage1

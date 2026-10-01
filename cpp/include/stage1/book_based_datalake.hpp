@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <optional>
+#include <vector>
 
 #include "stage1/datalake.hpp"
 
@@ -16,6 +17,7 @@ public:
 
     BookLocation write(int book_id, const std::string& header, const std::string& body) override;
     std::optional<BookLocation> locate(int book_id) const override;
+    std::vector<int> list_book_ids() const override;
 
 private:
     // The id's paths, computed (not necessarily written yet).

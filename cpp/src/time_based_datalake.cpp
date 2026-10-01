@@ -49,4 +49,22 @@ std::optional<BookLocation> TimeBasedDatalake::locate(int book_id) const {
     return it->second;
 }
 
+std::vector<int> TimeBasedDatalake::list_book_ids() const {
+    std::vector<int> ids;
+    if (!std::filesystem::exists(root_)) {
+        return ids;
+    }
+    for (const auto& day_dir : std::filesystem::directory_iterator(root_)) {
+        if (!day_dir.is_directory()) {
+            continue;
+        }
+        for (const auto& hour_dir : std::filesystem::directory_iterator(day_dir.path())) {
+            if (hour_dir.is_directory()) {
+                collect_body_header_pairs(hour_dir.path(), ids);
+            }
+        }
+    }
+    return ids;
+}
+
 }  // namespace stage1

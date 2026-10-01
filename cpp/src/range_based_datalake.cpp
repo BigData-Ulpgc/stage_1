@@ -46,4 +46,17 @@ std::optional<BookLocation> RangeBasedDatalake::locate(int book_id) const {
     return location;
 }
 
+std::vector<int> RangeBasedDatalake::list_book_ids() const {
+    std::vector<int> ids;
+    if (!std::filesystem::exists(root_)) {
+        return ids;
+    }
+    for (const auto& range_dir : std::filesystem::directory_iterator(root_)) {
+        if (range_dir.is_directory()) {
+            collect_body_header_pairs(range_dir.path(), ids);
+        }
+    }
+    return ids;
+}
+
 }  // namespace stage1

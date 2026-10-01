@@ -1,0 +1,16 @@
+language,experiment,structure,dataset_size,repetition,metric,value,unit
+cpp,datalake_incremental,book,15,1,elapsed,0.061,ms
+cpp,datalake_incremental,book,15,2,elapsed,0.060,ms
+cpp,datalake_incremental,book,15,3,elapsed,0.066,ms
+cpp,datalake_incremental,book,15,4,elapsed,0.067,ms
+cpp,datalake_incremental,book,15,5,elapsed,0.073,ms
+cpp,datalake_incremental,range,15,1,elapsed,0.093,ms
+cpp,datalake_incremental,range,15,2,elapsed,0.092,ms
+cpp,datalake_incremental,range,15,3,elapsed,0.109,ms
+cpp,datalake_incremental,range,15,4,elapsed,0.135,ms
+cpp,datalake_incremental,range,15,5,elapsed,0.114,ms
+cpp,datalake_incremental,time,15,1,elapsed,0.077,ms
+cpp,datalake_incremental,time,15,2,elapsed,0.076,ms
+cpp,datalake_incremental,time,15,3,elapsed,0.075,ms
+cpp,datalake_incremental,time,15,4,elapsed,0.073,ms
+cpp,datalake_incremental,time,15,5,elapsed,0.072,ms

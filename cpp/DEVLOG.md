@@ -1443,3 +1443,81 @@ the header and here, rather than left to look like "time turned out to be the fa
 - **Writing happens untimed, before the measured block.** This experiment is specifically about lookup
   cost, not write cost (already covered by `datalake_write`, Entry 30); mixing the two into one timed
   block would make this experiment redundant with that one instead of measuring something new.
+
+---
+
+## Entry 32 – Cross-language comparison: how each language solved TimeBasedDatalake's lookup (2026-10-01)
+
+### What was found
+Comparing `locate()`'s implementation across the three language modules, each independently hit the
+exact same design problem flagged in Entry 31 (a time-based path cannot be computed from the id alone)
+and solved it differently:
+- **C++ (this module):** an in-memory `std::unordered_map<int, BookLocation>` kept by `TimeBasedDatalake`
+  itself, populated by `write()`. Fast (O(1)), but only ever finds books `write()`'s own instance has
+  seen — a fresh instance (e.g. after a restart) finds nothing, even for files genuinely on disk.
+- **Java:** no memory at all. `TimeBasedDatalake.locate()` walks every `YYYYMMDD/HH` subdirectory
+  (newest first) and checks each one for the id's files, giving up only once every folder has been
+  tried. Its own comment states the reasoning in the same words this project's DEVLOG already used:
+  *"La ruta NO se puede calcular a partir del id, así que locate tiene que buscar."* Survives a restart
+  (nothing to forget), at the cost of scanning more folders as the dataset grows.
+- **Python:** no `locate`/lookup of any kind yet for any layout, only the write path
+  (`save_time_based`). `datalake_lookup` has not been implemented there yet.
+
+### Why this is worth recording
+Three independent implementations of the same SPEC requirement arrived at the same conclusion about
+*why* `time` is the hard case, and then made genuinely different, opposite-tradeoff choices for how to
+handle it — memory-bound-but-amnesiac (C++) versus disk-scan-but-durable (Java). That contrast is
+exactly the kind of cross-language design discussion the final report's "design decisions" and
+"benchmarks and results" sections are supposed to contain, and it was found by reading a teammate's
+code after a direct question, not by planning for it in advance — worth remembering to check teammates'
+equivalent code when a design problem feels like it should be universal, not C++-specific.
+
+---
+
+## Entry 33 – datalake_incremental: Datalake gets list_book_ids() too (2026-10-01)
+
+### What was done
+- `include/stage1/file_io.hpp`/`.cpp`: `collect_body_header_pairs(dir, ids)`, a shared helper that
+  scans one directory for `"<id>.body.txt"` files with a matching `"<id>.header.txt"` sibling, parsing
+  the id with `std::from_chars` (same style as `ControlLog`/`load_book_ids`). Used by both
+  `RangeBasedDatalake` and `TimeBasedDatalake`, which only differ in how many directory levels they
+  walk before reaching files named this way.
+- `Datalake` interface gained `virtual std::vector<int> list_book_ids() const = 0;`, implemented by all
+  three layouts by walking their own directory tree (never by remembering past writes — unlike
+  `locate()` for `time`, Entry 31/32, this needs no bookkeeping and works from a brand new instance,
+  confirmed by a dedicated test for each layout).
+- `include/stage1/datalake_incremental_benchmark.hpp` + `src/datalake_incremental_benchmark.cpp`:
+  `benchmark_datalake_incremental(language, books, output_dir)`, SPEC section 9's `datalake_incremental`
+  experiment. **Methodology deliberately mirrors the Java module's own `DatalakeBenchmark.incremental`**
+  (found by reading its code, see Entry 32): the most recent 10% of `books` (at least one) are treated
+  as "fresh", the rest as already "known"; both get written (untimed setup), then each layout is timed
+  calling `list_book_ids()` and subtracting the known ids, `measure_elapsed_ms`'s default 2+5
+  repetitions. Every repetition's detected set is checked against the real fresh ids and throws if it
+  ever disagrees, the same correctness guard Java's version has.
+- `main.cpp`'s `benchmark` command gained `datalake_incremental`.
+- 7 new tests (3 `list_book_ids()` tests across the three datalake test files, 2 for the benchmark
+  itself, plus the two `list_book_ids` tests). Suite total: 144 tests.
+- Ran it for real against the 15 downloaded books (10 cmd correctness checks all passed silently, no
+  thrown mismatch); all three layouts came out close and sub-millisecond at this small scale.
+
+### Why
+- **Matching Java's 90/10 methodology instead of inventing our own.** SPEC section 9 only names the
+  experiment; it does not fix how "new" books are simulated. Reading a teammate's already-working
+  implementation and reusing its exact split (rather than, say, picking a different percentage or
+  simulating "new" differently) is what makes the resulting CSVs directly comparable across languages
+  in the report, which is the whole stated purpose of the shared CSV format in the first place.
+- **`list_book_ids()` added to `Datalake`, not computed by reading the control layer's own files.**
+  SPEC section 3 frames incremental detection as a property of the datalake *layout itself*
+  ("later stages... can focus only on the most recent folders instead of scanning the entire
+  datalake"), independent of whatever external bookkeeping a control layer happens to keep; using
+  `ControlLog` here instead would have measured `ControlLog`'s hash-set performance (already
+  known-cheap, Entry 23) rather than anything specific to `book`/`range`/`time`, and would have given
+  every layout an identical, uninteresting result.
+- **`collect_body_header_pairs` factored out rather than duplicated between `range` and `time`.** Both
+  layouts store files the same way (`"<id>.body.txt"`/`"<id>.header.txt"` directly inside a folder);
+  only how many folders deep they walk to reach one differs. Sharing the filename-parsing logic means a
+  future bug fix (e.g. a malformed filename edge case) only needs to happen once.
+- **The detected set is checked for correctness on every repetition, not just assumed.** A subtly wrong
+  `list_book_ids()` (e.g. missing a layout's deepest directory level) would otherwise produce a
+  plausible-looking but meaningless timing number instead of a visible failure — the same reasoning
+  Java's own `require(...)` check already applied.

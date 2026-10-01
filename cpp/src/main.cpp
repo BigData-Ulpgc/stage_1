@@ -12,6 +12,7 @@
 #include "stage1/book_id_list.hpp"
 #include "stage1/control_log.hpp"
 #include "stage1/curl_http_client.hpp"
+#include "stage1/datalake_incremental_benchmark.hpp"
 #include "stage1/datalake_lookup_benchmark.hpp"
 #include "stage1/datalake_write_benchmark.hpp"
 #include "stage1/file_io.hpp"
@@ -39,7 +40,7 @@ const std::filesystem::path kBenchmarksDir = STAGE1_BENCHMARKS_DIR;
 void print_usage() {
     std::cerr << "usage: search_engine_stage1 pipeline <N>\n"
                  "       search_engine_stage1 benchmark "
-                 "<datalake_write|datalake_lookup|index_build|index_query>\n";
+                 "<datalake_write|datalake_lookup|datalake_incremental|index_build|index_query>\n";
 }
 
 void describe(const stage1::ControlDecision& decision) {
@@ -128,6 +129,8 @@ int run_benchmark(const std::string& experiment) {
         results = stage1::benchmark_datalake_write("cpp", books, work_dir);
     } else if (experiment == "datalake_lookup") {
         results = stage1::benchmark_datalake_lookup("cpp", books, work_dir);
+    } else if (experiment == "datalake_incremental") {
+        results = stage1::benchmark_datalake_incremental("cpp", books, work_dir);
     } else if (experiment == "index_build") {
         results = stage1::benchmark_index_build("cpp", books, stopwords, work_dir);
     } else if (experiment == "index_query") {

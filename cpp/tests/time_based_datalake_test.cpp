@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <ctime>
+#include <algorithm>
 #include <fstream>
 #include <sstream>
 
@@ -106,4 +107,20 @@ TEST(TimeBasedDatalake, LocateReturnsNulloptFromAFreshInstanceEvenIfTheFileExist
     // landed without being told when it was written.
     TimeBasedDatalake reopened(root.path(), clock);
     EXPECT_FALSE(reopened.locate(1342).has_value());
+}
+
+TEST(TimeBasedDatalake, ListBookIdsFindsEveryWrittenBookEvenFromAFreshInstance) {
+    TempDir root("stage1_time_based_datalake_test_list");
+    FakeClock morning_clock(make_local_time(2026, 9, 5, 8));
+    FakeClock evening_clock(make_local_time(2026, 9, 5, 20));
+    TimeBasedDatalake(root.path(), morning_clock).write(1, "h", "b");
+    TimeBasedDatalake(root.path(), evening_clock).write(2, "h", "b");
+
+    // Unlike locate(), a brand new instance must still find both -- there is
+    // nothing to remember, it is a real directory walk.
+    TimeBasedDatalake reopened(root.path(), morning_clock);
+    auto ids = reopened.list_book_ids();
+    std::sort(ids.begin(), ids.end());
+
+    EXPECT_EQ(ids, (std::vector<int>{1, 2}));
 }

@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <fstream>
 #include <sstream>
 
@@ -71,4 +72,23 @@ TEST(BookBasedDatalake, LocateReturnsNulloptForAnUnwrittenBook) {
     BookBasedDatalake datalake(root.path());
 
     EXPECT_FALSE(datalake.locate(404).has_value());
+}
+
+TEST(BookBasedDatalake, ListBookIdsFindsEveryWrittenBook) {
+    TempDir root("stage1_book_based_datalake_test_list");
+    BookBasedDatalake datalake(root.path());
+    datalake.write(1342, "h", "b");
+    datalake.write(84, "h", "b");
+
+    auto ids = datalake.list_book_ids();
+    std::sort(ids.begin(), ids.end());
+
+    EXPECT_EQ(ids, (std::vector<int>{84, 1342}));
+}
+
+TEST(BookBasedDatalake, ListBookIdsIsEmptyForAFreshRoot) {
+    TempDir root("stage1_book_based_datalake_test_list_empty");
+    BookBasedDatalake datalake(root.path());
+
+    EXPECT_TRUE(datalake.list_book_ids().empty());
 }

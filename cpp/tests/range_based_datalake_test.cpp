@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <fstream>
 #include <sstream>
 
@@ -91,4 +92,16 @@ TEST(RangeBasedDatalake, LocateReturnsNulloptForAnUnwrittenBook) {
     RangeBasedDatalake datalake(root.path());
 
     EXPECT_FALSE(datalake.locate(404).has_value());
+}
+
+TEST(RangeBasedDatalake, ListBookIdsFindsEveryWrittenBookAcrossRanges) {
+    TempDir root("stage1_range_based_datalake_test_list");
+    RangeBasedDatalake datalake(root.path());
+    datalake.write(1342, "h", "b");
+    datalake.write(999, "h", "b");
+
+    auto ids = datalake.list_book_ids();
+    std::sort(ids.begin(), ids.end());
+
+    EXPECT_EQ(ids, (std::vector<int>{999, 1342}));
 }
