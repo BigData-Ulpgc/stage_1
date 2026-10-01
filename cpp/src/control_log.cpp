@@ -1,5 +1,6 @@
 #include "stage1/control_log.hpp"
 
+#include <algorithm>
 #include <charconv>
 #include <fstream>
 #include <stdexcept>
@@ -31,6 +32,12 @@ ControlLog::ControlLog(std::filesystem::path path) : path_(std::move(path)) {
 }
 
 bool ControlLog::contains(int book_id) const { return recorded_.count(book_id) > 0; }
+
+std::vector<int> ControlLog::ids() const {
+    std::vector<int> sorted(recorded_.begin(), recorded_.end());
+    std::sort(sorted.begin(), sorted.end());  // unordered_set iteration order is unspecified
+    return sorted;
+}
 
 void ControlLog::mark(int book_id) {
     if (recorded_.count(book_id) > 0) {

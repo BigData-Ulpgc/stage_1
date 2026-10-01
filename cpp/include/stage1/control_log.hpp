@@ -19,6 +19,11 @@ public:
     // True if `book_id` has already been recorded.
     bool contains(int book_id) const;
 
+    // Every recorded id, ascending (each once). Includes ids recorded in a
+    // previous run that are no longer in shared/book_ids.txt: this reports
+    // what the log holds, not what the current dataset expects.
+    std::vector<int> ids() const;
+
     // Appends `book_id` to the log, on disk and in memory. A no-op if it was
     // already recorded, so calling it more than once for the same id never
     // duplicates a line (SPEC section 8: "recuperación sin pérdidas ni

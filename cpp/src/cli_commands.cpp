@@ -5,8 +5,11 @@
 // from SearchEngine.java, which does the equivalent wiring.
 #include "stage1/cli_commands.hpp"
 
+#include <algorithm>
 #include <filesystem>
 #include <iostream>
+#include <iterator>
+#include <string>
 #include <vector>
 
 #include "stage1/benchmark.hpp"
@@ -25,6 +28,7 @@
 #include "stage1/index_disk_benchmark.hpp"
 #include "stage1/index_memory_benchmark.hpp"
 #include "stage1/index_query_benchmark.hpp"
+#include "stage1/index_readers.hpp"
 #include "stage1/index_update_benchmark.hpp"
 #include "stage1/inverted_index.hpp"
 #include "stage1/metadata_insert_benchmark.hpp"
@@ -32,6 +36,7 @@
 #include "stage1/metadata_store.hpp"
 #include "stage1/monolithic_index_writer.hpp"
 #include "stage1/pipeline.hpp"
+#include "stage1/query_engine.hpp"
 #include "stage1/query_list.hpp"
 #include "stage1/sample_books.hpp"
 #include "stage1/stopwords.hpp"
@@ -47,6 +52,11 @@ namespace {
 const std::filesystem::path kSharedDir = STAGE1_SHARED_DIR;
 const std::filesystem::path kDataDir = STAGE1_DATA_DIR;
 const std::filesystem::path kBenchmarksDir = STAGE1_BENCHMARKS_DIR;
+
+// Written by `pipeline` (MonolithicIndexWriter), read back by `search`
+// (monolithic_postings_fetcher): one constant so the two can never drift
+// apart. Swapping pipeline's index format means swapping search's reader too.
+const std::filesystem::path kIndexPath = kDataDir / "datamarts" / "inverted_index.json";
 
 void describe(const ControlDecision& decision) {
     switch (decision.action) {
@@ -80,7 +90,7 @@ int run_pipeline_command(int steps) {
     GutenbergSource source(http_client);
     BookBasedDatalake datalake(kDataDir / "datalake" / "book");
     MetadataStore metadata(kDataDir / "datamarts" / "metadata.db");
-    MonolithicIndexWriter index_writer(kDataDir / "datamarts" / "inverted_index.json");
+    MonolithicIndexWriter index_writer(kIndexPath);
 
     // Rebuilt from scratch on every run by re-reading each already-indexed
     // book's body: this stage has no reader for the on-disk index formats
@@ -105,6 +115,69 @@ int run_pipeline_command(int steps) {
             break;  // dataset fully processed: no point looping further
         }
     }
+
+    return 0;
+}
+
+int run_search_command(const std::string& query) {
+    // Same tokenizer and stopwords as indexing (SPEC section 7), otherwise a
+    // query term could never match how the books' terms were stored.
+    const auto stopwords = load_stopwords(kSharedDir / "stopwords.txt");
+    const auto terms = tokenize(query, stopwords);
+    if (terms.empty()) {
+        std::cout << "[search] no searchable terms in \"" << query << "\" (empty, or only stopwords)\n";
+        return 0;
+    }
+
+    if (!std::filesystem::exists(kIndexPath)) {
+        std::cerr << "[search] no index found at " << kIndexPath << " -- run `pipeline <N>` first to build one.\n";
+        return 1;
+    }
+    const auto postings = monolithic_postings_fetcher(kIndexPath);
+    const auto book_ids = query_and(postings, terms);
+
+    std::cout << book_ids.size() << " book(s) matching all of:";
+    for (const auto& term : terms) {
+        std::cout << " " << term;
+    }
+    std::cout << "\n";
+
+    MetadataStore metadata(kDataDir / "datamarts" / "metadata.db");
+    for (int book_id : book_ids) {
+        const auto stored = metadata.find_by_id(book_id);
+        const std::string title = stored && stored->title ? *stored->title : "(no title in metadata)";
+        std::cout << "  " << book_id << "  " << title << "\n";
+    }
+
+    return 0;
+}
+
+int run_status_command() {
+    const auto candidate_ids = load_book_ids(kSharedDir / "book_ids.txt");
+    const ControlLog downloaded(kDataDir / "control" / "downloaded_books.txt");
+    const ControlLog indexed(kDataDir / "control" / "indexed_books.txt");
+
+    const auto downloaded_ids = downloaded.ids();
+    const auto indexed_ids = indexed.ids();
+
+    // Downloaded but not indexed yet. Both lists come out of ids() already
+    // ascending, which std::set_difference requires.
+    std::vector<int> pending;
+    std::set_difference(downloaded_ids.begin(), downloaded_ids.end(), indexed_ids.begin(), indexed_ids.end(),
+                        std::back_inserter(pending));
+
+    std::cout << "dataset:    " << candidate_ids.size() << " book id(s) in shared/book_ids.txt\n"
+              << "downloaded: " << downloaded_ids.size() << "\n"
+              << "indexed:    " << indexed_ids.size() << "\n"
+              << "pending:    " << pending.size();
+    if (!pending.empty()) {
+        std::cout << " (downloaded, not indexed yet:";
+        for (int book_id : pending) {
+            std::cout << " " << book_id;
+        }
+        std::cout << ")";
+    }
+    std::cout << "\n";
 
     return 0;
 }

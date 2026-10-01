@@ -4,6 +4,7 @@
 // Main.java and SearchEngine.java, which does the equivalent wiring.
 #include <cstdlib>
 #include <iostream>
+#include <string>
 #include <string_view>
 
 #include "stage1/cli_commands.hpp"
@@ -12,6 +13,8 @@ namespace {
 
 void print_usage() {
     std::cerr << "usage: search_engine_stage1 pipeline <N>\n"
+                 "       search_engine_stage1 search <words...>\n"
+                 "       search_engine_stage1 status\n"
                  "       search_engine_stage1 benchmark "
                  "<datalake_write|datalake_lookup|datalake_incremental|datalake_recovery|"
                  "datalake_storage|metadata_insert|metadata_query|index_build|index_query|"
@@ -30,6 +33,21 @@ int main(int argc, char** argv) {
                 return 1;
             }
             return stage1::run_pipeline_command(static_cast<int>(steps));
+        }
+
+        if (argc >= 3 && std::string_view(argv[1]) == "search") {
+            // Every word after "search" is part of the query, so both
+            // `search whale island` and `search "whale island"` work.
+            std::string query = argv[2];
+            for (int i = 3; i < argc; ++i) {
+                query += ' ';
+                query += argv[i];
+            }
+            return stage1::run_search_command(query);
+        }
+
+        if (argc == 2 && std::string_view(argv[1]) == "status") {
+            return stage1::run_status_command();
         }
 
         if (argc == 3 && std::string_view(argv[1]) == "benchmark") {

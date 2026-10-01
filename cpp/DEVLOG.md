@@ -2064,3 +2064,85 @@ C++ equivalent of Java's tested assembly remains `run_pipeline_step` in `stage1_
 benchmark dispatch. Making it testable would mean passing the three directories in as parameters so the
 file could move into `stage1_core`, a possible later improvement, deliberately left out of a
 behavior-preserving split.
+
+## Entry 44 – `search` and `status` commands: querying the persisted index from the binary (2026-10-01)
+
+### What was done
+- `include/stage1/index_readers.hpp` + `src/index_readers.cpp` (in `stage1_core`):
+  `monolithic_postings_fetcher(path)` and `hierarchical_postings_fetcher(root)`, the readers that used
+  to be private helpers inside `index_query_benchmark.cpp` (Entry 28), moved out unchanged so `search`
+  can reuse them. Each returns the postings-fetcher function `query_and` already accepts, the same shape
+  as the existing `mongo_postings_fetcher`. One behavior change: the monolithic reader now throws
+  `cannot open index file for reading: <path>` when the file is missing, instead of letting
+  `nlohmann::json::parse` fail with an unhelpful "unexpected end of input". `index_query_benchmark.cpp`
+  now calls the shared readers.
+- `ControlLog::ids()`: every recorded id, ascending, each once (a sorted copy of the internal
+  `unordered_set`, whose iteration order is unspecified). Until now the class could only answer
+  `contains(id)`, which is enough for the pipeline but not for counting or listing.
+- `search_engine_stage1 status` (`run_status_command`): dataset size (`shared/book_ids.txt`), how many
+  ids the control logs record as downloaded and as indexed, and which are downloaded but not indexed yet
+  (`std::set_difference` over the two sorted `ids()` lists). It counts what the logs hold, like Java's
+  `control.downloaded().size()`, not only ids still in the current dataset.
+- `search_engine_stage1 search <words...>` (`run_search_command`): tokenizes the query with the same
+  tokenizer and stopwords as indexing, runs `query_and` against the monolithic index `pipeline` wrote
+  (read with `monolithic_postings_fetcher`, never by re-reading the books), and prints each match's id
+  plus its title from `MetadataStore`. `main.cpp` joins every word after `search`, so
+  `search whale island` and `search "whale island"` are the same query.
+- `kIndexPath` in `cli_commands.cpp`: one constant for `data/datamarts/inverted_index.json`, used by
+  both `pipeline`'s `MonolithicIndexWriter` and `search`'s reader, so they cannot drift apart.
+- Tests: 4 for the readers (each one reads back what its writer wrote, unknown term gives empty
+  postings, missing monolithic file throws, and AND queries through both readers equal the in-memory
+  index's answers) and 1 for `ids()` (plus an `ids().empty()` check on a fresh log). Suite total: 172.
+
+### Verification (real data, 15 books)
+- `status` with nothing downloaded: 0 / 0 / 0. After `pipeline 5` (an odd step count, chosen on
+  purpose): downloaded 3, indexed 2, pending 1 (book 11). The next `pipeline` run's first action was
+  `indexed book 11`, so it resumed the pending work before downloading anything new. It then finished
+  all 15 books in ~18 s. Final `status`: 15 / 15 / 0.
+- `search` on every query in `shared/queries.txt`. Matches: adventure 9, island 9, love 13, ship sea 9,
+  king queen 8, monster creature 6, whale 4, detective crime 4, war peace 9, mother father 11.
+- **Independent cross-check: 10/10 identical.** For each query, a shell script listed the books whose
+  `body.txt` contains every term as a whole `[A-Za-z0-9]+` run, case-insensitively (SPEC section 5's
+  token definition), using plain `grep` instead of any project code. Its result matched `search`'s
+  exactly for all 10 queries. One pitfall worth recording for anyone repeating this: in this shell
+  `grep` resolved to `ugrep -I`, which silently skips files it considers binary, and under `LC_ALL=C`
+  some books' UTF-8 curly quotes made them look binary (0 hits for `love`). `/usr/bin/grep -a` was used
+  instead. A `grep -w` check would also have been subtly wrong: it treats `_` as part of a word, while
+  the tokenizer splits on it (Gutenberg marks italics as `_word_`).
+- Tokenization of the query itself: `search "The WHALE, and the Island!"` searches `whale island`
+  (case, punctuation and stopwords handled exactly like the books). A query of only stopwords prints a
+  "no searchable terms" message and exits 0. A missing index prints "run `pipeline <N>` first" and
+  exits 1. `search` with no words prints usage.
+
+### Why
+- **Querying is graded, and the binary could not query.** The assignment's evaluation criteria give 30%
+  to "proper functioning of downloading, indexing, and querying modules". `query_and` existed and was
+  tested (Entry 22), but only the tests and the `index_query` benchmark could reach it. Someone running
+  this module's binary could download and index, but not search. Java already had `search`/`status`.
+- **Read the persisted index, don't rebuild it.** `pipeline` rebuilds its in-memory index from the
+  books' bodies at startup (Entry 25's known cost). Doing the same for every single `search` would
+  re-tokenize the whole collection per query. Reading the monolithic file instead also shows that what
+  the pipeline writes to the datamart is actually usable for search, which is the point of a datamart.
+  The readers already existed (Entry 28), so the cost was moving them, not writing new parsing code.
+- **Readers in `stage1_core`, commands in the executable.** The readers take their path as a parameter,
+  so they are reusable and testable with a `TempDir`, unlike `cli_commands.cpp`, which reads
+  compile-time directory macros (Entry 43).
+- **`ids()` returns a sorted copy, not a reference to the internal set.** Callers cannot modify the
+  log behind `mark()`'s back, the internal container stays an implementation detail, and the sort makes
+  the output deterministic and directly usable by `std::set_difference`, which requires sorted input.
+- **Exit codes distinguish "nothing to search" (0) from "cannot search" (1)**, so a script chaining
+  commands can tell a valid empty result from a missing index.
+- **`status` stays read-only in intent.** Its only side effect is `ControlLog` creating an empty
+  `data/control/` the first time, documented in the header rather than worked around.
+
+### Known gaps, deliberately left
+- `search` only reads the **monolithic** index, because that is what `pipeline` writes (Entry 25's
+  default). Switching `pipeline` to another `IndexWriter` means switching `search`'s reader too, which is
+  why both sit next to `kIndexPath`'s comment.
+- Cosmetic: the header line shows the tokenized terms as typed, so `search whale whale island` prints
+  `whale whale island` (the result itself is right: `query_and` de-duplicates).
+- `cli_commands.cpp` is still untested as a whole (Entry 43). The new logic it calls (`ids()`, the
+  readers, `query_and`) is unit-tested, and the commands were verified by the real run above.
+- The root `README.md`'s C/C++ section is still the group's original template (`cd c/`, "GCC and
+  Make", the binary run with no arguments). It is a shared group file, so fixing it is left to a group
+  decision rather than changed unilaterally from this module.

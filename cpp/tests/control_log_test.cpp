@@ -25,6 +25,7 @@ TEST(ControlLog, StartsEmptyWhenTheFileDoesNotExistYet) {
     ControlLog log(root.path() / "downloaded_books.txt");
 
     EXPECT_FALSE(log.contains(1342));
+    EXPECT_TRUE(log.ids().empty());
 }
 
 TEST(ControlLog, MarkRecordsAnIdOnDiskAndInMemory) {
@@ -75,6 +76,20 @@ TEST(ControlLog, MultipleIdsAreAllRecordedAndSurviveAReload) {
     EXPECT_TRUE(reloaded.contains(1342));
     EXPECT_TRUE(reloaded.contains(999));
     EXPECT_FALSE(reloaded.contains(6));
+}
+
+TEST(ControlLog, IdsListsEveryRecordedIdOnceInAscendingOrder) {
+    TempDir root("stage1_control_log_test_ids");
+    const auto path = root.path() / "downloaded_books.txt";
+    ControlLog log(path);
+
+    log.mark(1342);
+    log.mark(5);
+    log.mark(999);
+    log.mark(5);  // a repeated mark must not show up twice
+
+    EXPECT_EQ(log.ids(), (std::vector<int>{5, 999, 1342}));
+    EXPECT_EQ(ControlLog(path).ids(), (std::vector<int>{5, 999, 1342}));  // same after a reload
 }
 
 TEST(ControlLog, IgnoresBlankLinesWhenLoadingAnExistingFile) {

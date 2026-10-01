@@ -18,6 +18,7 @@ add_executable(stage1_tests
   hierarchical_index_writer_test.cpp
   mongo_index_writer_test.cpp
   query_engine_test.cpp
+  index_readers_test.cpp
   control_log_test.cpp
   book_id_list_test.cpp
   pipeline_test.cpp

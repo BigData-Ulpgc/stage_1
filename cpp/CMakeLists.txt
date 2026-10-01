@@ -65,6 +65,7 @@ add_library(stage1_core
   src/hierarchical_index_writer.cpp
   src/mongo_index_writer.cpp
   src/query_engine.cpp
+  src/index_readers.cpp
   src/control_log.cpp
   src/book_id_list.cpp
   src/pipeline.cpp
