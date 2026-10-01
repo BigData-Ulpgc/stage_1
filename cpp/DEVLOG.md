@@ -1521,3 +1521,60 @@ equivalent code when a design problem feels like it should be universal, not C++
   `list_book_ids()` (e.g. missing a layout's deepest directory level) would otherwise produce a
   plausible-looking but meaningless timing number instead of a visible failure — the same reasoning
   Java's own `require(...)` check already applied.
+
+---
+
+## Entry 34 – datalake_recovery, and a generalized measure_elapsed_ms (2026-10-01)
+
+### What was done
+- `measure_elapsed_ms` gained a `(setup, operation, warmup_runs, measured_runs)` overload: `setup()`
+  runs untimed before every single repetition (both warmup and measured), then `operation()` is timed.
+  The existing single-argument shape survives as a one-line convenience overload delegating to it with
+  an empty `setup` — no existing call site needed to change, same "grow the shape, keep the old call
+  working" habit as `tokenize`'s stopword overload (Entry 6) and `query_and`'s generic core (Entry 28).
+  2 new tests confirm `setup` runs once per repetition (not once overall) and that its state is visible
+  to `operation` on each call.
+- `collect_body_header_pairs`/`list_book_ids` (Entry 33) reused; `count_files_with_suffix(dir, suffix)`
+  added to `file_io.hpp`/`.cpp`: recursively counts files under `dir` whose name ends with `suffix`
+  (`"body.txt"` matches both `book`'s exact filename and `range`/`time`'s `"<id>.body.txt"`).
+- `include/stage1/datalake_recovery_benchmark.hpp` + `src/datalake_recovery_benchmark.cpp`:
+  `benchmark_datalake_recovery(language, books, output_dir)`, SPEC section 9's `datalake_recovery`
+  experiment, **mirroring the Java module's own "damage every 10th book" methodology** (same reasoning
+  as `datalake_incremental`, Entry 33, for comparable cross-language CSVs). Per structure: `setup()`
+  (untimed, runs before every repetition) clears the directory, writes every book, then deletes the
+  *header* file of every 10th book -- simulating a crash between `write_text_file`'s two separate calls
+  for body and header (this project has no atomic write, unlike Java's, see Entry 32's cross-language
+  comparison style). The timed `operation()` is "list what's present, rewrite whatever's missing."
+  After the loop, the function itself verifies (and throws if not true) that every book is present and
+  no structure has more `body.txt` files than books written — the same correctness guard Java's
+  `require(...)` makes. Returns 5 `elapsed` rows plus one `recovered` and one `duplicates` row per
+  structure.
+- `main.cpp`'s `benchmark` command gained `datalake_recovery`.
+- 4 new tests (2 for the new `measure_elapsed_ms` overload, 2 for the benchmark itself). Suite total:
+  148 tests.
+- Ran it for real against the 15 downloaded books (damages book index 10, the only "every 10th" with 15
+  books): all three structures recovered the one damaged book with zero lost books and zero duplicates.
+
+### Why
+- **A generic `setup`/`operation` split in `measure_elapsed_ms`, not a bespoke loop inside this one
+  benchmark.** Recovery is the first experiment where repeating the same operation seven times is not
+  automatically equivalent work (once recovered, there is nothing left to recover) — every earlier
+  experiment (`index_build`, `datalake_write`, ...) sidestepped this by rebuilding everything from
+  scratch each repetition, which recovery cannot do without re-damaging first. The split is written as
+  a reusable addition to the shared benchmark infrastructure (Entry 26) because `index_update`, still
+  to come, has the same shape (a pre-built index, then timing one incremental change), not as a
+  one-off local loop only `datalake_recovery` could use.
+- **Damage simulated by deleting the header after a normal write, not via a temp-file/rename atomic
+  write like Java's.** This project's `write_text_file`/`Datalake::write` genuinely write body and
+  header as two separate, non-atomic steps; simulating the crash this way tests *this* codebase's real
+  failure mode, rather than importing an atomic-write mechanism this project does not have just to copy
+  Java's specific technique. (Whether to add atomic writes here is a separate, open design question the
+  benchmark result does not answer by itself.)
+- **Damage and recovery methodology matched to Java's, not invented independently.** Same reasoning as
+  Entry 33: SPEC only names the experiment, not its exact simulated-failure shape; reusing the already-
+  working "every 10th book" sample keeps the resulting `recovered`/`duplicates` numbers meaningfully
+  comparable across the three language implementations in the report.
+- **The function throws on any lost book or duplicate instead of just reporting whatever it measures.**
+  A recovery experiment whose entire point is correctness should fail loudly the moment it is not
+  correct, rather than silently writing a CSV row that looks like a timing result but actually hides a
+  bug in `write`/`locate`/`list_book_ids` working together.

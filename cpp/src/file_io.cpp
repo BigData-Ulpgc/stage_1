@@ -64,4 +64,22 @@ void collect_body_header_pairs(const std::filesystem::path& dir, std::vector<int
     }
 }
 
+int count_files_with_suffix(const std::filesystem::path& dir, std::string_view suffix) {
+    if (!std::filesystem::exists(dir)) {
+        return 0;
+    }
+    int count = 0;
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(dir)) {
+        if (!entry.is_regular_file()) {
+            continue;
+        }
+        const std::string filename = entry.path().filename().string();
+        if (filename.size() >= suffix.size() &&
+            filename.compare(filename.size() - suffix.size(), suffix.size(), suffix) == 0) {
+            ++count;
+        }
+    }
+    return count;
+}
+
 }  // namespace stage1

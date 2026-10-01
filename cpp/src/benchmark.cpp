@@ -26,20 +26,27 @@ void write_benchmark_results(const std::filesystem::path& path, const std::vecto
     write_text_file(path, out.str());
 }
 
-std::vector<double> measure_elapsed_ms(const std::function<void()>& operation, int warmup_runs, int measured_runs) {
+std::vector<double> measure_elapsed_ms(const std::function<void()>& setup, const std::function<void()>& operation,
+                                        int warmup_runs, int measured_runs) {
     for (int i = 0; i < warmup_runs; ++i) {
+        setup();
         operation();
     }
 
     std::vector<double> elapsed_ms;
     elapsed_ms.reserve(measured_runs);
     for (int i = 0; i < measured_runs; ++i) {
+        setup();
         const auto start = std::chrono::steady_clock::now();
         operation();
         const auto end = std::chrono::steady_clock::now();
         elapsed_ms.push_back(std::chrono::duration<double, std::milli>(end - start).count());
     }
     return elapsed_ms;
+}
+
+std::vector<double> measure_elapsed_ms(const std::function<void()>& operation, int warmup_runs, int measured_runs) {
+    return measure_elapsed_ms([] {}, operation, warmup_runs, measured_runs);
 }
 
 }  // namespace stage1

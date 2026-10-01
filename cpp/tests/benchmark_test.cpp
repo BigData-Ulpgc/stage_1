@@ -78,3 +78,24 @@ TEST(MeasureElapsedMs, EveryMeasuredValueIsNonNegative) {
         EXPECT_GE(value, 0.0);
     }
 }
+
+TEST(MeasureElapsedMs, SetupRunsOnceBeforeEveryRepetitionUntimed) {
+    int setup_calls = 0;
+    int operation_calls = 0;
+    measure_elapsed_ms([&setup_calls] { ++setup_calls; }, [&operation_calls] { ++operation_calls; }, 2, 5);
+
+    EXPECT_EQ(setup_calls, 2 + 5);
+    EXPECT_EQ(operation_calls, 2 + 5);
+}
+
+TEST(MeasureElapsedMs, SetupStateIsVisibleToOperation) {
+    int shared_counter = 0;
+    auto results = measure_elapsed_ms([&shared_counter] { shared_counter = 10; },
+                                       [&shared_counter] { shared_counter += 1; }, 1, 3);
+
+    // Each repetition resets shared_counter to 10 via setup, then operation
+    // adds 1: if setup ran before every repetition (not just once overall),
+    // the final value must be 11, not 10 + (1+3) = 14.
+    EXPECT_EQ(shared_counter, 11);
+    EXPECT_EQ(results.size(), 3u);
+}
