@@ -8,7 +8,7 @@ for book metadata.
 import os
 import sqlite3
 
-from datamart.metadata.parser import extract_metadata
+from src.main.bigdata.datamart.metadata.parser import extract_metadata
 
 # Default datamart path, relative to the src/datamart/metadata/ directory
 _DEFAULT_DB_PATH = os.path.join(

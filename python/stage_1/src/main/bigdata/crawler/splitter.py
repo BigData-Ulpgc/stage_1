@@ -87,7 +87,7 @@ def fetch_book(book_id: int) -> Optional[Tuple[str, str]]:
     Returns:
         A (header, body) tuple or None if the book could not be processed.
     """
-    from crawler.client import download_raw_text, DownloadError
+    from src.main.bigdata.crawler.client import download_raw_text, DownloadError
 
     try:
         raw_text = download_raw_text(book_id)

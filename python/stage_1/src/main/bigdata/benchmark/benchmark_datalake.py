@@ -23,10 +23,10 @@ _SRC_DIR = os.path.join(_SCRIPT_DIR, "..")
 if _SRC_DIR not in sys.path:
     sys.path.insert(0, _SRC_DIR)
 
-from crawler.splitter import fetch_book
-from datalake.time_based import save_time_based
-from datalake.book_based import save_book_based
-from datalake.range_based import save_range_based
+from src.main.bigdata.crawler.splitter import fetch_book
+from src.main.bigdata.datalake.time_based import save_time_based
+from src.main.bigdata.datalake.book_based import save_book_based
+from src.main.bigdata.datalake.range_based import save_range_based
 
 # ---------------------------------------------------------------------------
 # Paths relative to the script directory

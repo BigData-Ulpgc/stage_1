@@ -27,11 +27,11 @@ _SRC_DIR = os.path.join(_SCRIPT_DIR, "..")
 if _SRC_DIR not in sys.path:
     sys.path.insert(0, _SRC_DIR)
 
-from crawler.splitter import fetch_book
-from datamart.index.tokenizer import tokenize
-from datamart.index.monolithic import MonolithicIndex
-from datamart.index.hierarchical import HierarchicalIndex
-from datamart.index.mongo import MongoIndex
+from src.main.bigdata.crawler.splitter import fetch_book
+from src.main.bigdata.datamart.index.tokenizer import tokenize
+from src.main.bigdata.datamart.index.monolithic import MonolithicIndex
+from src.main.bigdata.datamart.index.hierarchical import HierarchicalIndex
+from src.main.bigdata.datamart.index.mongo import MongoIndex
 
 # ---------------------------------------------------------------------------
 # Paths relative to the script directory

@@ -14,14 +14,14 @@ import sys
 # ---------------------------------------------------------------------------
 # Internal module imports
 # ---------------------------------------------------------------------------
-from control.state_manager import ControlLayer
-from crawler.splitter import fetch_book
-from datalake import save_to_all_structures
-from datamart.metadata.repository import MetadataManager
-from datamart.index.tokenizer import tokenize
-from datamart.index.monolithic import MonolithicIndex
-from datamart.index.hierarchical import HierarchicalIndex
-from datamart.index.mongo import MongoIndex
+from src.main.bigdata.control.state_manager import ControlLayer
+from src.main.bigdata.crawler.splitter import fetch_book
+from src.main.bigdata.datalake import save_to_all_structures
+from src.main.bigdata.datamart.metadata.repository import MetadataManager
+from src.main.bigdata.datamart.index.tokenizer import tokenize
+from src.main.bigdata.datamart.index.monolithic import MonolithicIndex
+from src.main.bigdata.datamart.index.hierarchical import HierarchicalIndex
+from src.main.bigdata.datamart.index.mongo import MongoIndex
 
 # ---------------------------------------------------------------------------
 # Paths (relative to this script's directory → src/)
