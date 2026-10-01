@@ -82,3 +82,28 @@ TEST(TimeBasedDatalake, BooksWrittenInDifferentHoursGetSeparateFolders) {
     EXPECT_TRUE(std::filesystem::exists(root.path() / "20260905" / "08" / "1.body.txt"));
     EXPECT_TRUE(std::filesystem::exists(root.path() / "20260905" / "20" / "2.body.txt"));
 }
+
+TEST(TimeBasedDatalake, LocateFindsABookWrittenByTheSameInstance) {
+    TempDir root("stage1_time_based_datalake_test_locate");
+    FakeClock clock(make_local_time(2026, 9, 5, 8));
+    TimeBasedDatalake datalake(root.path(), clock);
+    datalake.write(1342, "header", "body");
+
+    auto found = datalake.locate(1342);
+
+    ASSERT_TRUE(found.has_value());
+    EXPECT_EQ(found->body_path, (root.path() / "20260905" / "08" / "1342.body.txt").string());
+}
+
+TEST(TimeBasedDatalake, LocateReturnsNulloptFromAFreshInstanceEvenIfTheFileExists) {
+    TempDir root("stage1_time_based_datalake_test_locate_fresh");
+    FakeClock clock(make_local_time(2026, 9, 5, 8));
+    TimeBasedDatalake(root.path(), clock).write(1342, "header", "body");
+
+    // A new instance remembers nothing, even though the file is really
+    // there: this is the real cost SPEC section 3 wants measured -- unlike
+    // book/range, a fresh TimeBasedDatalake cannot compute where id 1342
+    // landed without being told when it was written.
+    TimeBasedDatalake reopened(root.path(), clock);
+    EXPECT_FALSE(reopened.locate(1342).has_value());
+}

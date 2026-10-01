@@ -23,16 +23,27 @@ std::string range_folder_name(int book_id) {
     return zero_pad5(range_start) + "-" + zero_pad5(range_end);
 }
 
-BookLocation RangeBasedDatalake::write(int book_id, const std::string& header, const std::string& body) {
+BookLocation RangeBasedDatalake::paths_for(int book_id) const {
     const std::filesystem::path range_dir = root_ / range_folder_name(book_id);
     const std::string id = std::to_string(book_id);
-    const std::filesystem::path body_path = range_dir / (id + ".body.txt");
-    const std::filesystem::path header_path = range_dir / (id + ".header.txt");
+    return BookLocation{(range_dir / (id + ".body.txt")).string(), (range_dir / (id + ".header.txt")).string()};
+}
 
-    write_text_file(body_path, body);
-    write_text_file(header_path, header);
+BookLocation RangeBasedDatalake::write(int book_id, const std::string& header, const std::string& body) {
+    const BookLocation location = paths_for(book_id);
+    write_text_file(location.body_path, body);
+    write_text_file(location.header_path, header);
+    return location;
+}
 
-    return BookLocation{body_path.string(), header_path.string()};
+std::optional<BookLocation> RangeBasedDatalake::locate(int book_id) const {
+    // Pure computation, same reasoning as write(): the range folder is a
+    // function of the id alone, no lookup table needed to find it again.
+    const BookLocation location = paths_for(book_id);
+    if (!std::filesystem::exists(location.body_path) || !std::filesystem::exists(location.header_path)) {
+        return std::nullopt;
+    }
+    return location;
 }
 
 }  // namespace stage1

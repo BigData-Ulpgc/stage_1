@@ -2,7 +2,9 @@
 
 #include <chrono>
 #include <filesystem>
+#include <optional>
 #include <string>
+#include <unordered_map>
 
 #include "stage1/datalake.hpp"
 
@@ -39,9 +41,18 @@ public:
 
     BookLocation write(int book_id, const std::string& header, const std::string& body) override;
 
+    // Unlike BookBasedDatalake/RangeBasedDatalake, this path is NOT a pure
+    // function of `book_id`: it also depends on *when* the book was written,
+    // which is not derivable from the id alone. So this only ever finds books
+    // that write() has already been called for on this same instance, which
+    // it must remember internally -- see written_ below. A fresh instance
+    // (e.g. after the program restarts) knows nothing until it writes again.
+    std::optional<BookLocation> locate(int book_id) const override;
+
 private:
     std::filesystem::path root_;
     Clock& clock_;
+    std::unordered_map<int, BookLocation> written_;
 };
 
 }  // namespace stage1

@@ -53,3 +53,22 @@ TEST(BookBasedDatalake, WritingTheSameBookIdAgainReplacesTheContent) {
     EXPECT_EQ(read_file(root.path() / "1" / "body.txt"), "new body");
     EXPECT_EQ(read_file(root.path() / "1" / "header.txt"), "new header");
 }
+
+TEST(BookBasedDatalake, LocateFindsAWrittenBook) {
+    TempDir root("stage1_book_based_datalake_test_locate");
+    BookBasedDatalake datalake(root.path());
+    auto location = datalake.write(1342, "header", "body");
+
+    auto found = datalake.locate(1342);
+
+    ASSERT_TRUE(found.has_value());
+    EXPECT_EQ(found->body_path, location.body_path);
+    EXPECT_EQ(found->header_path, location.header_path);
+}
+
+TEST(BookBasedDatalake, LocateReturnsNulloptForAnUnwrittenBook) {
+    TempDir root("stage1_book_based_datalake_test_locate_missing");
+    BookBasedDatalake datalake(root.path());
+
+    EXPECT_FALSE(datalake.locate(404).has_value());
+}

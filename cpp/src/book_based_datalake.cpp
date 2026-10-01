@@ -4,15 +4,26 @@
 
 namespace stage1 {
 
-BookLocation BookBasedDatalake::write(int book_id, const std::string& header, const std::string& body) {
+BookLocation BookBasedDatalake::paths_for(int book_id) const {
     const std::filesystem::path book_dir = root_ / std::to_string(book_id);
-    const std::filesystem::path body_path = book_dir / "body.txt";
-    const std::filesystem::path header_path = book_dir / "header.txt";
+    return BookLocation{(book_dir / "body.txt").string(), (book_dir / "header.txt").string()};
+}
 
-    write_text_file(body_path, body);
-    write_text_file(header_path, header);
+BookLocation BookBasedDatalake::write(int book_id, const std::string& header, const std::string& body) {
+    const BookLocation location = paths_for(book_id);
+    write_text_file(location.body_path, body);
+    write_text_file(location.header_path, header);
+    return location;
+}
 
-    return BookLocation{body_path.string(), header_path.string()};
+std::optional<BookLocation> BookBasedDatalake::locate(int book_id) const {
+    // Pure computation, same reasoning as write(): the path never depended on
+    // anything but the id, so no lookup table is needed to find it again.
+    const BookLocation location = paths_for(book_id);
+    if (!std::filesystem::exists(location.body_path) || !std::filesystem::exists(location.header_path)) {
+        return std::nullopt;
+    }
+    return location;
 }
 
 }  // namespace stage1

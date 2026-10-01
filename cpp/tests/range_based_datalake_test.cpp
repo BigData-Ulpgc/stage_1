@@ -72,3 +72,23 @@ TEST(RangeBasedDatalake, BooksInDifferentRangesGetSeparateFolders) {
     EXPECT_TRUE(std::filesystem::exists(root.path() / "00000-00999" / "999.body.txt"));
     EXPECT_TRUE(std::filesystem::exists(root.path() / "01000-01999" / "1000.body.txt"));
 }
+
+TEST(RangeBasedDatalake, LocateFindsAWrittenBookEvenFromAFreshInstance) {
+    TempDir root("stage1_range_based_datalake_test_locate");
+    RangeBasedDatalake(root.path()).write(1342, "header", "body");
+
+    // A brand new instance, same root: the path is computed from the id
+    // alone, so it does not need to be the same object that wrote it.
+    RangeBasedDatalake reopened(root.path());
+    auto found = reopened.locate(1342);
+
+    ASSERT_TRUE(found.has_value());
+    EXPECT_EQ(found->body_path, (root.path() / "01000-01999" / "1342.body.txt").string());
+}
+
+TEST(RangeBasedDatalake, LocateReturnsNulloptForAnUnwrittenBook) {
+    TempDir root("stage1_range_based_datalake_test_locate_missing");
+    RangeBasedDatalake datalake(root.path());
+
+    EXPECT_FALSE(datalake.locate(404).has_value());
+}

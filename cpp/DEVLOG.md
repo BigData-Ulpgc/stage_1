@@ -1387,3 +1387,59 @@ Documented so this result is not mistaken for "the three layouts perform identic
   this) is to confirm the tools work correctly end to end; a flat result here is real evidence the
   write-cost difference needs a larger dataset to appear, which is itself useful information for the
   report, not a failure to hide.
+
+---
+
+## Entry 31 – datalake_lookup: giving Datalake a locate() method (2026-10-01)
+
+### What was done
+- `Datalake` interface gained `virtual std::optional<BookLocation> locate(int book_id) const = 0;`,
+  symmetric to `write()`. Each layout now implements it:
+  - `BookBasedDatalake`/`RangeBasedDatalake`: `locate` recomputes the path (pure function of the id,
+    same as `write` always did) and checks the files exist with `std::filesystem::exists`; works from
+    any instance, even a brand new one on the same root (a new test confirms this explicitly).
+  - `TimeBasedDatalake`: the path depends on *when* a book was written, not just its id, so there is no
+    formula to invert. It now keeps an internal `std::unordered_map<int, BookLocation> written_`,
+    populated by `write()`; `locate()` only ever finds books the *same instance* wrote. A new test
+    (`LocateReturnsNulloptFromAFreshInstanceEvenIfTheFileExists`) pins this down: a second
+    `TimeBasedDatalake` on the same root, after the first one already wrote the file for real, still
+    returns `nullopt` — the file is there, but nothing remembers where.
+  - `BookBasedDatalake`/`RangeBasedDatalake::write` refactored to share path computation with `locate`
+    through a private `paths_for(book_id)` helper, so the two methods cannot silently drift apart.
+- `include/stage1/datalake_lookup_benchmark.hpp` + `src/datalake_lookup_benchmark.cpp`:
+  `benchmark_datalake_lookup(language, books, output_dir)`, SPEC section 9's `datalake_lookup`
+  experiment (section 3's own "lookup cost"). For each layout: writes every book once, untimed, then
+  times calling `locate()` for every book id, `measure_elapsed_ms`'s default 2+5 repetitions.
+- `main.cpp`'s `benchmark` command gained `datalake_lookup`.
+- 7 new tests (6 `locate()` tests across the three datalake test files, 1 for the benchmark itself).
+  Suite total: 138 tests.
+- Ran it for real against the same 15 downloaded books.
+
+### An honest limitation this result exposes
+At `dataset_size=15`: `time` locates in ≈0.001ms, `book`/`range` in ≈0.04ms — `time` looks *faster*,
+which is the opposite of the real-world disadvantage already discussed before writing any code for this
+phase ("time no puede calcular la ruta solo con el ID"). The reason is specific to how this benchmark is
+built: it writes and locates through the *same* `Datalake` instance within one process, so `time`'s
+lookup is a bare in-memory hash map hit, while `book`/`range` each pay a real filesystem `stat()` call.
+This experiment, as built, cannot show `time`'s real weakness — a fresh process (like a restarted
+pipeline) that has forgotten everything and must fall back to an external index (`MetadataStore`,
+exactly what `main.cpp`'s own pipeline already does) to find anything at all. Documented explicitly in
+the header and here, rather than left to look like "time turned out to be the fastest layout."
+
+### Why
+- **`locate()` added to the existing `Datalake` interface instead of a free function per layout.**
+  Mirrors `write()`'s own shape (one virtual method, one concrete implementation per layout) and lets
+  `benchmark_datalake_lookup` work through `Datalake&` uniformly, the same reasoning `IndexWriter`
+  already established for `benchmark_index_build`.
+- **`TimeBasedDatalake`'s `written_` map is the honest way to implement "find what I wrote," not a
+  shortcut.** It cannot do better: nothing about `book_id` encodes *when* it was written, and
+  SPEC/the PDF explicitly frame this inability to compute the path as the trade-off worth measuring.
+  Keeping the map (rather than, say, always returning `nullopt`) makes `locate()` still usefully
+  correct within one running process — just not across a restart, which is the precise, narrow gap this
+  entry documents rather than papers over.
+- **`paths_for()` extracted in `BookBasedDatalake`/`RangeBasedDatalake`.** `write()` and `locate()` must
+  agree on exactly the same path for the same id; computing it in one place removes any chance of the
+  two methods disagreeing after a future edit to either.
+- **Writing happens untimed, before the measured block.** This experiment is specifically about lookup
+  cost, not write cost (already covered by `datalake_write`, Entry 30); mixing the two into one timed
+  block would make this experiment redundant with that one instead of measuring something new.

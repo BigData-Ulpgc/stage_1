@@ -36,7 +36,17 @@ BookLocation TimeBasedDatalake::write(int book_id, const std::string& header, co
     write_text_file(body_path, body);
     write_text_file(header_path, header);
 
-    return BookLocation{body_path.string(), header_path.string()};
+    const BookLocation location{body_path.string(), header_path.string()};
+    written_[book_id] = location;  // remember it: this is the only way locate() can ever find it again
+    return location;
+}
+
+std::optional<BookLocation> TimeBasedDatalake::locate(int book_id) const {
+    const auto it = written_.find(book_id);
+    if (it == written_.end()) {
+        return std::nullopt;
+    }
+    return it->second;
 }
 
 }  // namespace stage1
