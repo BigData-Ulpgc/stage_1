@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <stdexcept>
+#include <unordered_set>
 
 #include "stage1/hierarchical_index_writer.hpp"
 #include "stage1/inverted_index.hpp"
@@ -33,8 +34,15 @@ void run_and_record(const std::string& language, const std::string& structure, c
 
     const auto elapsed = measure_elapsed_ms(setup, [&] {
         for (const auto& book : added) {
-            index.add_book(book.book_id, tokenize(book.body, stopwords));
-            writer.write(index);  // the only "update" this writer supports today: a full rewrite
+            const auto tokens = tokenize(book.body, stopwords);
+            // Every term whose postings could possibly change by adding this
+            // one book is exactly its own distinct term set -- nothing else
+            // in the index is touched by add_book (Entry 17).
+            const std::unordered_set<std::string> unique_terms(tokens.begin(), tokens.end());
+            const std::vector<std::string> changed_terms(unique_terms.begin(), unique_terms.end());
+
+            index.add_book(book.book_id, tokens);
+            writer.update_terms(index, changed_terms);  // only a full rewrite if the writer has no cheaper way
         }
     });
 

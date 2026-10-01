@@ -80,3 +80,24 @@ TEST(MongoIndexWriter, UnreachableServerThrowsRuntimeError) {
 TEST(MongoIsReachable, ReturnsFalseForAnUnreachableAddressWithoutThrowing) {
     EXPECT_FALSE(stage1::mongo_is_reachable("mongodb://localhost:1/?serverSelectionTimeoutMS=500"));
 }
+
+TEST(MongoIndexWriter, UpdateTermsOnlyTouchesTheGivenTermsDocuments) {
+    if (!stage1::mongo_is_reachable(kTestUri)) {
+        GTEST_SKIP() << "no MongoDB reachable at " << kTestUri;
+    }
+
+    InvertedIndex index;
+    index.add_book(1, {"car", "boat"});
+    MongoIndexWriter writer(kTestUri);
+    writer.write(index);
+
+    index.add_book(2, {"car", "dragon"});
+    writer.update_terms(index, {"car", "dragon"});
+
+    mongocxx::client client{mongocxx::uri{kTestUri}};
+    auto collection = client["search_engine"]["inverted_index"];
+    EXPECT_TRUE(collection.find_one(make_document(kvp("term", "car"))).has_value());
+    EXPECT_TRUE(collection.find_one(make_document(kvp("term", "dragon"))).has_value());
+    // "boat" was never in changed_terms: write() already put it there, untouched since.
+    EXPECT_TRUE(collection.find_one(make_document(kvp("term", "boat"))).has_value());
+}

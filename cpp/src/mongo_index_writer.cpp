@@ -7,6 +7,7 @@
 #include <mongocxx/exception/exception.hpp>
 #include <mongocxx/instance.hpp>
 #include <mongocxx/options/index.hpp>
+#include <mongocxx/options/update.hpp>
 #include <mongocxx/uri.hpp>
 
 #include <memory>
@@ -72,6 +73,31 @@ void MongoIndexWriter::write(const InvertedIndex& index) {
         collection.insert_many(documents);
     } catch (const mongocxx::exception& error) {
         throw std::runtime_error(std::string("failed to write index to MongoDB: ") + error.what());
+    }
+}
+
+void MongoIndexWriter::update_terms(const InvertedIndex& index, const std::vector<std::string>& changed_terms) {
+    try {
+        mongocxx::client client{mongocxx::uri{uri_}};
+        mongocxx::collection collection = client["search_engine"]["inverted_index"];
+
+        mongocxx::options::update upsert;
+        upsert.upsert(true);
+        for (const auto& term : changed_terms) {
+            bsoncxx::builder::basic::array postings_array;
+            for (int book_id : index.postings(term)) {
+                postings_array.append(book_id);
+            }
+            // $set, not a full document replace: touches only this one
+            // document (term)'s "postings" field, same spirit as
+            // HierarchicalIndexWriter::update_terms touching only that
+            // term's file. upsert(true) covers a term that is brand new.
+            collection.update_one(make_document(kvp("term", term)),
+                                   make_document(kvp("$set", make_document(kvp("postings", postings_array.extract())))),
+                                   upsert);
+        }
+    } catch (const mongocxx::exception& error) {
+        throw std::runtime_error(std::string("failed to update index in MongoDB: ") + error.what());
     }
 }
 

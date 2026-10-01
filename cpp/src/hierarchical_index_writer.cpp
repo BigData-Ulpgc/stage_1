@@ -36,4 +36,16 @@ void HierarchicalIndexWriter::write(const InvertedIndex& index) {
     }
 }
 
+void HierarchicalIndexWriter::update_terms(const InvertedIndex& index, const std::vector<std::string>& changed_terms) {
+    // Exactly what SPEC section 6 calls this layout's own advantage ("very
+    // fine-grained updates: only the file of the affected term is
+    // modified"): touch only the files for `changed_terms`, read `index`
+    // fresh for each one's current postings, and leave every other term's
+    // file untouched on disk.
+    for (const auto& term : changed_terms) {
+        const std::filesystem::path term_path = root_ / hierarchical_folder_name(term) / (term + ".txt");
+        write_text_file(term_path, postings_file_content(index.postings(term)));
+    }
+}
+
 }  // namespace stage1

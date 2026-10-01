@@ -70,3 +70,31 @@ TEST(HierarchicalIndexWriter, EmptyIndexWritesNoFiles) {
     TempDir root("stage1_hierarchical_index_writer_test_empty");
     EXPECT_NO_THROW(HierarchicalIndexWriter(root.path()).write(InvertedIndex{}));
 }
+
+TEST(HierarchicalIndexWriter, UpdateTermsOnlyTouchesTheGivenTermsFiles) {
+    TempDir root("stage1_hierarchical_index_writer_test_update");
+    InvertedIndex index;
+    index.add_book(1, {"car", "boat"});
+    HierarchicalIndexWriter writer(root.path());
+    writer.write(index);
+
+    // A new book adds "car" (now in two books) and a brand-new term "dragon".
+    index.add_book(2, {"car", "dragon"});
+    writer.update_terms(index, {"car", "dragon"});
+
+    EXPECT_EQ(read_file(root.path() / "C" / "car.txt"), "1\n2\n");
+    EXPECT_EQ(read_file(root.path() / "D" / "dragon.txt"), "2\n");
+    // "boat" was never in changed_terms: its file must be exactly as write() left it.
+    EXPECT_EQ(read_file(root.path() / "B" / "boat.txt"), "1\n");
+}
+
+TEST(HierarchicalIndexWriter, UpdateTermsWithAnEmptyListTouchesNothing) {
+    TempDir root("stage1_hierarchical_index_writer_test_update_empty");
+    InvertedIndex index;
+    index.add_book(1, {"car"});
+    HierarchicalIndexWriter writer(root.path());
+    writer.write(index);
+
+    EXPECT_NO_THROW(writer.update_terms(index, {}));
+    EXPECT_EQ(read_file(root.path() / "C" / "car.txt"), "1\n");
+}

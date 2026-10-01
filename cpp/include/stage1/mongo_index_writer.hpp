@@ -40,6 +40,7 @@ public:
     explicit MongoIndexWriter(std::string uri = "mongodb://localhost:27017");
 
     void write(const InvertedIndex& index) override;
+    void update_terms(const InvertedIndex& index, const std::vector<std::string>& changed_terms) override;
 
 private:
     std::string uri_;

@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <string>
+#include <vector>
 
 #include "stage1/index_writer.hpp"
 
@@ -20,6 +21,7 @@ public:
     explicit HierarchicalIndexWriter(std::filesystem::path root) : root_(std::move(root)) {}
 
     void write(const InvertedIndex& index) override;
+    void update_terms(const InvertedIndex& index, const std::vector<std::string>& changed_terms) override;
 
 private:
     std::filesystem::path root_;

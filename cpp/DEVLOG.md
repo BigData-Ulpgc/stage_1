@@ -1840,3 +1840,67 @@ efficient to update," which SPEC section 9 keeps as a question to measure, not a
   writer that is slow but still produces the right answer is a performance finding to report; a writer
   that is slow *and* wrong would be a bug to fix first, and the two are easy to conflate without an
   explicit check separating them.
+
+---
+
+## Entry 40 – Fixing hierarchical's update cost (Entry 39), and what the fix did and did not solve (2026-10-01)
+
+### What was done
+- `IndexWriter` gained `update_terms(index, changed_terms)`: persists only the listed terms' current
+  postings, leaving every other already-persisted term untouched. Defaults to `write(index)` (a full
+  rewrite -- always correct, not necessarily cheap), so every existing writer keeps compiling and
+  behaving exactly as before without an override.
+- `HierarchicalIndexWriter::update_terms` overridden: for each term in `changed_terms`, rewrites only
+  that term's own file -- exactly SPEC section 6's own description of this layout's advantage ("very
+  fine-grained updates: only the file of the affected term is modified"), which nothing in this project
+  actually exercised until now.
+- `MongoIndexWriter::update_terms` overridden too, for completeness and because it is cheap and
+  correct to add: `update_one` with `$set` and `upsert(true)` per changed term, instead of
+  `delete_many` + reinserting everything. Not benchmarked for real here (no Docker on this machine),
+  but has its own skippable test, same pattern as the rest of the Mongo-dependent tests.
+- `MonolithicIndexWriter` left with no override, on purpose: a single JSON file has no way to patch
+  part of itself cheaply with this project's plain-text approach, so the default (full rewrite) is
+  already the honest, correct answer for this layout -- not a missed optimization.
+- `benchmark_index_update`'s timed operation now computes the *distinct* terms of each newly added book
+  (the only terms `add_book` could possibly have changed, Entry 17) and calls `writer.update_terms(index,
+  changed_terms)` instead of `writer.write(index)`.
+- 5 new tests: `HierarchicalIndexWriter::update_terms` touches only the requested terms' files and
+  leaves everything else exactly as `write()` left it (and handles an empty term list); a skippable
+  `MongoIndexWriter::update_terms` equivalent. Suite total: 165 tests.
+- **Re-ran the real benchmark (same 15 books) before and after, to measure the actual effect:**
+
+  | structure | per-update, before (Entry 39) | per-update, after (this entry) |
+  |---|---|---|
+  | monolithic | 23.4–31.3 ms | 25.2–28.0 ms (unchanged, as expected: no override) |
+  | hierarchical | 3,178.8–4,561.7 ms | **983.3–1,169.7 ms** |
+
+### An honest reading of the result: real improvement, not a full fix
+`hierarchical` got **roughly 3-4x faster** per update, a genuine, measured win from the fix. But it is
+still **~35-45x slower than `monolithic`** at this dataset size, not close to parity. The reason is
+structural, not a remaining bug: `changed_terms` for one newly added real book is still that book's
+*own* distinct vocabulary (plausibly a couple of thousand words), and each one still costs its own
+`write_text_file` call — a `create_directories` check, an open, a write, a close. The fix removed the
+waste of touching *every other book's* terms too, but it cannot remove the fact that a layout built
+from "one small file per term" pays a per-term filesystem cost that "one JSON file" simply does not.
+This is the more precise, measured version of the architectural trade-off SPEC section 6 already
+describes in words ("A very large number of small files can overwhelm the filesystem, reducing
+performance") — now with a before/after number attached to both the problem and the fix's real,
+partial effect on it.
+
+### Why
+- **A new interface method with a safe default, not a breaking signature change to `write()`.** Every
+  other benchmark and every existing test that calls `write()` needed zero changes; `update_terms` is
+  purely additive, and a writer that does not override it is still fully correct (just not faster),
+  which is exactly the same "grow the shape, never break an existing caller" discipline already applied
+  to `tokenize`, `query_and`, and `Datalake`'s own `locate()`/`list_book_ids()` additions.
+- **`MonolithicIndexWriter` deliberately left without an override.** Giving every writer a "pretend
+  incremental" method by, say, having monolithic's default secretly still rewrite the whole file under
+  a different method name would not be an optimization, just the same cost with a misleading name;
+  leaving it on the honest default makes the real difference between layouts visible in the benchmark
+  results instead of hidden behind an API that implies all three writers now update cheaply.
+- **Re-measuring instead of assuming the fix worked, same discipline as Entry 37's transaction fix.**
+  The obvious, appealing story ("hierarchical only touches what changed, so it must now be about as fast
+  as monolithic") turned out to be wrong in degree, and only a real before/after run caught that. Writing
+  this nuance into the DEVLOG rather than just the headline "3-4x faster" is what keeps this log useful
+  for the report: both the improvement and its real limit are facts worth knowing before deciding
+  whether this structure is good enough for the group's final choice.
