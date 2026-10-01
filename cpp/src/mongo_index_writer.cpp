@@ -9,6 +9,7 @@
 #include <mongocxx/options/index.hpp>
 #include <mongocxx/uri.hpp>
 
+#include <memory>
 #include <stdexcept>
 #include <vector>
 
@@ -72,6 +73,26 @@ void MongoIndexWriter::write(const InvertedIndex& index) {
     } catch (const mongocxx::exception& error) {
         throw std::runtime_error(std::string("failed to write index to MongoDB: ") + error.what());
     }
+}
+
+std::function<std::vector<int>(const std::string&)> mongo_postings_fetcher(const std::string& uri) {
+    ensure_mongo_driver_initialized();
+    // Held by shared_ptr, not by value: mongocxx::client is move-only, and a
+    // std::function's target must be copyable.
+    auto client = std::make_shared<mongocxx::client>(mongocxx::uri{uri});
+
+    return [client](const std::string& term) -> std::vector<int> {
+        auto collection = (*client)["search_engine"]["inverted_index"];
+        const auto doc = collection.find_one(make_document(kvp("term", term)));
+        if (!doc) {
+            return {};
+        }
+        std::vector<int> postings;
+        for (const auto& element : doc->view()["postings"].get_array().value) {
+            postings.push_back(element.get_int32().value);
+        }
+        return postings;
+    };
 }
 
 }  // namespace stage1

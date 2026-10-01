@@ -1,6 +1,8 @@
 #pragma once
 
+#include <functional>
 #include <string>
+#include <vector>
 
 #include "stage1/index_writer.hpp"
 
@@ -42,5 +44,12 @@ public:
 private:
     std::string uri_;
 };
+
+// Returns a postings-fetcher backed by a live MongoDB connection at `uri`:
+// one query per term against the "mongo" structure MongoIndexWriter wrote.
+// Used by benchmarks that need to measure querying each on-disk/database
+// structure directly, not through the in-memory InvertedIndex.
+std::function<std::vector<int>(const std::string&)> mongo_postings_fetcher(
+    const std::string& uri = "mongodb://localhost:27017");
 
 }  // namespace stage1

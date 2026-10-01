@@ -6,10 +6,11 @@
 
 namespace stage1 {
 
-std::vector<int> query_and(const InvertedIndex& index, const std::vector<std::string>& terms) {
+std::vector<int> query_and(const std::function<std::vector<int>(const std::string&)>& postings,
+                            const std::vector<std::string>& terms) {
     // De-duplicate query terms first: "car car" must behave exactly like
-    // "car" -- intersecting the same postings list with itself twice would
-    // just redo the same work for the same result.
+    // "car" -- fetching the same postings list twice would just redo the
+    // same work for the same result.
     const std::unordered_set<std::string> distinct_terms(terms.begin(), terms.end());
     if (distinct_terms.empty()) {
         return {};  // no meaningful terms -> no results, not "every book"
@@ -22,7 +23,7 @@ std::vector<int> query_and(const InvertedIndex& index, const std::vector<std::st
     std::vector<std::vector<int>> postings_lists;
     postings_lists.reserve(distinct_terms.size());
     for (const auto& term : distinct_terms) {
-        postings_lists.push_back(index.postings(term));
+        postings_lists.push_back(postings(term));
     }
     std::sort(postings_lists.begin(), postings_lists.end(),
               [](const auto& a, const auto& b) { return a.size() < b.size(); });
@@ -35,6 +36,10 @@ std::vector<int> query_and(const InvertedIndex& index, const std::vector<std::st
         result = std::move(intersected);
     }
     return result;
+}
+
+std::vector<int> query_and(const InvertedIndex& index, const std::vector<std::string>& terms) {
+    return query_and([&index](const std::string& term) { return index.postings(term); }, terms);
 }
 
 }  // namespace stage1

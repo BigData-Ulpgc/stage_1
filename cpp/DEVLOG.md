@@ -1202,3 +1202,67 @@ called the binary with no arguments, which now just prints usage and exits 1. It
 - **Each structure writes under its own subdirectory of `output_dir`** (`monolithic/`, `hierarchical/`),
   so a single benchmark run's three structures never collide on the same path, and the output can be
   inspected structure by structure afterward.
+
+---
+
+## Entry 28 – index_query: generalizing query_and to compare structures fairly (2026-09-30)
+
+### What was done
+- `query_and` generalized: the core now takes a `std::function<std::vector<int>(const std::string&)>
+  postings` instead of `const InvertedIndex&` directly, keeping the exact same de-duplicate/smallest-
+  first/`std::set_intersection` algorithm from Entry 22 unchanged. The original signature survives as a
+  one-line convenience overload (`query_and(index, terms)` delegates to the generic core with a lambda
+  wrapping `index.postings`), so every existing caller and test needed no changes.
+- `load_queries` (`query_list.hpp`/`.cpp`): reads `shared/queries.txt` in file order, skipping blank/`#`
+  lines -- the same shape as `load_stopwords`/`load_book_ids`, now for the query workload SPEC section 1
+  reserves that file for.
+- `mongo_postings_fetcher(uri)` added next to `MongoIndexWriter`: returns a postings-fetcher backed by a
+  live MongoDB connection (one `find_one` per term). The `mongocxx::client` is held through a
+  `std::shared_ptr`, not by value, because `mongocxx::client` is move-only and a `std::function`'s
+  target must be copy-constructible.
+- `include/stage1/index_query_benchmark.hpp` + `src/index_query_benchmark.cpp`:
+  `benchmark_index_query(language, dataset_size, queries, stopwords, index_dir)`, SPEC section 9's
+  `index_query` experiment. For each structure `benchmark_index_build` already wrote — monolithic
+  (parses the JSON file once, then answers every query from the parsed map), hierarchical (no upfront
+  load: each query term opens and reads its own small file on demand), and mongo if reachable (one
+  network round trip per term) — times "load the structure, then run every query in the workload" as
+  one unit, `measure_elapsed_ms`'s default 2+5 repetitions, and returns one `BenchmarkResult` row per
+  measured run.
+- 6 new tests: `load_queries` (order, comments/blanks, missing file, the real `shared/queries.txt`) and
+  `benchmark_index_query` (five rows per available structure with the right shape, mongo rows present
+  only when reachable), built on top of `benchmark_index_build`'s output. Suite total: 126 tests.
+
+### Why
+- **Generalizing `query_and` instead of duplicating its intersection logic per structure.** Querying
+  the monolithic JSON, the hierarchical files, and MongoDB each fetch postings a completely different
+  way, but AND-intersecting whatever they fetch is the exact same algorithm every time; writing that
+  algorithm three more times (once per structure) would triple the chance of a subtle bug (wrong sort
+  order, a missed short-circuit) appearing in only one of the four copies. This is the same "generalize
+  once a second real caller needs it" reasoning already applied to `HttpClient`, `TempDir`, and
+  `mongo_is_reachable` — except here the second caller changed an existing function's *signature*
+  rather than adding a sibling, which is why the old call shape was kept as a convenience overload
+  instead of forcing every existing caller to wrap `index.postings` in a lambda by hand.
+- **Querying each on-disk/database structure directly, not through the in-memory `InvertedIndex`.**
+  This project's `InvertedIndex` is a single, shared, structure-agnostic representation — querying it
+  would give the exact same timing for all three structures, since none of them would actually be
+  involved. That would defeat the purpose of an experiment whose entire point, per SPEC section 6 and
+  the course PDF, is comparing how these three physical structures perform.
+- **The monolithic reader parses the file once and reuses it for the whole query batch; the
+  hierarchical reader has no such step and pays a file access per query term instead.** This mirrors
+  each structure's real shape: a monolithic file is naturally something a query service loads once and
+  serves many queries against, while the hierarchical layout's whole design is "each term is its own
+  file" (SPEC section 6) — there is nothing sensible to "load upfront" for it. Measuring both fairly,
+  the same way, would hide exactly the trade-off SPEC asks the report to discuss.
+- **"Load + whole query batch" timed as one combined unit, not load and per-query costs measured
+  separately.** Keeping the measured operation identical in shape across all three structures (and
+  identical to how `benchmark_index_build` already times "build + persist" as one unit) is what makes
+  the three numbers directly comparable; splitting load from query cost would need a second,
+  structure-specific methodology decision for each format, not a clear win worth the added complexity
+  at this stage. Documented explicitly, including that this "cold" measurement does not reflect a real
+  service that keeps a structure loaded across many queries — a defensible simplification, not a hidden
+  one.
+- **`mongo_postings_fetcher` returns a `std::function`, not a class implementing some `PostingsSource`
+  interface.** Only one thing (this benchmark, so far) needs "a callable that fetches postings from
+  somewhere"; introducing a new interface hierarchy for that, mirroring `Datalake`/`IndexWriter`, would
+  be the same premature-generalization mistake already avoided once for `MetadataRepository` (Entry 13)
+  — `std::function` is already the right amount of abstraction `query_and`'s own signature needed.
