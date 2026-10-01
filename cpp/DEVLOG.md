@@ -1578,3 +1578,54 @@ equivalent code when a design problem feels like it should be universal, not C++
   A recovery experiment whose entire point is correctness should fail loudly the moment it is not
   correct, rather than silently writing a CSV row that looks like a timing result but actually hides a
   bug in `write`/`locate`/`list_book_ids` working together.
+
+---
+
+## Entry 35 – datalake_storage, closing the datalake benchmark block (2026-10-01)
+
+### What was done
+- `include/stage1/datalake_storage_benchmark.hpp` + `src/datalake_storage_benchmark.cpp`:
+  `benchmark_datalake_storage(language, books, output_dir)`, SPEC section 9's `datalake_storage`
+  experiment (section 3's own "storage overhead"). Not a timing experiment: for each layout, writes
+  every book once, then reports `files`, `directories`, `max_entries_per_dir` (the most populated
+  directory, root included) and `bytes` (summed logical file size) via a single recursive directory
+  walk (`std::filesystem::recursive_directory_iterator`), one `BenchmarkResult` row per metric.
+  Deliberately leaves out the Java module's fifth metric, block-size-rounded `allocated_bytes`: there is
+  no portable C++ standard-library way to query a filesystem's block size, and Java's own code already
+  calls that number "an estimate" rather than an exact figure.
+- `main.cpp`'s `benchmark` command gained `datalake_storage`. This closes all five of SPEC section 9's
+  `datalake_*` experiments.
+- 3 new tests with a small, hand-traceable 3-book corpus (1342, 84, 11): `book` gets exactly 2
+  files/1 directory per book; all three layouts report identical `bytes` (same content, different
+  organization); `range` groups 84 and 11 into one folder (`00000-00999`) and 1342 into another
+  (`01000-01999`). Suite total: 151 tests.
+- Ran it for real against the 15 downloaded books.
+
+### A result that makes the book/range/time trade-off concrete
+All three layouts: 30 files, identical byte count (6,575,252 — same content, just organized
+differently; a useful sanity check in itself). Where they differ is `max_entries_per_dir`:
+`book` = 15 (the root directory, one subdirectory per book), `range` = 18 (the most populated range
+folder, `00000-00999`, holding 9 of the 15 books), `time` = **30** — every single file, because all 15
+books were downloaded within the same hour and `time` has no way to spread a burst of downloads across
+multiple folders. This is precisely the failure mode SPEC section 3 warns about ("a very large number
+of small files can overwhelm the filesystem") showing up with real numbers, and it is `time`'s second
+documented structural weakness in this project (after `locate()`'s inability to compute a path from the
+id alone, Entry 31) — both stemming from the same root cause: `time`'s organization depends on *when*
+things happen to be written, which this project's own pipeline does in bursts, not evenly.
+
+### Why
+- **One directory walk per structure, not per metric.** `files`, `directories`, `max_entries_per_dir`
+  and `bytes` all fall out of the same single pass over every entry under the root; walking the tree
+  four separate times (once per metric) would be needlessly repeated I/O for numbers that are all
+  byproducts of the same traversal.
+- **`entries_per_dir` keyed by `parent_path()`, counting the root's own direct children too.** Matches
+  the Java module's own explicit choice ("incluida la raíz"): for the `book` layout specifically, the
+  root directory (one subdirectory per book) is very often the most populated directory in the whole
+  tree, and excluding it would hide exactly the kind of overcrowding this metric exists to catch.
+- **`allocated_bytes` left out rather than approximated with a guessed block size.** A hardcoded
+  assumption (e.g. "assume 4096-byte blocks") would silently misreport on a filesystem that does not
+  use that block size, which is worse than not reporting the number at all; Java's own version, built
+  with `Files.getFileStore(root).getBlockSize()`, has no equivalent in portable C++ without reaching for
+  platform-specific APis (`statvfs` on POSIX, `GetDiskFreeSpace` on Windows) this project has not needed
+  anywhere else — a reasonable line to draw given `bytes` (logical size) already answers "how much data"
+  and the point of `max_entries_per_dir` already covers the structural overcrowding concern.
