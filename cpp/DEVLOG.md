@@ -1782,3 +1782,61 @@ per-row commit cost to dominate badly.
   `query_count`'s real size unpredictably and could silently shrink to "no author data at all" for
   (say) a corpus where titles extract cleanly but authors do not; failing loudly surfaces a header-
   parsing problem immediately rather than producing a quietly-smaller, misleading benchmark.
+
+---
+
+## Entry 39 – index_update reveals hierarchical is far worse than monolithic for updates (2026-10-01)
+
+### What was done
+- `include/stage1/index_update_benchmark.hpp` + `src/index_update_benchmark.cpp`:
+  `benchmark_index_update(language, books, stopwords, output_dir)`, SPEC section 9's `index_update`
+  experiment (the course PDF's "cost of adding new books to an existing index without rebuilding it
+  completely"). Mirrors the Java module's own methodology: the most recent 10% of `books` (at least
+  one, `k`) are "added"; the rest form a "base" index, built and persisted once per repetition
+  (untimed setup, via `measure_elapsed_ms`'s `setup`). The timed operation adds the `k` books one at a
+  time, each immediately followed by a full `IndexWriter::write()` call — currently the *only* kind of
+  "update" any of this project's three writers support (Entry 18/25 already documented that `write()`
+  always persists the whole current index, never incrementally). After the run, the final in-memory
+  index is checked term-by-term against building straight from every book, the same correctness
+  discipline as `datalake_incremental`/`datalake_recovery`. Returns 5 `elapsed` rows plus a derived
+  `per_book` row (`elapsed / k`) per structure.
+- `main.cpp`'s `benchmark` command gained `index_update`.
+- 2 new tests (with a tiny synthetic vocabulary, so the real-world cost below does not show up there
+  and the suite stays fast). Suite total: 162 tests.
+- Ran it for real against the 15 downloaded books (`k=1`, so each repetition adds exactly one more
+  real book to a 14-book base). Mongo skipped (no Docker on this machine).
+
+### A genuinely surprising, measured result
+`monolithic`: **~23-31ms** per update. `hierarchical`: **~3,180-4,560ms** per update — **over 100x
+slower**, the opposite of the naive expectation (and the opposite of what the Java module's own design
+achieves, per its comment: *"hierarchical sólo los ficheros de los términos del libro"*). The cause is
+architectural, not a fluke: `HierarchicalIndexWriter::write()` (Entry 19) iterates over *every* term in
+`index.entries()` and rewrites *all* of their files on every call, because it has no notion of "which
+terms actually changed since the last write" — the same `write()` means "make the whole structure match
+this index" contract every writer in this project shares (Entry 18). With a real book's vocabulary
+running into the low thousands of distinct terms, one update means thousands of individual small-file
+`write_text_file` calls (each its own `create_directories` check, open, write, close), while
+`monolithic` pays for exactly one file write regardless of vocabulary size. This is the project's
+clearest evidence yet (after Entries 31-35's smaller `time`-layout findings) that this stage's writers
+were built to answer "can the format represent three physically different layouts correctly" (which
+they do — proven by `index_build`/`index_query`'s correctness checks) rather than "is this layout
+efficient to update," which SPEC section 9 keeps as a question to measure, not assume.
+
+### Why
+- **Not fixed here, same reasoning as Entry 36's transaction gap before Entry 37 fixed it.** This
+  result exposes a real architectural limitation of `HierarchicalIndexWriter` specifically (it would
+  need to track which terms a given `add_book` call actually touched, and write only those files,
+  to behave the way SPEC section 6 frames the hierarchical layout's whole selling point — "very
+  fine-grained updates: only the file of the affected term is modified"). That is a meaningfully larger
+  change than adding a transaction call, and deserves its own deliberate step rather than a reactive
+  patch inside a benchmark-writing session; recorded here as a concrete, numbers-backed candidate for
+  future work instead.
+- **Measuring with real book text instead of a tiny synthetic vocabulary is what made this visible at
+  all.** The unit test's own tiny corpus (a couple of words per book) would never reveal this cost,
+  because the whole problem scales with vocabulary size, not book count — exactly why Entry 29's
+  decision to benchmark against real, already-downloaded books (not synthetic placeholder text) mattered
+  here specifically, beyond the general realism argument already made there.
+- **The correctness check still runs even though this entry is about timing, not correctness.** A
+  writer that is slow but still produces the right answer is a performance finding to report; a writer
+  that is slow *and* wrong would be a bug to fix first, and the two are easy to conflate without an
+  explicit check separating them.
