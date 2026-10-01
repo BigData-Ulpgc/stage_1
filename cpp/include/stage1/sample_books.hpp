@@ -12,9 +12,14 @@ namespace stage1 {
 // benchmark. SPEC section 9: benchmarks that build/write structures must
 // start from books already on disk, so the network never contaminates the
 // timings.
+// `header` is appended last, not inserted between `book_id` and `body`, so
+// that existing two-value aggregate-init literals like `{1, "some body"}`
+// (several tests already use this shape) keep meaning what they always did,
+// with `header` simply defaulting to an empty string.
 struct SampleBook {
     int book_id;
     std::string body;
+    std::string header;
 };
 
 // Loads every book in `candidate_ids` that `downloaded` already has recorded,

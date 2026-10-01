@@ -15,8 +15,8 @@ using stage1::testing::TempDir;
 namespace {
 
 const std::vector<SampleBook> kCorpus = {
-    {1, "the whale swims. the whale dives."},
-    {2, "the boat sails."},
+    {1, "the whale swims. the whale dives.", ""},
+    {2, "the boat sails.", ""},
 };
 const std::unordered_set<std::string> kStopwords = {"the"};
 

@@ -19,8 +19,10 @@ TEST(LoadSampleBooks, LoadsOnlyDownloadedBooksWithTheirRealBodyFromDisk) {
 
     const auto body_path = root.path() / "1342_body.txt";
     std::ofstream(body_path) << "It is a truth universally acknowledged.";
+    const auto header_path = root.path() / "1342_header.txt";
+    std::ofstream(header_path) << "Title: Pride and Prejudice";
     metadata.insert_book(1342, BookMetadata{"Pride and Prejudice", std::nullopt, std::nullopt, std::nullopt},
-                          body_path.string(), "header.txt");
+                          body_path.string(), header_path.string());
     downloaded.mark(1342);
     // 999 is a candidate but was never downloaded, so it must be skipped.
 
@@ -29,6 +31,7 @@ TEST(LoadSampleBooks, LoadsOnlyDownloadedBooksWithTheirRealBodyFromDisk) {
     ASSERT_EQ(books.size(), 1u);
     EXPECT_EQ(books[0].book_id, 1342);
     EXPECT_EQ(books[0].body, "It is a truth universally acknowledged.");
+    EXPECT_EQ(books[0].header, "Title: Pride and Prejudice");
 }
 
 TEST(LoadSampleBooks, ReturnsEmptyWhenNothingIsDownloaded) {
@@ -45,9 +48,12 @@ TEST(LoadSampleBooks, PreservesCandidateOrder) {
     MetadataStore metadata(root.path() / "metadata.db");
 
     for (int id : {5, 1342, 84}) {
-        const auto path = root.path() / (std::to_string(id) + ".txt");
-        std::ofstream(path) << "body " << id;
-        metadata.insert_book(id, BookMetadata{"T", std::nullopt, std::nullopt, std::nullopt}, path.string(), "h");
+        const auto body_path = root.path() / (std::to_string(id) + "_body.txt");
+        std::ofstream(body_path) << "body " << id;
+        const auto header_path = root.path() / (std::to_string(id) + "_header.txt");
+        std::ofstream(header_path) << "header " << id;
+        metadata.insert_book(id, BookMetadata{"T", std::nullopt, std::nullopt, std::nullopt}, body_path.string(),
+                              header_path.string());
         downloaded.mark(id);
     }
 

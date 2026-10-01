@@ -1333,3 +1333,57 @@ these specific numbers will need to be regenerated once the dataset is larger (s
   would at the "hundreds/thousands" scale `shared/book_ids.txt`'s own comment calls for; the committed
   CSVs should be treated as an early sanity check of the benchmarking tools working correctly end to
   end, not as the final numbers for the report.
+
+---
+
+## Entry 30 – datalake_write, and SampleBook gets a header (2026-10-01)
+
+### What was done
+- `SampleBook` extended with a `header` field, appended last (not between `book_id` and `body`) so
+  every existing two-value aggregate-init literal (`{1, "some body"}`, used by several tests) keeps
+  meaning exactly what it did, with `header` simply defaulting to `""`. `load_sample_books` now reads
+  both `body_path` and `header_path` from the stored metadata.
+- `include/stage1/datalake_write_benchmark.hpp` + `src/datalake_write_benchmark.cpp`:
+  `benchmark_datalake_write(language, books, output_dir)`, SPEC section 9's `datalake_write`
+  experiment (section 3's own "download and write throughput"). For each of the three required
+  layouts — `book`, `range`, `time` — times writing every book in `books` (header + body) through a
+  fresh instance of that `Datalake`, `measure_elapsed_ms`'s default 2+5 repetitions, one
+  `BenchmarkResult` row per measured run.
+- `main.cpp`'s `benchmark` command gained `datalake_write` alongside `index_build`/`index_query`.
+- 2 new tests (five rows per structure with the right shape; the written files actually exist at each
+  layout's expected path, including a direct check against `time_folder_name(now())` for the time
+  layout). Suite total: 131 tests.
+- **A real bug this caught:** extending `SampleBook` with `header` broke two of `sample_books_test.cpp`'s
+  own fixtures, which had been passing placeholder strings (`"header.txt"`, `"h"`) as `header_path` —
+  harmless while nothing read that path, a hard failure (`cannot open file for reading`) the moment
+  `load_sample_books` started reading it for real. Fixed by writing real header files in those fixtures,
+  mirroring what they already did for `body_path`.
+- **Ran it for real** against the same 15 real, already-downloaded books as Entry 29.
+
+### A result that is honest about its own limits
+At `dataset_size=15`, all three structures wrote in roughly the same ~10-14ms, no structure clearly
+faster. This is expected, not a bug: 15 books means `book` creates 15 directories, `range` only 3 (the
+15 ids in `shared/book_ids.txt` happen to fall into 3 thousand-ranges), and `time` just 1 (everything
+written in the same run lands in the same hour); at that scale, directory-creation cost on a local SSD
+is close to noise. The structural difference SPEC section 3 asks about — many small directories vs few
+large ones — only becomes visible at the "hundreds/thousands" scale the dataset is meant to reach.
+Documented so this result is not mistaken for "the three layouts perform identically."
+
+### Why
+- **`header` appended last on `SampleBook`, not inserted after `book_id`.** Changing an existing
+  struct's layout without breaking callers that used positional aggregate initialization is exactly the
+  kind of small compatibility decision `tokenize`'s two-argument overload (Entry 6) and `query_and`'s
+  generic core (Entry 28) already established a habit of making — grow the shape, do not reorder it.
+- **Each repetition re-writes every book, not just the first one.** Same reasoning as
+  `benchmark_index_build` (Entry 27): every repetition is fully self-contained, and `Datalake::write`
+  already overwrites rather than appends (Entry 14), so repeating the same writes 7 times measures the
+  same "steady state" cost each time, with nothing left over from a previous repetition to bias the next.
+- **Three separate `Datalake` instances (one per layout), not one function switching on a `structure`
+  string.** This mirrors `benchmark_index_build`'s own shape, and keeps each layout's real constructor
+  (including `TimeBasedDatalake`'s `Clock&`) explicit at the call site rather than hidden behind a
+  string-based dispatch that would need its own tests to get right.
+- **The small-dataset result reported honestly, with the reason written down, instead of silently
+  omitted or re-run until it "looked better."** The point of these early runs (Entry 29 already flagged
+  this) is to confirm the tools work correctly end to end; a flat result here is real evidence the
+  write-cost difference needs a larger dataset to appear, which is itself useful information for the
+  report, not a failure to hide.

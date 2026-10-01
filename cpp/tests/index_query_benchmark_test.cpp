@@ -15,8 +15,8 @@ using stage1::testing::TempDir;
 namespace {
 
 const std::vector<SampleBook> kCorpus = {
-    {1, "the whale swims near the island."},
-    {2, "the boat sails to the island."},
+    {1, "the whale swims near the island.", ""},
+    {2, "the boat sails to the island.", ""},
 };
 const std::unordered_set<std::string> kStopwords = {"the", "to", "near"};
 const std::vector<std::string> kQueries = {"whale island", "boat", "dragon"};

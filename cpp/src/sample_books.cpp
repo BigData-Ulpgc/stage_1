@@ -12,7 +12,8 @@ std::vector<SampleBook> load_sample_books(const std::vector<int>& candidate_ids,
             continue;  // not downloaded yet: nothing to read
         }
         if (const auto stored = metadata.find_by_id(book_id)) {
-            books.push_back(SampleBook{book_id, read_text_file(stored->body_path)});
+            books.push_back(
+                SampleBook{book_id, read_text_file(stored->body_path), read_text_file(stored->header_path)});
         }
         // No metadata row despite being marked downloaded should not normally
         // happen (the pipeline always stores metadata before marking), so

@@ -12,6 +12,7 @@
 #include "stage1/book_id_list.hpp"
 #include "stage1/control_log.hpp"
 #include "stage1/curl_http_client.hpp"
+#include "stage1/datalake_write_benchmark.hpp"
 #include "stage1/file_io.hpp"
 #include "stage1/gutenberg_client.hpp"
 #include "stage1/index_build_benchmark.hpp"
@@ -36,7 +37,7 @@ const std::filesystem::path kBenchmarksDir = STAGE1_BENCHMARKS_DIR;
 
 void print_usage() {
     std::cerr << "usage: search_engine_stage1 pipeline <N>\n"
-                 "       search_engine_stage1 benchmark <index_build|index_query>\n";
+                 "       search_engine_stage1 benchmark <datalake_write|index_build|index_query>\n";
 }
 
 void describe(const stage1::ControlDecision& decision) {
@@ -121,7 +122,9 @@ int run_benchmark(const std::string& experiment) {
     const auto work_dir = kBenchmarksDir / "work";
     std::vector<stage1::BenchmarkResult> results;
 
-    if (experiment == "index_build") {
+    if (experiment == "datalake_write") {
+        results = stage1::benchmark_datalake_write("cpp", books, work_dir);
+    } else if (experiment == "index_build") {
         results = stage1::benchmark_index_build("cpp", books, stopwords, work_dir);
     } else if (experiment == "index_query") {
         // (Re)builds the structures first, untimed, so index_query always
