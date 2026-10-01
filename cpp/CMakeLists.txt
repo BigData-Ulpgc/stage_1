@@ -86,10 +86,14 @@ add_library(stage1_core
 target_link_libraries(stage1_core PUBLIC stage1_deps)
 
 # ---- Executable ----
-add_executable(search_engine_stage1 src/main.cpp)
+# cli_commands.cpp belongs here, not in stage1_core: it is the only code that
+# reads the directory macros below, which only this target defines.
+add_executable(search_engine_stage1
+  src/main.cpp
+  src/cli_commands.cpp)
 target_link_libraries(search_engine_stage1 PRIVATE stage1_core)
-# Lets main.cpp find shared/ and its own data/ directory regardless of the
-# working directory it is launched from (same pattern as the tests' own
+# Lets cli_commands.cpp find shared/ and its own data/ directory regardless of
+# the working directory it is launched from (same pattern as the tests' own
 # STAGE1_SHARED_DIR, see tests/CMakeLists.txt).
 target_compile_definitions(search_engine_stage1 PRIVATE
   STAGE1_SHARED_DIR="${CMAKE_SOURCE_DIR}/../shared"
