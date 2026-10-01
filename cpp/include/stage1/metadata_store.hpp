@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "stage1/metadata.hpp"
 
@@ -40,6 +41,14 @@ public:
 
     // Looks up a book by id. Returns std::nullopt if no such book is stored.
     std::optional<StoredBook> find_by_id(int book_id) const;
+
+    // Every book whose author/title is exactly `author`/`title` (empty if
+    // none). Exact match, not a substring search -- what SPEC section 4's
+    // "find all books by a specific author" means, and what the author/title
+    // indexes this class already creates (see the constructor) exist for;
+    // nothing called either of these until DEVLOG entry 38.
+    std::vector<StoredBook> find_by_author(const std::string& author) const;
+    std::vector<StoredBook> find_by_title(const std::string& title) const;
 
     // Groups every insert_book() call between begin_transaction() and
     // commit_transaction() into a single disk commit, instead of each

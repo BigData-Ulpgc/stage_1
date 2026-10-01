@@ -133,3 +133,42 @@ TEST(MetadataStore, RollbackDiscardsEverythingSinceBeginTransaction) {
     EXPECT_TRUE(store.find_by_id(1).has_value());   // committed before the transaction: unaffected
     EXPECT_FALSE(store.find_by_id(2).has_value());  // rolled back: never really there
 }
+
+TEST(MetadataStore, FindByAuthorReturnsEveryMatchingBook) {
+    MetadataStore store(":memory:");
+    store.insert_book(1, BookMetadata{"Emma", "Jane Austen", std::nullopt, std::nullopt}, "b1", "h1");
+    store.insert_book(2, BookMetadata{"Persuasion", "Jane Austen", std::nullopt, std::nullopt}, "b2", "h2");
+    store.insert_book(3, BookMetadata{"Frankenstein", "Mary Shelley", std::nullopt, std::nullopt}, "b3", "h3");
+
+    auto books = store.find_by_author("Jane Austen");
+
+    ASSERT_EQ(books.size(), 2u);
+    EXPECT_NE(books[0].book_id, books[1].book_id);
+    for (const auto& book : books) {
+        EXPECT_EQ(book.author, "Jane Austen");
+    }
+}
+
+TEST(MetadataStore, FindByAuthorWithNoMatchesReturnsEmpty) {
+    MetadataStore store(":memory:");
+    store.insert_book(1, BookMetadata{"Emma", "Jane Austen", std::nullopt, std::nullopt}, "b", "h");
+
+    EXPECT_TRUE(store.find_by_author("Unknown Author").empty());
+}
+
+TEST(MetadataStore, FindByTitleReturnsEveryMatchingBook) {
+    MetadataStore store(":memory:");
+    store.insert_book(1, BookMetadata{"Same Title", "Author A", std::nullopt, std::nullopt}, "b1", "h1");
+    store.insert_book(2, BookMetadata{"Same Title", "Author B", std::nullopt, std::nullopt}, "b2", "h2");
+
+    auto books = store.find_by_title("Same Title");
+
+    EXPECT_EQ(books.size(), 2u);
+}
+
+TEST(MetadataStore, FindByAuthorIsAnExactMatchNotASubstringSearch) {
+    MetadataStore store(":memory:");
+    store.insert_book(1, BookMetadata{"T", "Jane Austen", std::nullopt, std::nullopt}, "b", "h");
+
+    EXPECT_TRUE(store.find_by_author("Jane").empty());  // substring, not exact: no match
+}

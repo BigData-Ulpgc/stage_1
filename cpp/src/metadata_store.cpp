@@ -121,6 +121,44 @@ void MetadataStore::insert_book(int book_id, const BookMetadata& metadata, const
     }
 }
 
+namespace {
+
+// Reads the row `statement` is currently positioned on (after a successful
+// SQLITE_ROW step) into a StoredBook. Shared by find_by_id and the
+// find_by_author/find_by_title loops below, all three SELECTs use the exact
+// same column order.
+StoredBook read_row(sqlite3_stmt* statement) {
+    StoredBook book;
+    book.book_id = sqlite3_column_int(statement, 0);
+    book.title = column_optional_text(statement, 1);
+    book.author = column_optional_text(statement, 2);
+    book.language = column_optional_text(statement, 3);
+    book.release_date = column_optional_text(statement, 4);
+    book.body_path = column_text(statement, 5);
+    book.header_path = column_text(statement, 6);
+    return book;
+}
+
+// Runs `sql` (must have exactly one text parameter, `value`) and collects
+// every matching row.
+std::vector<StoredBook> find_all(sqlite3* db, const char* sql, const std::string& value) {
+    Statement statement(db, sql);
+    sqlite3_bind_text(statement.get(), 1, value.c_str(), -1, SQLITE_TRANSIENT);
+
+    std::vector<StoredBook> books;
+    int step_result = sqlite3_step(statement.get());
+    while (step_result == SQLITE_ROW) {
+        books.push_back(read_row(statement.get()));
+        step_result = sqlite3_step(statement.get());
+    }
+    if (step_result != SQLITE_DONE) {
+        throw std::runtime_error(std::string("failed to query books: ") + sqlite3_errmsg(db));
+    }
+    return books;
+}
+
+}  // namespace
+
 void MetadataStore::begin_transaction() { exec(db_, "BEGIN TRANSACTION;"); }
 void MetadataStore::commit_transaction() { exec(db_, "COMMIT;"); }
 void MetadataStore::rollback_transaction() { exec(db_, "ROLLBACK;"); }
@@ -139,16 +177,21 @@ std::optional<StoredBook> MetadataStore::find_by_id(int book_id) const {
     if (step_result != SQLITE_ROW) {
         throw std::runtime_error(std::string("failed to query book: ") + sqlite3_errmsg(db_));
     }
+    return read_row(statement.get());
+}
 
-    StoredBook book;
-    book.book_id = sqlite3_column_int(statement.get(), 0);
-    book.title = column_optional_text(statement.get(), 1);
-    book.author = column_optional_text(statement.get(), 2);
-    book.language = column_optional_text(statement.get(), 3);
-    book.release_date = column_optional_text(statement.get(), 4);
-    book.body_path = column_text(statement.get(), 5);
-    book.header_path = column_text(statement.get(), 6);
-    return book;
+std::vector<StoredBook> MetadataStore::find_by_author(const std::string& author) const {
+    static constexpr const char* kSql =
+        "SELECT book_id, title, author, language, release_date, body_path, header_path "
+        "FROM books WHERE author = ?;";
+    return find_all(db_, kSql, author);
+}
+
+std::vector<StoredBook> MetadataStore::find_by_title(const std::string& title) const {
+    static constexpr const char* kSql =
+        "SELECT book_id, title, author, language, release_date, body_path, header_path "
+        "FROM books WHERE title = ?;";
+    return find_all(db_, kSql, title);
 }
 
 }  // namespace stage1

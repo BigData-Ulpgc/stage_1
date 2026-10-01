@@ -1725,3 +1725,60 @@ per-row commit cost to dominate badly.
   begin/commit/rollback surface costs one more `exec` call and avoids leaving an odd, asymmetric API
   (commit with no way to abort) now that the mechanism exists at all; the dedicated rollback test
   exists specifically so this is not an untested, unverified method sitting in the codebase.
+
+---
+
+## Entry 38 – metadata_query, and two query methods the indexes were waiting for (2026-10-01)
+
+### What was done
+- `MetadataStore` gained `find_by_author(author)`/`find_by_title(title)` (exact match, not substring),
+  returning every matching `StoredBook`. Both reuse a new shared `read_row`/`find_all` pair of internal
+  helpers (anonymous namespace), and `find_by_id` was refactored to use the same `read_row` instead of
+  duplicating the column-reading code. 4 new tests: multiple matches, no matches, matches share a title
+  across different authors, and exact-match semantics (`"Jane"` does not match `"Jane Austen"`).
+  **This closes a real gap**: the author/title SQLite indexes (`idx_books_author`/`idx_books_title`)
+  have existed since Entry 12, created for exactly this kind of lookup, but nothing in this project ever
+  called a query that would use them until now.
+- `include/stage1/metadata_query_benchmark.hpp` + `src/metadata_query_benchmark.cpp`:
+  `benchmark_metadata_query(language, books, output_dir, query_count=1000)`, SPEC section 9's
+  `metadata_query` experiment (section 4's own "query performance": "Find all books by a specific
+  author; or Retrieve the path of a book by its title or ID"). Mirrors the Java module's own
+  methodology: the database is populated once (untimed, via the transaction batching from Entry 37); a
+  fixed-seed (`std::mt19937(42)`) workload of `query_count` random picks (repeats allowed) feeds three
+  query types -- `find_by_id`, `find_by_author`, `find_by_title` -- each run as one timed block of the
+  whole workload per repetition, reporting both the total `elapsed` and a derived `<type>_avg`
+  (microseconds per single lookup). Every query must find at least one result (verified, throws
+  otherwise); every book must have both a title and an author, or the function throws immediately
+  (the workloads need something to query for).
+- `main.cpp`'s `benchmark` command gained `metadata_query`.
+- 2 new tests for the benchmark itself. Suite total: 160 tests.
+- Ran it for real against the 15 downloaded books' real metadata, 1000 queries per type: all three
+  types landed around 8-9 microseconds per query on average (`find_by_id` slightly faster, ~8us, than
+  the indexed-but-still-disk-backed `find_by_author`/`find_by_title`, ~9-10us) — close enough at this
+  small dataset size that the gap is not yet meaningful; worth re-measuring once the dataset is larger,
+  the same caveat already noted for every other benchmark run so far at `dataset_size=15`.
+
+### Why
+- **`find_by_author`/`find_by_title` added now, not earlier.** They had no caller until this
+  experiment needed them; building them speculatively back in Phase 3 would have been exactly the kind
+  of premature addition Entry 13 already argued against for a different part of `MetadataStore`. A
+  benchmark that needs a real capability is precisely the "second real use" signal this project has
+  used throughout (`HttpClient`, `TempDir`, `mongo_is_reachable`, `Datalake::locate`/`list_book_ids`) to
+  decide when generalizing stops being speculative.
+- **Exact match, not a substring/`LIKE` search.** SPEC section 4's own phrasing ("find all books by a
+  specific author") describes looking up a known author, not a fuzzy search; exact match is simpler,
+  faster (a plain index lookup rather than a table scan `LIKE` would often require), and is what the
+  existing index actually accelerates.
+- **The whole query-type workload timed as one block, not query-by-query.** Matches
+  `benchmark_index_query`'s own reasoning (Entry 28): a single query is too fast to time meaningfully on
+  its own (clock resolution and call overhead would dominate), so timing `query_count` of them together
+  and deriving a per-query average is the way to get a stable, meaningful number.
+- **The database populated via a transaction, not row-by-row.** Directly reuses the fix from Entry 37
+  instead of reintroducing the same one-commit-per-row cost in a different benchmark's setup step; this
+  experiment is about query cost, and an unnecessarily slow population phase would be noise in
+  comparison, not signal.
+- **Requiring every book to have a title and an author, throwing otherwise, instead of silently
+  skipping incomplete books.** A workload built by skipping some books while keeping others changes
+  `query_count`'s real size unpredictably and could silently shrink to "no author data at all" for
+  (say) a corpus where titles extract cleanly but authors do not; failing loudly surfaces a header-
+  parsing problem immediately rather than producing a quietly-smaller, misleading benchmark.
