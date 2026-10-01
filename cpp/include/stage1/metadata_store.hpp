@@ -41,6 +41,18 @@ public:
     // Looks up a book by id. Returns std::nullopt if no such book is stored.
     std::optional<StoredBook> find_by_id(int book_id) const;
 
+    // Groups every insert_book() call between begin_transaction() and
+    // commit_transaction() into a single disk commit, instead of each
+    // insert_book() committing on its own (SQLite's default, "autocommit"
+    // behavior). Inserting many rows one by one without this pays one fsync
+    // per row, which Entry 36's benchmark run showed as noisy, lower
+    // throughput; see Entry 37 for the measured before/after. rollback_
+    // transaction() discards everything written since begin_transaction()
+    // instead of committing it.
+    void begin_transaction();
+    void commit_transaction();
+    void rollback_transaction();
+
 private:
     sqlite3* db_;
 };

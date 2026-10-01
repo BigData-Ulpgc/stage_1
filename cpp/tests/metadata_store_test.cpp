@@ -109,3 +109,27 @@ TEST(MetadataStore, CreatesMissingParentDirectories) {
     EXPECT_TRUE(std::filesystem::exists(nested_path));
     std::filesystem::remove_all(db_path.path().parent_path() / "datamarts");
 }
+
+TEST(MetadataStore, InsertsInsideATransactionAreVisibleAfterCommit) {
+    MetadataStore store(":memory:");
+
+    store.begin_transaction();
+    store.insert_book(1, BookMetadata{"One", std::nullopt, std::nullopt, std::nullopt}, "b1", "h1");
+    store.insert_book(2, BookMetadata{"Two", std::nullopt, std::nullopt, std::nullopt}, "b2", "h2");
+    store.commit_transaction();
+
+    EXPECT_TRUE(store.find_by_id(1).has_value());
+    EXPECT_TRUE(store.find_by_id(2).has_value());
+}
+
+TEST(MetadataStore, RollbackDiscardsEverythingSinceBeginTransaction) {
+    MetadataStore store(":memory:");
+    store.insert_book(1, BookMetadata{"Already committed", std::nullopt, std::nullopt, std::nullopt}, "b", "h");
+
+    store.begin_transaction();
+    store.insert_book(2, BookMetadata{"Should vanish", std::nullopt, std::nullopt, std::nullopt}, "b", "h");
+    store.rollback_transaction();
+
+    EXPECT_TRUE(store.find_by_id(1).has_value());   // committed before the transaction: unaffected
+    EXPECT_FALSE(store.find_by_id(2).has_value());  // rolled back: never really there
+}

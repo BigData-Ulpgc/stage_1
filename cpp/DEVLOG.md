@@ -1682,3 +1682,46 @@ per-row commit cost to dominate badly.
   the public `MetadataStore` API or only used internally by callers that know they are doing bulk
   work) that deserves its own deliberate step, not a quick patch made only because a benchmark run
   happened to reveal it.
+
+---
+
+## Entry 37 – Fixing the transaction gap Entry 36 found, and measuring the difference (2026-10-01)
+
+### What was done
+- `MetadataStore` gained `begin_transaction()`/`commit_transaction()`/`rollback_transaction()`
+  (`BEGIN TRANSACTION;`/`COMMIT;`/`ROLLBACK;`, reusing the existing `exec` helper). 2 new tests:
+  inserts made between `begin_transaction()` and `commit_transaction()` are visible after commit;
+  `rollback_transaction()` discards everything written since `begin_transaction()`, leaving anything
+  committed *before* it untouched.
+- `benchmark_metadata_insert`'s timed operation now wraps its whole insert loop in one transaction
+  (`begin_transaction()` ... `commit_transaction()`) instead of leaving every `insert_book()` call to
+  commit on its own. Suite total: 154 tests.
+- **Re-ran the real benchmark against the same 15 downloaded books, before and after, to measure the
+  actual difference** rather than assuming the fix helped:
+
+  | | elapsed (ms, 5 runs) | throughput (rows/s, 5 runs) |
+  |---|---|---|
+  | **Before** (Entry 36, no transaction) | 11.3, 7.6, 11.9, 7.0, 7.3 | 1326, 1965, 1263, 2131, 2051 |
+  | **After** (this entry, one transaction) | 3.3, 3.3, 3.2, 3.3, 3.3 | 4485, 4506, 4638, 4557, 4614 |
+
+  Roughly **2.5x faster on average**, and just as importantly, the measured time went from noisy
+  (7.0-11.9ms, swinging by a factor of ~1.7x run to run) to tightly consistent (3.2-3.3ms every time).
+  The noise itself is explained by what changed: 15 separate implicit commits (each paying its own,
+  somewhat variable fsync cost) became 1 commit for the whole batch.
+
+### Why
+- **Measured before and after with the same benchmark, not just reasoned that it should help.** The
+  whole point of building this benchmarking infrastructure (Entry 26 onward) is to replace "this should
+  be faster" with an actual number; fixing the gap Entry 36 found without re-running the same experiment
+  would have left the claim unverified, exactly the kind of thing this project's benchmarks exist to
+  avoid.
+- **`begin_transaction`/`commit_transaction`/`rollback_transaction` added as general `MetadataStore`
+  methods, not hidden inside the benchmark.** Transaction batching is useful to any future caller doing
+  bulk inserts (the real pipeline's indexing step currently inserts one book at a time, which does not
+  need this, but a future bulk-import path would); exposing it on `MetadataStore` itself, the same place
+  `insert_book` already lives, means the benchmark is just an ordinary caller of a real feature, not a
+  special case with its own private workaround.
+- **`rollback_transaction` included even though nothing calls it yet.** A minimal, complete
+  begin/commit/rollback surface costs one more `exec` call and avoids leaving an odd, asymmetric API
+  (commit with no way to abort) now that the mechanism exists at all; the dedicated rollback test
+  exists specifically so this is not an untested, unverified method sitting in the codebase.

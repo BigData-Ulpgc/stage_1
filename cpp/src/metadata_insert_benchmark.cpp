@@ -20,12 +20,16 @@ std::vector<BenchmarkResult> benchmark_metadata_insert(const std::string& langua
         store = std::make_unique<MetadataStore>(db_path);  // opens + creates schema: untimed on purpose
     };
     const auto operation = [&] {
+        // One commit for the whole batch instead of one per row: see DEVLOG
+        // entry 37 for the before/after this made (entry 36 found the gap).
+        store->begin_transaction();
         for (const auto& book : books) {
             const BookMetadata metadata = extract_metadata(book.header);
             const std::string body_path = "datalake/" + std::to_string(book.book_id) + "/body.txt";
             const std::string header_path = "datalake/" + std::to_string(book.book_id) + "/header.txt";
             store->insert_book(book.book_id, metadata, body_path, header_path);
         }
+        store->commit_transaction();
     };
 
     const auto elapsed = measure_elapsed_ms(setup, operation);

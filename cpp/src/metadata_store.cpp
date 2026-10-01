@@ -121,6 +121,10 @@ void MetadataStore::insert_book(int book_id, const BookMetadata& metadata, const
     }
 }
 
+void MetadataStore::begin_transaction() { exec(db_, "BEGIN TRANSACTION;"); }
+void MetadataStore::commit_transaction() { exec(db_, "COMMIT;"); }
+void MetadataStore::rollback_transaction() { exec(db_, "ROLLBACK;"); }
+
 std::optional<StoredBook> MetadataStore::find_by_id(int book_id) const {
     static constexpr const char* kSql =
         "SELECT book_id, title, author, language, release_date, body_path, header_path "
