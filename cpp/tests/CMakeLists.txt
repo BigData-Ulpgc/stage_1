@@ -33,7 +33,8 @@ add_executable(stage1_tests
   datalake_storage_benchmark_test.cpp
   metadata_insert_benchmark_test.cpp
   metadata_query_benchmark_test.cpp
-  index_update_benchmark_test.cpp)
+  index_update_benchmark_test.cpp
+  index_memory_benchmark_test.cpp)
 target_link_libraries(stage1_tests PRIVATE stage1_core GTest::gtest_main)
 # Lets tests read the shared contract files (stopwords, queries, book ids)
 target_compile_definitions(stage1_tests PRIVATE

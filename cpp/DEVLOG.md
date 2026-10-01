@@ -1904,3 +1904,60 @@ partial effect on it.
   this nuance into the DEVLOG rather than just the headline "3-4x faster" is what keeps this log useful
   for the report: both the improvement and its real limit are facts worth knowing before deciding
   whether this structure is good enough for the group's final choice.
+
+---
+
+## Entry 41 – index_memory, measured without a garbage collector to lean on (2026-10-01)
+
+### What was done
+- `include/stage1/index_memory_benchmark.hpp` + `src/index_memory_benchmark.cpp`:
+  `benchmark_index_memory(language, books, stopwords, output_dir)`, SPEC section 9's `index_memory`
+  experiment. C++ has no equivalent to the Java module's `Runtime.totalMemory()/freeMemory()`-after-GC
+  estimate, since there is no garbage collector or heap-size introspection API; the closest honest
+  substitute is the operating system's own **peak resident set size** (`getrusage`'s `ru_maxrss`,
+  POSIX — available on both macOS and Linux, this project's only targets), measured before and after
+  each step. Two measurements, both single-shot (no `measure_elapsed_ms` repetitions: RSS is a
+  point-in-time OS counter, not something warmup/averaging applies to):
+  - `in_memory_index`: building the shared `InvertedIndex` from `books` — what every structure's
+    in-memory representation starts from.
+  - `monolithic`: on top of that, re-parsing the just-written monolithic JSON file back into memory
+    (the `load_monolithic` step `benchmark_index_query`, Entry 28, already does for real queries).
+  `hierarchical` and `mongo` are deliberately **not** measured: neither has an equivalent "loaded into
+  this process" state in this project's design — hierarchical reads small per-term files on demand with
+  nothing kept resident across queries, and mongo's data lives in the database server's own process,
+  not this one (the same limitation the Java module's own comment notes for its client-only view).
+- `ru_maxrss`'s platform-dependent unit handled explicitly: bytes on macOS, kilobytes on Linux
+  (`#if defined(__APPLE__)`).
+- Deltas clamped to zero (`std::max<long>(0, after - before)`), documented as meaning "this step did
+  not push the peak any higher than an earlier, larger step already had" rather than a meaningless
+  negative number — `ru_maxrss` is a **monotonic peak for the whole process**, not a per-object
+  counter, so later, smaller steps can legitimately measure as zero if an earlier step already set a
+  higher peak. This single-process ordering caveat is this benchmark's own honest limitation,
+  documented in the header rather than hidden, the same way Java's own file documents its GC
+  estimate's imprecision.
+- `main.cpp`'s `benchmark` command gained `index_memory`.
+- 1 new test (checks row shape, not specific magnitudes — RSS numbers are inherently
+  platform/allocator-dependent and would make a unit test flaky if asserted precisely). Suite total:
+  166 tests.
+- Ran it for real against the 15 downloaded books: building `in_memory_index` grew the peak by
+  **~12.86 MB**; re-parsing the monolithic JSON added **~5.24 MB** more — both plausible, non-zero,
+  real numbers for a modest real-text corpus, not noise.
+
+### Why
+- **Peak RSS instead of trying to emulate Java's GC-based estimate.** Forcing an artificial "GC-like"
+  moment in C++ (there is nothing to force — allocations are freed deterministically by destructors,
+  not by a collector) would be inventing a C++ concept that does not exist just to mirror Java's
+  method; using the OS's own, real memory accounting is the more honest choice for this language,
+  even though it is a different kind of estimate with its own caveats (monotonic peak, process-wide)
+  rather than Java's (heap after a *requested*, not guaranteed, GC).
+- **`hierarchical`/`mongo` left unmeasured rather than reported as a misleading `0`.** Writing a `0`
+  bytes row for them would read as "this structure uses no memory," which is not what is actually true
+  (it uses *no resident, cached, in-process* memory, because its whole design never loads anything
+  persistent into this process) — a meaningfully different, more informative statement than a bare
+  zero, and worth the reader's attention rather than silently averaged into a comparison table.
+- **Two measurements sharing one process, with the ordering caveat documented, instead of forking a
+  fresh process per measurement for cleaner isolation.** A `fork()`-per-structure design would give more
+  accurate, order-independent numbers, but introduces real complexity (coordinating with GoogleTest's
+  own process model, file descriptor handling across the fork) for a benchmark whose own purpose is
+  already an *estimate* by nature, in every language's version of it; the honest, documented caveat is a
+  smaller, more proportionate cost than the added design risk.

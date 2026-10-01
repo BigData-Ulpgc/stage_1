@@ -16,6 +16,7 @@
 #include "stage1/datalake_recovery_benchmark.hpp"
 #include "stage1/datalake_storage_benchmark.hpp"
 #include "stage1/metadata_insert_benchmark.hpp"
+#include "stage1/index_memory_benchmark.hpp"
 #include "stage1/index_update_benchmark.hpp"
 #include "stage1/metadata_query_benchmark.hpp"
 #include "stage1/datalake_lookup_benchmark.hpp"
@@ -47,7 +48,7 @@ void print_usage() {
                  "       search_engine_stage1 benchmark "
                  "<datalake_write|datalake_lookup|datalake_incremental|datalake_recovery|"
                  "datalake_storage|metadata_insert|metadata_query|index_build|index_query|"
-                 "index_update>\n";
+                 "index_update|index_memory>\n";
 }
 
 void describe(const stage1::ControlDecision& decision) {
@@ -157,6 +158,8 @@ int run_benchmark(const std::string& experiment) {
         results = stage1::benchmark_index_query("cpp", static_cast<int>(books.size()), queries, stopwords, work_dir);
     } else if (experiment == "index_update") {
         results = stage1::benchmark_index_update("cpp", books, stopwords, work_dir);
+    } else if (experiment == "index_memory") {
+        results = stage1::benchmark_index_memory("cpp", books, stopwords, work_dir);
     } else {
         std::cerr << "[benchmark] unknown experiment: " << experiment << "\n";
         return 1;
