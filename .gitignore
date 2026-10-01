@@ -62,3 +62,11 @@ data/
 *.db
 *.sqlite
 *.sqlite3
+
+# ---- Datos generados por la implementación Java ----
+java/stage1/data/
+java/stage1/benchmarks/work/
+!java/stage1/benchmarks/results/*.csv
+
+# ---- Memoria del proyecto ----
+java/stage1/docs/Memoria_Stage1_Java.pdf

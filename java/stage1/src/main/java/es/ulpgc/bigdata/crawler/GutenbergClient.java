@@ -6,6 +6,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.Objects;
 import java.util.Optional;
 
 /**
@@ -18,14 +19,14 @@ public class GutenbergClient implements BookSource {
     private static final String URL_TEMPLATE =
             "https://www.gutenberg.org/cache/epub/%d/pg%d.txt";
 
-    private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
-    private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(15);
-
     private final HttpClient httpClient;
+    private final Duration requestTimeout;
 
-    public GutenbergClient() {
+    /** Los timeouts vienen de AppConfig (http.connect.timeout.seconds, http.request.timeout.seconds). */
+    public GutenbergClient(Duration connectTimeout, Duration requestTimeout) {
+        this.requestTimeout = Objects.requireNonNull(requestTimeout, "requestTimeout");
         this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(CONNECT_TIMEOUT)
+                .connectTimeout(Objects.requireNonNull(connectTimeout, "connectTimeout"))
                 .build();
     }
 
@@ -42,7 +43,7 @@ public class GutenbergClient implements BookSource {
 
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(uri)
-                .timeout(REQUEST_TIMEOUT)
+                .timeout(requestTimeout)
                 .GET()
                 .build();
 
