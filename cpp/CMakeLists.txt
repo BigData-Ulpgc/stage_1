@@ -69,6 +69,7 @@ add_library(stage1_core
   src/book_id_list.cpp
   src/pipeline.cpp
   src/benchmark.cpp
+  src/sample_books.cpp
   src/index_build_benchmark.cpp
   src/query_list.cpp
   src/index_query_benchmark.cpp)
@@ -82,7 +83,8 @@ target_link_libraries(search_engine_stage1 PRIVATE stage1_core)
 # STAGE1_SHARED_DIR, see tests/CMakeLists.txt).
 target_compile_definitions(search_engine_stage1 PRIVATE
   STAGE1_SHARED_DIR="${CMAKE_SOURCE_DIR}/../shared"
-  STAGE1_DATA_DIR="${CMAKE_SOURCE_DIR}/data")
+  STAGE1_DATA_DIR="${CMAKE_SOURCE_DIR}/data"
+  STAGE1_BENCHMARKS_DIR="${CMAKE_SOURCE_DIR}/benchmarks")
 
 # ---- Tests ----
 enable_testing()

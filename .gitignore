@@ -56,6 +56,8 @@ compile_commands.json
 *.dylib
 *.dSYM/
 cpp/data/
+cpp/benchmarks/work/
+!cpp/benchmarks/results/*.csv
 
 # ---- Datos del Proyecto y Bases de Datos (¡CRÍTICO!) ----
 data/

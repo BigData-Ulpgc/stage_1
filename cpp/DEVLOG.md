@@ -1266,3 +1266,70 @@ called the binary with no arguments, which now just prints usage and exits 1. It
   somewhere"; introducing a new interface hierarchy for that, mirroring `Datalake`/`IndexWriter`, would
   be the same premature-generalization mistake already avoided once for `MetadataRepository` (Entry 13)
   — `std::function` is already the right amount of abstraction `query_and`'s own signature needed.
+
+---
+
+## Entry 29 – Real books instead of synthetic data, and a CLI to run benchmarks (2026-10-01)
+
+### What was done
+- `SampleBook` moved out of `index_build_benchmark.hpp` into its own `include/stage1/sample_books.hpp`
+  (+ `src/sample_books.cpp`), since it is a corpus concept shared by every future experiment, not
+  something that belongs to `index_build` specifically.
+- `load_sample_books(candidate_ids, downloaded, metadata)`: walks `candidate_ids` in order, keeps only
+  the ones `downloaded` already has recorded, and reads each one's real body straight off disk via the
+  path `metadata` stored for it — the exact same lookup `main.cpp` already does to rebuild the in-memory
+  index on startup (Entry 25). No network, no synthetic text: this reuses whatever a real
+  `pipeline <N>` run already downloaded.
+- `main.cpp` gained a second command: `search_engine_stage1 benchmark <index_build|index_query>`.
+  Loads the real downloaded books via `load_sample_books`, runs the requested experiment, and writes
+  `benchmarks/results/cpp_<experiment>.csv`. `index_query` first (re)builds the structures, untimed, so
+  it always queries whatever `books` currently holds regardless of invocation order. Mirrors the Java
+  module's own `benchmarks/work/` (scratch, git-ignored) vs `benchmarks/results/*.csv` (committed)
+  split; `.gitignore` updated with the matching exception for `cpp/`, since the existing blanket `*.csv`
+  rule would otherwise silently swallow these too (the same rule Daniel's Python branch added, and the
+  same fix Java's own merge already applied for its own path).
+- 3 new tests (`tests/sample_books_test.cpp`): only downloaded books are loaded with their real body
+  content, nothing is downloaded means nothing is loaded, and candidate order is preserved regardless
+  of insertion order into the control log. Suite total: 129 tests.
+- **Ran it for real**, end to end, against this machine's actual network: `pipeline 30` downloaded and
+  indexed all 15 books currently in `shared/book_ids.txt`; `benchmark index_build` and
+  `benchmark index_query` then produced real CSVs (Mongo skipped, no Docker on this machine). Scratch
+  `data/`/`benchmarks/work/` removed afterward; the two result CSVs were kept and committed.
+
+### A genuinely useful early result
+At `dataset_size=15`: **hierarchical took ~23x longer to build** than monolithic (≈1900ms vs ≈83ms,
+averaged over 5 runs) — the cost of writing thousands of tiny per-term files that SPEC section 6 itself
+calls out as hierarchical's weakness. But **hierarchical answered the query workload ~55x faster**
+(≈0.25ms vs ≈14ms) — monolithic's measured time is dominated by re-parsing the whole JSON file on every
+repetition (Entry 28's "cold" load), while hierarchical has no such step and just opens the handful of
+small files each query actually needs. Exactly the kind of build-speed-vs-query-speed trade-off SPEC
+section 6 and the course PDF ask the report to discuss, visible already with a 15-book sample — though
+these specific numbers will need to be regenerated once the dataset is larger (see below).
+
+### Why
+- **Real text over synthetic generation**, unlike the Java module's `BenchmarkBooks.synthetic(...)`
+  approach. This project already had a working, tested downloader (`GutenbergSource`/`CurlHttpClient`,
+  Entry 9-10) and a pipeline that exercises it end to end (Entry 25); reusing real, already-downloaded
+  books costs no new "fake text" generation code and gives real vocabulary and sentence-length
+  distributions instead of a fixed, repeated word list. The trade-off, made explicit: it needs a one-time
+  network step (`pipeline <N>`) before any benchmark can run, where synthetic data would not.
+- **`SampleBook` relocated instead of left in `index_build_benchmark.hpp`.** `index_query`, and every
+  future experiment that needs real books (`datalake_write`, `metadata_insert`, ...), would otherwise
+  have had to `#include` the build benchmark's header just to get a type that has nothing to do with
+  building anything — the same "this concept now has more than one real user" signal that already moved
+  `TempDir`, `FakeHttpClient`/`FakeClock`, and `mongo_is_reachable` into shared locations.
+- **`load_sample_books` silently skips a downloaded id with no metadata row**, instead of throwing.
+  SPEC's own control-layer discipline (Entry 23-24: never mark something done until it fully succeeded)
+  already guarantees this should not happen in practice; treating it as a hard error here would turn a
+  pipeline implementation detail into a benchmark-tool crash, for no benefit over simply not counting
+  that one book.
+- **`benchmark index_query` rebuilds the structures itself, untimed, instead of assuming
+  `benchmark index_build` already ran in the same invocation.** Each CLI command is self-sufficient:
+  running `benchmark index_query` alone, days after the last `benchmark index_build`, still measures
+  against the current contents of `books`, not stale files left over from an earlier, possibly different
+  dataset size.
+- **Small dataset (15 books) acknowledged explicitly, not hidden.** This is real, honest data — not a
+  placeholder — but it is small enough that filesystem/OS caching effects could matter more than they
+  would at the "hundreds/thousands" scale `shared/book_ids.txt`'s own comment calls for; the committed
+  CSVs should be treated as an early sanity check of the benchmarking tools working correctly end to
+  end, not as the final numbers for the report.

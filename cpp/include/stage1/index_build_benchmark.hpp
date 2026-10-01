@@ -6,18 +6,9 @@
 #include <vector>
 
 #include "stage1/benchmark.hpp"
+#include "stage1/sample_books.hpp"
 
 namespace stage1 {
-
-// An already-downloaded, already header/body-split book, ready to feed a
-// benchmark. SPEC section 9: benchmarks that build/write structures must
-// start from books already on disk (e.g. sample_dataset/), so the network
-// never contaminates the timings; loading these is the caller's job, this
-// struct is just the shape the benchmark needs.
-struct SampleBook {
-    int book_id;
-    std::string body;
-};
 
 // SPEC section 9's "index_build" experiment: for each required index
 // structure (monolithic, hierarchical, and mongo if reachable -- skipped

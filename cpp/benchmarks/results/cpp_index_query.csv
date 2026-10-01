@@ -1,0 +1,11 @@
+language,experiment,structure,dataset_size,repetition,metric,value,unit
+cpp,index_query,monolithic,15,1,elapsed,13.869,ms
+cpp,index_query,monolithic,15,2,elapsed,15.264,ms
+cpp,index_query,monolithic,15,3,elapsed,13.895,ms
+cpp,index_query,monolithic,15,4,elapsed,13.832,ms
+cpp,index_query,monolithic,15,5,elapsed,13.936,ms
+cpp,index_query,hierarchical,15,1,elapsed,0.260,ms
+cpp,index_query,hierarchical,15,2,elapsed,0.252,ms
+cpp,index_query,hierarchical,15,3,elapsed,0.251,ms
+cpp,index_query,hierarchical,15,4,elapsed,0.252,ms
+cpp,index_query,hierarchical,15,5,elapsed,0.251,ms

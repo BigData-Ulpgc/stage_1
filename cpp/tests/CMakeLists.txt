@@ -22,6 +22,7 @@ add_executable(stage1_tests
   book_id_list_test.cpp
   pipeline_test.cpp
   benchmark_test.cpp
+  sample_books_test.cpp
   index_build_benchmark_test.cpp
   query_list_test.cpp
   index_query_benchmark_test.cpp)
