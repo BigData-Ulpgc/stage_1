@@ -1629,3 +1629,56 @@ things happen to be written, which this project's own pipeline does in bursts, n
   platform-specific APis (`statvfs` on POSIX, `GetDiskFreeSpace` on Windows) this project has not needed
   anywhere else — a reasonable line to draw given `bytes` (logical size) already answers "how much data"
   and the point of `max_entries_per_dir` already covers the structural overcrowding concern.
+
+---
+
+## Entry 36 – metadata_insert, and a transaction gap this benchmark exposed (2026-10-01)
+
+### What was done
+- `include/stage1/metadata_insert_benchmark.hpp` + `src/metadata_insert_benchmark.cpp`:
+  `benchmark_metadata_insert(language, books, output_dir)`, SPEC section 9's `metadata_insert`
+  experiment (section 4's own "insertion speed"). Before each repetition (untimed, via
+  `measure_elapsed_ms`'s `setup`): deletes any previous database file and opens a fresh
+  `MetadataStore` (schema creation happens here, not in the timed part). Timed: `extract_metadata`
+  each book's header and `insert_book` it. Verifies every book is present via `find_by_id` after the
+  final repetition. `structure` is always `"sqlite"` — this project still has only one metadata
+  backend (Entry 13's reasoning for not generalizing `MetadataStore` without a second real
+  implementation still holds), unlike the Java module, which also benchmarks a `"sqlite_no_index"`
+  variant by dropping the author/title indexes. Returns 5 `elapsed` rows plus 5 derived `throughput`
+  rows (`rows_per_s`), matching the Java module's own metric shape.
+- `main.cpp`'s `benchmark` command gained `metadata_insert`.
+- 1 new test. Suite total: 152 tests.
+- Ran it for real against the 15 downloaded books' real headers.
+
+### A real gap this exposed: no transaction batching
+At `dataset_size=15`: throughput varied noisily between roughly 1,260 and 2,130 rows/s across the 5
+measured repetitions — noisy for a reason worth naming: `MetadataStore::insert_book` runs each `INSERT`
+as its own implicit SQLite transaction (no `BEGIN`/`COMMIT` wrapping multiple rows), so every single row
+pays its own commit cost. The Java module's equivalent explicitly batches rows into one transaction per
+batch (`saveAll`, `DEFAULT_BATCH_SIZE = 1000`). This project's current `MetadataStore` does not offer
+that at all. Not fixed here — this benchmark's job is to measure and report what exists, not to
+silently patch the thing being measured — but recorded as a concrete, benchmark-discovered candidate
+improvement: wrapping a batch of inserts in one transaction would very likely raise and stabilize this
+throughput number, and is exactly the kind of finding SPEC section 4's benchmarking considerations
+("insertion speed... thousands of books") exist to surface before the dataset is large enough for the
+per-row commit cost to dominate badly.
+
+### Why
+- **Opening the database (and creating its schema) happens in `setup`, not inside the timed
+  operation.** That cost is fixed and one-time per repetition regardless of how many rows get
+  inserted; including it in the timed block would inflate "insertion speed" by a cost that has nothing
+  to do with how many rows were inserted, especially visible at this project's current small sample
+  sizes.
+- **`structure` fixed to `"sqlite"` rather than inventing a second backend to compare.** Same reasoning
+  already applied in Entry 13: SPEC does not require this comparison (it is explicitly optional, per
+  the course PDF), and building a toggle for it now, with no immediate plan to add a second backend,
+  would be exactly the premature generalization that reasoning was written to avoid.
+- **Verifying every book is findable after the run, not just trusting the loop completed.** The same
+  "a benchmark about correctness should fail loudly if it is not correct" reasoning already applied to
+  `datalake_incremental`/`datalake_recovery` (Entries 33-34): a silently-broken `insert_book` would
+  otherwise still produce a plausible-looking timing number.
+- **The missing-transaction finding recorded rather than silently fixed.** Changing `MetadataStore` to
+  batch inserts is a real, separate design decision (how big a batch, whether to expose it as part of
+  the public `MetadataStore` API or only used internally by callers that know they are doing bulk
+  work) that deserves its own deliberate step, not a quick patch made only because a benchmark run
+  happened to reveal it.

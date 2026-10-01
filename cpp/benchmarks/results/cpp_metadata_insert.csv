@@ -1,0 +1,11 @@
+language,experiment,structure,dataset_size,repetition,metric,value,unit
+cpp,metadata_insert,sqlite,15,1,elapsed,11.309,ms
+cpp,metadata_insert,sqlite,15,1,throughput,1326.328,rows_per_s
+cpp,metadata_insert,sqlite,15,2,elapsed,7.633,ms
+cpp,metadata_insert,sqlite,15,2,throughput,1965.044,rows_per_s
+cpp,metadata_insert,sqlite,15,3,elapsed,11.876,ms
+cpp,metadata_insert,sqlite,15,3,throughput,1263.052,rows_per_s
+cpp,metadata_insert,sqlite,15,4,elapsed,7.040,ms
+cpp,metadata_insert,sqlite,15,4,throughput,2130.556,rows_per_s
+cpp,metadata_insert,sqlite,15,5,elapsed,7.315,ms
+cpp,metadata_insert,sqlite,15,5,throughput,2050.698,rows_per_s

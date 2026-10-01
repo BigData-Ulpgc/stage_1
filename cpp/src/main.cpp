@@ -15,6 +15,7 @@
 #include "stage1/datalake_incremental_benchmark.hpp"
 #include "stage1/datalake_recovery_benchmark.hpp"
 #include "stage1/datalake_storage_benchmark.hpp"
+#include "stage1/metadata_insert_benchmark.hpp"
 #include "stage1/datalake_lookup_benchmark.hpp"
 #include "stage1/datalake_write_benchmark.hpp"
 #include "stage1/file_io.hpp"
@@ -43,7 +44,7 @@ void print_usage() {
     std::cerr << "usage: search_engine_stage1 pipeline <N>\n"
                  "       search_engine_stage1 benchmark "
                  "<datalake_write|datalake_lookup|datalake_incremental|datalake_recovery|"
-                 "datalake_storage|index_build|index_query>\n";
+                 "datalake_storage|metadata_insert|index_build|index_query>\n";
 }
 
 void describe(const stage1::ControlDecision& decision) {
@@ -138,6 +139,8 @@ int run_benchmark(const std::string& experiment) {
         results = stage1::benchmark_datalake_recovery("cpp", books, work_dir);
     } else if (experiment == "datalake_storage") {
         results = stage1::benchmark_datalake_storage("cpp", books, work_dir);
+    } else if (experiment == "metadata_insert") {
+        results = stage1::benchmark_metadata_insert("cpp", books, work_dir);
     } else if (experiment == "index_build") {
         results = stage1::benchmark_index_build("cpp", books, stopwords, work_dir);
     } else if (experiment == "index_query") {
