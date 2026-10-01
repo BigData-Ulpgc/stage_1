@@ -81,7 +81,8 @@ add_library(stage1_core
   src/metadata_insert_benchmark.cpp
   src/metadata_query_benchmark.cpp
   src/index_update_benchmark.cpp
-  src/index_memory_benchmark.cpp)
+  src/index_memory_benchmark.cpp
+  src/index_disk_benchmark.cpp)
 target_link_libraries(stage1_core PUBLIC stage1_deps)
 
 # ---- Executable ----

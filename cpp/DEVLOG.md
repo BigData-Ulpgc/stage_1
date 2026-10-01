@@ -1961,3 +1961,55 @@ partial effect on it.
   own process model, file descriptor handling across the fork) for a benchmark whose own purpose is
   already an *estimate* by nature, in every language's version of it; the honest, documented caveat is a
   smaller, more proportionate cost than the added design risk.
+
+---
+
+## Entry 42 – index_disk, the last of the 12 SPEC section 9 experiments (2026-10-01)
+
+### What was done
+- `include/stage1/index_disk_benchmark.hpp` + `src/index_disk_benchmark.cpp`:
+  `benchmark_index_disk(language, books, stopwords, output_dir)`, SPEC section 9's `index_disk`
+  experiment (the course PDF's own "Memory and disk usage"). Builds the index once, writes it through
+  `monolithic` and `hierarchical`, and reports per structure: `bytes` (total file size on disk,
+  recursive), `files` (file count), and `terms`/`postings` — the index's *logical* size, identical
+  across structures by construction (same vocabulary, same postings; the two are read from the same
+  `InvertedIndex` object, so there is nothing to independently verify here, unlike experiments comparing
+  two separately-built structures). `mongo` deliberately left out: its real disk footprint needs
+  MongoDB's own `collStats` command, whose numeric BSON fields vary in type across driver/server
+  versions and need careful handling this machine (no Docker) cannot verify — same "don't ship what
+  can't be checked now" discipline already used for `allocated_bytes` (Entry 35) and the Mongo gaps in
+  Entries 28/41.
+- `main.cpp`'s `benchmark` command gained `index_disk`. **This is the 12th and last of SPEC section 9's
+  experiments** — every one of `datalake_write`, `datalake_lookup`, `datalake_incremental`,
+  `datalake_recovery`, `datalake_storage`, `metadata_insert`, `metadata_query`, `index_build`,
+  `index_query`, `index_update`, `index_memory`, `index_disk` now has a working, tested, real-run
+  implementation in this module.
+- 1 new test (checks `monolithic`/`hierarchical` agree on `terms`/`postings`, and that `hierarchical`'s
+  file count equals the term count while `monolithic`'s stays at 1). Suite total: 167 tests.
+- Ran it for real against the 15 downloaded books.
+
+### A result that mirrors index_update's finding, in the opposite direction
+`monolithic`: 738,543 bytes in 1 file. `hierarchical`: 356,666 bytes across 30,396 files (one per
+term, matching `terms` exactly) — **less than half the disk space**, despite needing tens of thousands
+of files. The reason is the inverse of Entry 39/40's finding: JSON repeats each term as a quoted string
+key plus structural punctuation (`"term":[...]," `) for every single entry, while hierarchical's files
+contain *only* the postings, one bare integer per line — the term itself is never written inside a
+file, it is the filename. So the very same "one small file per term" design that made `hierarchical`
+dramatically more expensive to *update* (Entry 39) is what makes it meaningfully cheaper to *store*.
+Both entries 39/40 and this one measure real, opposite-direction consequences of the same structural
+choice, which is precisely the kind of trade-off SPEC section 6 asks the report to discuss — now with
+numbers on both sides of it, from the same 15-book dataset.
+
+### Why
+- **`terms`/`postings` reported once per structure even though they are always identical.** Having them
+  sit in the same CSV, next to each structure's very different `bytes`/`files`, is what makes "same
+  logical data, different physical cost" directly visible without needing to cross-reference a separate
+  table — the exact point Java's own version of this experiment makes with the same two metrics.
+- **No repetitions, no timing.** `index_disk`, like `datalake_storage` (Entry 35) and `index_memory`
+  (Entry 41), measures a static property of a finished structure, not an operation's duration;
+  `measure_elapsed_ms`'s warmup/averaging methodology has nothing to apply to here.
+- **Mongo skipped rather than half-implemented.** A `collStats`-based number that might silently read as
+  `0` or throw on a BSON type mismatch this environment cannot exercise would be worse than an honest
+  gap — the same reasoning already applied twice this session (`allocated_bytes`, `index_memory`'s
+  Mongo row) kept consistent a third time, rather than making an exception just to say every experiment
+  covers all three structures.

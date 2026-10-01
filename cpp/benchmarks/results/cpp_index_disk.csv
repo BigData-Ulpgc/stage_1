@@ -1,0 +1,9 @@
+language,experiment,structure,dataset_size,repetition,metric,value,unit
+cpp,index_disk,monolithic,15,1,bytes,738543.000,bytes
+cpp,index_disk,monolithic,15,1,files,1.000,count
+cpp,index_disk,monolithic,15,1,terms,30396.000,count
+cpp,index_disk,monolithic,15,1,postings,89727.000,count
+cpp,index_disk,hierarchical,15,1,bytes,356666.000,bytes
+cpp,index_disk,hierarchical,15,1,files,30396.000,count
+cpp,index_disk,hierarchical,15,1,terms,30396.000,count
+cpp,index_disk,hierarchical,15,1,postings,89727.000,count
