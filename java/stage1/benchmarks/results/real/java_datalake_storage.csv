@@ -1,0 +1,16 @@
+language,experiment,structure,dataset_size,repetition,metric,value,unit
+java,datalake_storage,book,200,1,files,400,count
+java,datalake_storage,book,200,1,directories,200,count
+java,datalake_storage,book,200,1,max_entries_per_dir,200,count
+java,datalake_storage,book,200,1,bytes,128980349,bytes
+java,datalake_storage,book,200,1,allocated_bytes,130883584,bytes
+java,datalake_storage,range,200,1,files,400,count
+java,datalake_storage,range,200,1,directories,47,count
+java,datalake_storage,range,200,1,max_entries_per_dir,220,count
+java,datalake_storage,range,200,1,bytes,128980349,bytes
+java,datalake_storage,range,200,1,allocated_bytes,130256896,bytes
+java,datalake_storage,time,200,1,files,400,count
+java,datalake_storage,time,200,1,directories,21,count
+java,datalake_storage,time,200,1,max_entries_per_dir,20,count
+java,datalake_storage,time,200,1,bytes,128980349,bytes
+java,datalake_storage,time,200,1,allocated_bytes,130150400,bytes
