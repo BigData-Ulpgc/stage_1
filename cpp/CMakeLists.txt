@@ -49,41 +49,41 @@ target_compile_options(stage1_deps INTERFACE -Wall -Wextra -Wpedantic)
 
 # ---- Core library: all the project logic; shared by the executable and the tests ----
 add_library(stage1_core
-  src/tokenizer.cpp
-  src/stopwords.cpp
-  src/book_splitter.cpp
-  src/curl_http_client.cpp
-  src/gutenberg_client.cpp
-  src/metadata.cpp
-  src/metadata_store.cpp
-  src/file_io.cpp
-  src/book_based_datalake.cpp
-  src/range_based_datalake.cpp
-  src/time_based_datalake.cpp
-  src/inverted_index.cpp
-  src/monolithic_index_writer.cpp
-  src/hierarchical_index_writer.cpp
-  src/mongo_index_writer.cpp
-  src/query_engine.cpp
-  src/index_readers.cpp
-  src/control_log.cpp
-  src/book_id_list.cpp
-  src/pipeline.cpp
-  src/benchmark.cpp
-  src/sample_books.cpp
-  src/index_build_benchmark.cpp
-  src/query_list.cpp
-  src/index_query_benchmark.cpp
-  src/datalake_write_benchmark.cpp
-  src/datalake_lookup_benchmark.cpp
-  src/datalake_incremental_benchmark.cpp
-  src/datalake_recovery_benchmark.cpp
-  src/datalake_storage_benchmark.cpp
-  src/metadata_insert_benchmark.cpp
-  src/metadata_query_benchmark.cpp
-  src/index_update_benchmark.cpp
-  src/index_memory_benchmark.cpp
-  src/index_disk_benchmark.cpp)
+  src/datamart/index/tokenizer.cpp
+  src/datamart/index/stopwords.cpp
+  src/crawler/book_splitter.cpp
+  src/crawler/curl_http_client.cpp
+  src/crawler/gutenberg_client.cpp
+  src/datamart/metadata/metadata.cpp
+  src/datamart/metadata/metadata_store.cpp
+  src/util/file_io.cpp
+  src/datalake/book_based_datalake.cpp
+  src/datalake/range_based_datalake.cpp
+  src/datalake/time_based_datalake.cpp
+  src/datamart/index/inverted_index.cpp
+  src/datamart/index/monolithic_index_writer.cpp
+  src/datamart/index/hierarchical_index_writer.cpp
+  src/datamart/index/mongo_index_writer.cpp
+  src/query/query_engine.cpp
+  src/datamart/index/index_readers.cpp
+  src/control/control_log.cpp
+  src/control/book_id_list.cpp
+  src/control/pipeline.cpp
+  src/benchmark/benchmark.cpp
+  src/benchmark/sample_books.cpp
+  src/benchmark/index_build_benchmark.cpp
+  src/benchmark/query_list.cpp
+  src/benchmark/index_query_benchmark.cpp
+  src/benchmark/datalake_write_benchmark.cpp
+  src/benchmark/datalake_lookup_benchmark.cpp
+  src/benchmark/datalake_incremental_benchmark.cpp
+  src/benchmark/datalake_recovery_benchmark.cpp
+  src/benchmark/datalake_storage_benchmark.cpp
+  src/benchmark/metadata_insert_benchmark.cpp
+  src/benchmark/metadata_query_benchmark.cpp
+  src/benchmark/index_update_benchmark.cpp
+  src/benchmark/index_memory_benchmark.cpp
+  src/benchmark/index_disk_benchmark.cpp)
 target_link_libraries(stage1_core PUBLIC stage1_deps)
 
 # ---- Executable ----

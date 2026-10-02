@@ -2146,3 +2146,92 @@ behavior-preserving split.
 - The root `README.md`'s C/C++ section is still the group's original template (`cd c/`, "GCC and
   Make", the binary run with no arguments). It is a shared group file, so fixing it is left to a group
   decision rather than changed unilaterally from this module.
+
+## Entry 45 – Module folders mirroring the Java package layout (2026-10-02)
+
+### What was done
+`include/stage1/`, `src/` and `tests/` were each split into the same module subfolders as the Java
+module's packages (`java/stage1/src/main/java/es/ulpgc/bigdata/...`):
+
+| C++ folder | Java package | Contents |
+|---|---|---|
+| *(root)* | `Main`, `SearchEngine`, `EndToEndTest` | `main.cpp`, `cli_commands`, `smoke_test` |
+| `crawler/` | `crawler` | `book_source`, `book_splitter`, `gutenberg_client`, `http_client`, `curl_http_client`, `download_result` |
+| `datalake/` | `datalake` | `datalake` (interface), `book_based_`, `range_based_`, `time_based_datalake` |
+| `datamart/index/` | `datamart.index` | `inverted_index`, `tokenizer`, `stopwords`, `index_writer`, the three writers, `index_readers` |
+| `datamart/metadata/` | `datamart.metadata` | `metadata` (≈ `MetadataParser`), `metadata_store` (≈ `SqliteMetadataRepository`) |
+| `control/` | `control` | `control_log` (≈ `ControlFiles`), `book_id_list`, `pipeline` (≈ `PipelineController`) |
+| `query/` | `query` | `query_engine` (≈ `SearchService`) |
+| `benchmark/` | `benchmark` | `benchmark` (timer + CSV), `sample_books` (≈ `BenchmarkBooks`), `query_list`, the 12 experiments |
+| `util/` | *(none)* | `file_io`, `text_utils` |
+
+`tests/fakes/` and `tests/support/` are unchanged.
+
+Strictly mechanical, in two steps: `crawler/` first as a worked example, then every other module.
+- 110 files moved with `git mv`, so each file keeps its history (`git log --follow`).
+- 226 `#include "stage1/<name>.hpp"` lines rewritten to `"stage1/<module>/<name>.hpp"`.
+- Source paths updated in both `CMakeLists.txt`.
+- One new line in `tests/CMakeLists.txt`: `target_include_directories(stage1_tests PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR})`. Without it, a test moved into a subfolder can no longer find
+  `"fakes/..."`/`"support/..."`: a quoted include is first searched next to the including file, which
+  is now `tests/crawler/` rather than `tests/` (confirmed by building without it first:
+  `'fakes/fake_http_client.hpp' file not found`).
+- No logic, name, comment or namespace changed. The diff contains nothing but `#include` lines and
+  CMake paths.
+
+### Verification
+- A dry run of the move list (checking that only `cli_commands.hpp`, `main.cpp`, `cli_commands.cpp`
+  and `smoke_test.cpp` would stay at the roots) before moving anything.
+- After moving: no flat `"stage1/<name>.hpp"` include left except the root-level `cli_commands.hpp`.
+- An existence check of every CMake source path: 72 listed, 72 `.cpp` files on disk, 0 missing. This
+  check caught a slip in the move script, which had missed the last entry of each source list because
+  it carries the closing `)` on the same line. It was fixed by hand.
+- Clean rebuild, all 172 tests pass, and `status`/`search whale island` give the same output as before.
+
+### What the folders now make visible
+Counting cross-module `#include`s gives a layered graph with no cycles:
+```
+util               -> (nothing)
+crawler, datalake,
+datamart/index,
+datamart/metadata  -> util
+query              -> datamart/index
+control            -> crawler, datalake, datamart/index, datamart/metadata, util
+benchmark          -> control, datalake, datamart/index, datamart/metadata, query, util
+(root: CLI)        -> everything
+```
+This is the assignment's architecture, now readable from the folder tree alone. The datalake and the
+two datamarts are independent of each other. The control layer is the only module that orchestrates
+them (crawler → datalake → metadata → index). Search needs nothing but the index. The same graph is a
+ready-made diagram for the report's "System architecture" section.
+
+### Why
+- **Same shape as the Java module.** Someone comparing the three implementations (the grader
+  included) finds the same responsibilities under the same names in each one. The flat folder of
+  ~40 headers gave no hint of the datalake/datamart/control architecture at all.
+- **"Code quality (20%): structure, modularity"** is an explicit grading criterion, and module folders
+  are the most direct evidence of modularity.
+- **C++ conventions kept where they differ from Java's.** The split is `include/` + `src/` + `tests/`
+  mirroring each other, not Maven's `src/main/java` + `src/test/java`, which is a Maven convention
+  rather than part of the module design.
+
+### Alternatives considered and rejected
+- **Wrapping everything in `cpp/stage1/`** (like `java/stage1/`, `python/stage_1/`). It would require
+  editing the group's root `.gitignore` (`cpp/build/`, `cpp/data/`, `cpp/benchmarks/work/`). Worse,
+  `.gitignore` ignores every `*.csv` and re-includes only `!cpp/benchmarks/results/*.csv`, so the 12
+  committed result CSVs would silently become ignored at the new path. It would also change CMake's
+  `../shared` paths and need a full rebuild and new local editor settings.
+- **`model/` and `config/` folders.** Java's `model` classes have C++ equivalents that live next to
+  their logic (`BookMetadata` in `metadata.hpp`, `StoredBook` in `metadata_store.hpp`), and splitting
+  them out would change code, which this restructure deliberately did not. There is no `config/`
+  equivalent: this module's configuration is CMake compile definitions, not a config class.
+- **Namespaces per module** (`stage1::crawler`, ...), the closest C++ analogue of Java packages. It
+  would touch nearly every file's code, not just its location. It is a possible later step, kept
+  separate so that this change stays purely mechanical.
+- **Smaller placement calls.**
+  - `download_result` went to `crawler/`, not to a one-file `model/`, because only the crawler uses it.
+  - `stopwords` went next to `tokenizer`, as Java's `Tokenizer.fromStopwordsFile` does.
+  - `query_list` went to `benchmark/`, since it loads the benchmark query workload and nothing else
+    uses it.
+  - `util/` is new because `file_io`/`text_utils` are used by almost every module, whereas Java keeps
+    such helpers inside each class.
