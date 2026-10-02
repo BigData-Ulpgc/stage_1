@@ -68,7 +68,7 @@ class IndexerTest {
         index.close();
     }
 
-    // --- Criterios del reto --------------------------------------------------
+    // --- Challenge criteria --------------------------------------------------
 
     @Test
     void libroQueNoEstaEnElDatalakeNoCreaEstadoParcial() {
@@ -76,7 +76,7 @@ class IndexerTest {
 
         assertEquals(0, metadata.count());
         assertEquals(List.of(), index.postings("truth"));
-        assertFalse(Files.exists(indexFile));               // el índice ni siquiera se ha escrito
+        assertFalse(Files.exists(indexFile));               // the index has not even been written
     }
 
     @Test
@@ -89,22 +89,22 @@ class IndexerTest {
         assertEquals(saved, fromDb);
         assertEquals("Pride and Prejudice", fromDb.title());
         assertEquals("Jane Austen", fromDb.author());
-        assertEquals(location.headerPath(), fromDb.headerPath());   // las rutas también se guardan
+        assertEquals(location.headerPath(), fromDb.headerPath());   // the paths are saved too
         assertEquals(location.bodyPath(), fromDb.bodyPath());
 
         assertEquals(List.of(1342), index.postings("truth"));
         assertEquals(List.of(1342), index.postings("universally"));
     }
 
-    // --- Lo que se indexa ------------------------------------------------------
+    // --- What gets indexed -----------------------------------------------------
 
     @Test
     void elIndiceSoloContieneTerminosDelBody() {
         datalake.save(PRIDE);
         indexer.index(1342);
 
-        assertEquals(List.of(), index.postings("gutenberg"));      // sólo está en el header
-        assertEquals(List.of(), index.postings("austen"));         // sólo está en el header
+        assertEquals(List.of(), index.postings("gutenberg"));      // only in the header
+        assertEquals(List.of(), index.postings("austen"));         // only in the header
         assertEquals(List.of(), index.postings("the"));            // stopword
         assertEquals(List.of(1342), index.postings("wife"));
     }
@@ -124,7 +124,7 @@ class IndexerTest {
         assertEquals(List.of(), search.search("single disaster"));
     }
 
-    // --- Persistencia ----------------------------------------------------------
+    // --- Persistence -----------------------------------------------------------
 
     @Test
     void todoSigueAhiTrasCerrarYReabrir() {
@@ -133,7 +133,7 @@ class IndexerTest {
         metadata.close();
         index.close();
 
-        metadata = new SqliteMetadataRepository(dbFile);            // "otra ejecución"
+        metadata = new SqliteMetadataRepository(dbFile);            // "another run"
         index = new MonolithicJsonIndex(indexFile);
 
         assertEquals("Jane Austen", metadata.findById(1342).orElseThrow().author());
@@ -150,18 +150,18 @@ class IndexerTest {
         assertEquals(List.of(1342), index.postings("truth"));
     }
 
-    // --- Fallos: qué estado queda ---------------------------------------------
+    // --- Failures: what state is left -----------------------------------------
 
     @Test
     void siFallaSqliteElIndiceNoSeToca() {
         datalake.save(PRIDE);
-        metadata.close();                                    // cualquier save fallará
+        metadata.close();                                    // any save will fail
 
         assertThrows(MetadataRepositoryException.class, () -> indexer.index(1342));
 
         assertEquals(List.of(), index.postings("truth"));
         assertFalse(Files.exists(indexFile));
-        metadata = new SqliteMetadataRepository(dbFile);     // para que tearDown pueda cerrarlo
+        metadata = new SqliteMetadataRepository(dbFile);     // so that tearDown can close it
     }
 
     @Test
@@ -172,11 +172,11 @@ class IndexerTest {
 
         assertThrows(UncheckedIOException.class, () -> withFailingIndex.index(1342));
 
-        // Estado parcial: los metadatos sí están, el índice en disco no.
+        // Partial state: the metadata is there, the on-disk index is not.
         assertTrue(metadata.findById(1342).isPresent());
         assertFalse(Files.exists(indexFile));
 
-        // Recovery: el libro no se marcó como indexado, así que se vuelve a indexar.
+        // Recovery: the book was not marked as indexed, so it is indexed again.
         failing.failNextFlush = false;
         withFailingIndex.index(1342);
 
@@ -188,7 +188,7 @@ class IndexerTest {
     @Test
     void siElBodyDesapareceNoSeEscribeNada() throws Exception {
         BookLocation location = datalake.save(PRIDE);
-        Datalake staleDatalake = new Datalake() {           // locate dice que está, pero el body ya no
+        Datalake staleDatalake = new Datalake() {           // locate says it is there, but the body is gone
             @Override public String name() { return "stale"; }
             @Override public BookLocation save(RawBook book) { throw new UnsupportedOperationException(); }
             @Override public java.util.Optional<BookLocation> locate(int id) { return java.util.Optional.of(location); }
@@ -199,11 +199,11 @@ class IndexerTest {
 
         assertThrows(UncheckedIOException.class, () -> staleIndexer.index(1342));
 
-        assertEquals(0, metadata.count());                   // se leyó todo ANTES de escribir
+        assertEquals(0, metadata.count());                   // everything was read BEFORE writing
         assertFalse(Files.exists(indexFile));
     }
 
-    /** Índice que delega en otro, pero cuyo flush falla mientras failNextFlush sea true. */
+    /** Index that delegates to another one, but whose flush fails while failNextFlush is true. */
     private static final class FailingFlushIndex implements InvertedIndex {
         private final InvertedIndex delegate;
         boolean failNextFlush = true;

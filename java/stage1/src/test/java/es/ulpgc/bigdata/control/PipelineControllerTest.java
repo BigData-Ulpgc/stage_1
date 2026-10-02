@@ -35,8 +35,8 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Pipeline completo con piezas reales (datalake, SQLite, índice, Indexer);
- * sólo la red es falsa. Gutenberg "tiene" los libros de FAKE_GUTENBERG.
+ * Full pipeline with real pieces (datalake, SQLite, index, Indexer);
+ * only the network is fake. Gutenberg "has" the books of FAKE_GUTENBERG.
  */
 class PipelineControllerTest {
 
@@ -61,9 +61,9 @@ class PipelineControllerTest {
     private CountingIndex index;
     private Tokenizer tokenizer;
 
-    /** Ids que se pidieron a "Gutenberg", en orden. */
+    /** Ids requested from "Gutenberg", in order. */
     private final List<Integer> downloadRequests = new ArrayList<>();
-    /** Ids para los que la red "falla". */
+    /** Ids for which the network "fails". */
     private final Set<Integer> networkFailsFor = new HashSet<>();
 
     private final BookSource fakeGutenberg = id -> {
@@ -71,7 +71,7 @@ class PipelineControllerTest {
         if (networkFailsFor.contains(id)) {
             throw new UncheckedIOException(new ConnectException("sin conexión (simulado)"));
         }
-        return Optional.ofNullable(FAKE_GUTENBERG.get(id));   // vacío = 404
+        return Optional.ofNullable(FAKE_GUTENBERG.get(id));   // empty = 404
     };
 
     @BeforeEach
@@ -87,7 +87,7 @@ class PipelineControllerTest {
         metadata.close();
     }
 
-    /** Un controlador nuevo sobre los MISMOS ficheros: como arrancar el programa otra vez. */
+    /** A new controller on the SAME files: like starting the program again. */
     private PipelineController newController(List<Integer> dataset) {
         return new PipelineController(
                 new ControlFiles(tmp.resolve("control")),
@@ -101,10 +101,10 @@ class PipelineControllerTest {
     }
 
     private ControlFiles control() {
-        return new ControlFiles(tmp.resolve("control"));      // relee los ficheros de disco
+        return new ControlFiles(tmp.resolve("control"));      // rereads the files from disk
     }
 
-    // --- Criterios del reto --------------------------------------------------
+    // --- Challenge criteria --------------------------------------------------
 
     @Test
     void cadaStepHaceComoMaximoUnaOperacion() {
@@ -137,11 +137,11 @@ class PipelineControllerTest {
     @Test
     void nuncaSeIndexaDosVecesNiAunqueSeReinicie() {
         newController().runUntilIdle(100);
-        newController().runUntilIdle(100);                     // segunda "ejecución"
-        newController().runUntilIdle(100);                     // y tercera
+        newController().runUntilIdle(100);                     // second "run"
+        newController().runUntilIdle(100);                     // and third
 
         assertEquals(Map.of(1342, 1, 84, 1, 11, 1), index.addsPerBook());
-        assertEquals(DATASET.size(), downloadRequests.size()); // tampoco se descarga dos veces
+        assertEquals(DATASET.size(), downloadRequests.size()); // it is not downloaded twice either
     }
 
     @Test
@@ -156,13 +156,13 @@ class PipelineControllerTest {
         assertTrue(datalake.locate(84).isEmpty());
         assertTrue(control().isIndexed(11), "un fallo no debe parar el resto del dataset");
 
-        networkFailsFor.clear();                                // "vuelve la red"
+        networkFailsFor.clear();                                // "the network is back"
         List<StepResult> retry = newController().runUntilIdle(100);
 
         assertEquals(List.of(StepResult.of(Action.DOWNLOADED, 84), StepResult.of(Action.INDEXED, 84)), retry);
     }
 
-    // --- Libros que no existen o no se pueden indexar ------------------------------
+    // --- Books that do not exist or cannot be indexed ------------------------------
 
     @Test
     void libroQueGutenbergNoTieneNoSeMarcaYNoBloquea() {
@@ -191,7 +191,7 @@ class PipelineControllerTest {
 
     @Test
     void descargadoSegunElControlPeroAusenteDelDatalakeNoSeMarcaIndexado() {
-        control().markDownloaded(555);                          // el control dice algo que no es verdad
+        control().markDownloaded(555);                          // the control says something that is not true
 
         StepResult result = newController(List.of()).step();
 
@@ -199,15 +199,15 @@ class PipelineControllerTest {
         assertFalse(control().isIndexed(555));
     }
 
-    // --- Reanudar ------------------------------------------------------------------------
+    // --- Resuming ------------------------------------------------------------------------
 
     @Test
     void alReiniciarContinuaDondeSeQuedo() {
         PipelineController first = newController();
-        first.step();                                            // descarga 1342
-        // El programa "se cierra" aquí, antes de indexar.
+        first.step();                                            // downloads 1342
+        // The program "closes" here, before indexing.
 
-        PipelineController second = newController();             // lee el estado de los ficheros
+        PipelineController second = newController();             // reads the state from the files
 
         assertEquals(StepResult.of(Action.INDEXED, 1342), second.step());
         assertEquals(StepResult.of(Action.DOWNLOADED, 84), second.step());
@@ -217,30 +217,30 @@ class PipelineControllerTest {
 
     @Test
     void indexarPendientesTienePrioridadSobreDescargar() throws IOException {
-        // Situación de partida: dos libros ya descargados (por ejemplo, de una ejecución que se cortó).
+        // Starting point: two books already downloaded (for example, from a run that was cut off).
         PipelineController setup = newController();
-        setup.step();                                            // descarga 1342
+        setup.step();                                            // downloads 1342
         control().markDownloaded(84);
         datalake.save(new BookSplitter().split(84, FAKE_GUTENBERG.get(84)).orElseThrow());
 
         PipelineController pipeline = newController();
 
-        assertEquals(StepResult.of(Action.INDEXED, 84), pipeline.step());     // readyToIndex va ordenado
+        assertEquals(StepResult.of(Action.INDEXED, 84), pipeline.step());     // readyToIndex is sorted
         assertEquals(StepResult.of(Action.INDEXED, 1342), pipeline.step());
         assertEquals(StepResult.of(Action.DOWNLOADED, 11), pipeline.step());
     }
 
     @Test
     void runUntilIdleRespetaElMaximoDePasos() {
-        // Descargar 1342, indexar 1342, descargar 84... y se para: el 84 queda sin indexar.
+        // Download 1342, index 1342, download 84... and it stops: 84 is left unindexed.
         assertEquals(3, newController().runUntilIdle(3).size());
 
-        // Aunque el dataset esté vacío, lo pendiente se termina y luego no hay nada más.
+        // Even if the dataset is empty, what is pending gets finished and then there is nothing else.
         assertEquals(List.of(StepResult.of(Action.INDEXED, 84)), newController(List.of()).runUntilIdle(10));
         assertEquals(List.of(), newController(List.of()).runUntilIdle(10));
     }
 
-    // --- De principio a fin ---------------------------------------------------------------
+    // --- End to end -----------------------------------------------------------------------
 
     @Test
     void trasElPipelineElBuscadorEncuentraLosLibros() {
@@ -253,7 +253,7 @@ class PipelineControllerTest {
         assertTrue(Files.exists(tmp.resolve("control/indexed_books.txt")));
     }
 
-    // --- Índice que cuenta cuántas veces se indexa cada libro -----------------------------
+    // --- Index that counts how many times each book is indexed ----------------------------
 
     private static final class CountingIndex implements InvertedIndex {
         private final InvertedIndex delegate;

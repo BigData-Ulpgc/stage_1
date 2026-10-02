@@ -11,16 +11,16 @@ import java.util.OptionalInt;
 import java.util.Set;
 
 /**
- * Decide qué hacer a continuación y se lo pide a quien sabe hacerlo.
- * No descarga, no parsea, no indexa: sólo coordina ControlFiles, BookDownloader e Indexer.
+ * Decides what to do next and asks whoever knows how to do it.
+ * It does not download, parse or index: it only coordinates ControlFiles, BookDownloader and Indexer.
  *
- * Cada step() hace COMO MÁXIMO una operación principal:
- *   1. Si hay libros descargados sin indexar -> indexa el primero y marca "indexed".
- *   2. Si no, si queda algún libro del dataset sin descargar -> lo descarga y marca "downloaded".
- *   3. Si no, no hace nada (IDLE).
+ * Each step() does AT MOST one main operation:
+ *   1. If there are downloaded books not yet indexed -> indexes the first one and marks it "indexed".
+ *   2. Otherwise, if some dataset book is still not downloaded -> downloads it and marks it "downloaded".
+ *   3. Otherwise, it does nothing (IDLE).
  *
- * Las marcas se escriben SÓLO después de que la operación termine bien.
- * Todo lo necesario para continuar tras un reinicio está en los ficheros de control.
+ * The marks are written ONLY after the operation finishes successfully.
+ * Everything needed to continue after a restart is in the control files.
  */
 public class PipelineController {
 
@@ -30,14 +30,14 @@ public class PipelineController {
     private final List<Integer> dataset;
 
     /**
-     * Libros que fallaron en ESTA ejecución: se saltan para no reintentar en bucle el mismo.
-     * No se guarda en disco: al reiniciar el programa se vuelven a intentar.
+     * Books that failed in THIS run: they are skipped so the same one is not retried in a loop.
+     * Not saved to disk: when the program restarts they are tried again.
      */
     private final Set<Integer> skippedThisRun = new HashSet<>();
 
     /**
-     * @param dataset ids a descargar, en orden (normalmente BookIdList.load(shared/book_ids.txt)).
-     *                No se usan ids aleatorios: el SPEC fija el dataset común.
+     * @param dataset ids to download, in order (usually BookIdList.load(shared/book_ids.txt)).
+     *                No random ids are used: the SPEC fixes the common dataset.
      */
     public PipelineController(ControlFiles control, BookDownloader downloader, Indexer indexer,
                               List<Integer> dataset) {
@@ -47,7 +47,7 @@ public class PipelineController {
         this.dataset = List.copyOf(Objects.requireNonNull(dataset, "dataset"));
     }
 
-    /** Un paso del pipeline: como mucho una descarga o una indexación. */
+    /** One pipeline step: at most one download or one indexing. */
     public StepResult step() {
         OptionalInt toIndex = nextToIndex();
         if (toIndex.isPresent()) {
@@ -60,7 +60,7 @@ public class PipelineController {
         return StepResult.idle();
     }
 
-    /** Repite step() hasta que no quede nada o se llegue a maxSteps. */
+    /** Repeats step() until nothing is left or maxSteps is reached. */
     public List<StepResult> runUntilIdle(int maxSteps) {
         List<StepResult> results = new ArrayList<>();
         for (int i = 0; i < maxSteps; i++) {
@@ -74,10 +74,10 @@ public class PipelineController {
     }
 
     // ------------------------------------------------------------------
-    // Qué toca ahora
+    // What comes next
     // ------------------------------------------------------------------
 
-    /** Primer libro de downloaded − indexed que no haya fallado en esta ejecución. */
+    /** First book of downloaded − indexed that has not failed in this run. */
     private OptionalInt nextToIndex() {
         for (int id : control.readyToIndex()) {
             if (!skippedThisRun.contains(id)) {
@@ -87,7 +87,7 @@ public class PipelineController {
         return OptionalInt.empty();
     }
 
-    /** Primer libro del dataset, en su orden, aún no descargado ni fallido en esta ejecución. */
+    /** First dataset book, in its order, not yet downloaded nor failed in this run. */
     private OptionalInt nextToDownload() {
         for (int id : dataset) {
             if (!control.isDownloaded(id) && !skippedThisRun.contains(id)) {
@@ -98,26 +98,26 @@ public class PipelineController {
     }
 
     // ------------------------------------------------------------------
-    // Las dos operaciones: llamar, y marcar SÓLO si terminó bien
+    // The two operations: call, and mark ONLY if it finished successfully
     // ------------------------------------------------------------------
 
     private StepResult index(int bookId) {
         try {
-            if (indexer.index(bookId).isEmpty()) {         // el control mentía: no está en el datalake
+            if (indexer.index(bookId).isEmpty()) {         // the control was lying: it is not in the datalake
                 skippedThisRun.add(bookId);
                 return StepResult.of(StepResult.Action.MISSING_FROM_DATALAKE, bookId);
             }
         } catch (RuntimeException e) {
-            skippedThisRun.add(bookId);                    // no se marca: se reintentará al reiniciar
+            skippedThisRun.add(bookId);                    // not marked: it will be retried on restart
             return StepResult.failed(StepResult.Action.INDEX_FAILED, bookId, e);
         }
-        control.markIndexed(bookId);                       // sólo aquí: el Indexer ya hizo flush
+        control.markIndexed(bookId);                       // only here: the Indexer has already flushed
         return StepResult.of(StepResult.Action.INDEXED, bookId);
     }
 
     private StepResult download(int bookId) {
         try {
-            if (downloader.download(bookId).isEmpty()) {   // 404 o sin marcadores: nada guardado
+            if (downloader.download(bookId).isEmpty()) {   // 404 or no markers: nothing saved
                 skippedThisRun.add(bookId);
                 return StepResult.of(StepResult.Action.NOT_AVAILABLE, bookId);
             }
@@ -125,7 +125,7 @@ public class PipelineController {
             skippedThisRun.add(bookId);
             return StepResult.failed(StepResult.Action.DOWNLOAD_FAILED, bookId, e);
         }
-        control.markDownloaded(bookId);                    // sólo aquí: el libro ya está en el datalake
+        control.markDownloaded(bookId);                    // only here: the book is already in the datalake
         return StepResult.of(StepResult.Action.DOWNLOADED, bookId);
     }
 }

@@ -19,7 +19,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class RangeBasedDatalakeTest {
 
     @TempDir Path tmp;
-    Datalake datalake;          // se usa como interfaz, no como clase concreta (reto 7)
+    Datalake datalake;          // used as an interface, not as a concrete class (challenge 7)
     Path rangeRoot;
 
     @BeforeEach
@@ -94,7 +94,7 @@ class RangeBasedDatalakeTest {
         Files.writeString(dir.resolve("abc.body.txt"), "x");
         Files.writeString(dir.resolve("1600.body.txt.tmp"), "x");
         Files.writeString(dir.resolve("01342.body.txt"), "x");
-        Files.writeString(dir.resolve("5000.body.txt"), "x");    // rango equivocado
+        Files.writeString(dir.resolve("5000.body.txt"), "x");    // wrong range
         Files.writeString(dir.resolve("5000.header.txt"), "x");
         Files.createDirectories(rangeRoot.resolve("carpeta_rara"));
         Files.writeString(rangeRoot.resolve("suelto.body.txt"), "x");

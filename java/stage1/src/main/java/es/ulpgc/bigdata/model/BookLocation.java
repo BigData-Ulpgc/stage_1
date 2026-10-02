@@ -3,8 +3,8 @@ package es.ulpgc.bigdata.model;
 import java.nio.file.Path;
 
 /**
- * Resultado de guardar un libro en el datalake: dónde quedaron
- * físicamente el header y el body. No contiene el texto, sólo las rutas.
+ * Result of saving a book in the datalake: where the header and the body
+ * physically ended up. It does not contain the text, only the paths.
  */
 public record BookLocation(int id, Path headerPath, Path bodyPath) {
 }

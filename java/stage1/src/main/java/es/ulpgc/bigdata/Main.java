@@ -11,17 +11,17 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Capa fina: interpreta el comando, carga AppConfig, pide el sistema montado a
- * SearchEngine (que usa las factories) y muestra el resultado. Aquí NO hay lógica de negocio:
- * qué descargar, cómo indexar o cómo intersecar viven en PipelineController, Indexer y SearchService.
+ * Thin layer: interprets the command, loads AppConfig, asks SearchEngine (which uses the
+ * factories) for the assembled system and shows the result. There is NO business logic here:
+ * what to download, how to index or how to intersect live in PipelineController, Indexer and SearchService.
  *
- * Uso:  java ... Main [--config fichero.properties] <comando>
- *   pipeline [pasos]    descarga/indexa como mucho 'pasos' libros (por defecto 10)
- *   search <consulta>   búsqueda AND con el índice activo
- *   status              descargados, indexados y pendientes
- *   config              configuración efectiva
+ * Usage:  java ... Main [--config file.properties] <command>
+ *   pipeline [steps]    downloads/indexes at most 'steps' books (default 10)
+ *   search <query>      AND search with the active index
+ *   status              downloaded, indexed and pending
+ *   config              effective configuration
  *
- * Cambiar de estructura no toca código:  -Ddatalake.structure=book -Dindex.structure=hierarchical
+ * Changing the structure does not touch code:  -Ddatalake.structure=book -Dindex.structure=hierarchical
  */
 public final class Main {
 
@@ -56,14 +56,14 @@ public final class Main {
                     System.exit(2);
                 }
             }
-        } catch (IllegalArgumentException e) {                 // configuración o argumentos mal puestos
+        } catch (IllegalArgumentException e) {                 // wrong configuration or arguments
             System.err.println("Error: " + e.getMessage());
             System.exit(2);
         }
     }
 
     // ------------------------------------------------------------------
-    // Comandos: conectar piezas y mostrar resultados
+    // Commands: connect pieces and show results
     // ------------------------------------------------------------------
 
     private static void pipeline(AppConfig config, int steps) {

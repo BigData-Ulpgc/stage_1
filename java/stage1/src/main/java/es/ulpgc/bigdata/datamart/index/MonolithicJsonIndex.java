@@ -19,16 +19,16 @@ import static java.nio.file.StandardCopyOption.ATOMIC_MOVE;
 import static java.nio.file.StandardCopyOption.REPLACE_EXISTING;
 
 /**
- * Índice invertido guardado en UN solo fichero JSON (shared/SPEC.md, sección 6):
+ * Inverted index stored in ONE single JSON file (shared/SPEC.md, section 6):
  *
  *   {"blue":[20],"boat":[10,20],"fast":[20],"island":[30],"red":[10,30],"sails":[10,20]}
  *
- * Todo el índice vive en memoria. Al crear el objeto se carga el JSON si existe;
- * flush lo reescribe ENTERO (temporal + mover); clear borra memoria y fichero.
+ * The whole index lives in memory. When the object is created the JSON is loaded if it exists;
+ * flush rewrites it WHOLE (temp file + move); clear deletes memory and file.
  */
 public class MonolithicJsonIndex implements InvertedIndex {
 
-    /** Tipo de lo que se lee del JSON: términos ordenados -> ids ordenados y sin repetir. */
+    /** Type of what is read from the JSON: sorted terms -> sorted ids without repetitions. */
     private static final TypeReference<TreeMap<String, TreeSet<Integer>>> INDEX_TYPE = new TypeReference<>() {};
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -37,7 +37,7 @@ public class MonolithicJsonIndex implements InvertedIndex {
     private final Path tmpFile;
     private final TreeMap<String, TreeSet<Integer>> index;
 
-    /** true si hay cambios en memoria que aún no están en el fichero. */
+    /** true if there are changes in memory that are not in the file yet. */
     private boolean dirty = false;
 
     public MonolithicJsonIndex(Path file) {
@@ -46,7 +46,7 @@ public class MonolithicJsonIndex implements InvertedIndex {
         this.index = load(file);
     }
 
-    /** Si el JSON existe, lo lee entero; si no, empieza vacío. */
+    /** If the JSON exists, reads it whole; otherwise, starts empty. */
     private static TreeMap<String, TreeSet<Integer>> load(Path file) {
         if (!Files.exists(file)) {
             return new TreeMap<>();
@@ -55,7 +55,7 @@ public class MonolithicJsonIndex implements InvertedIndex {
             TreeMap<String, TreeSet<Integer>> loaded = MAPPER.readValue(file.toFile(), INDEX_TYPE);
             return loaded == null ? new TreeMap<>() : loaded;
         } catch (IOException e) {
-            // No se devuelve un índice vacío: el siguiente flush borraría el índice bueno.
+            // An empty index is not returned: the next flush would delete the good index.
             throw new UncheckedIOException("No se pudo leer el índice " + file, e);
         }
     }
@@ -66,7 +66,7 @@ public class MonolithicJsonIndex implements InvertedIndex {
     }
 
     // ------------------------------------------------------------------
-    // Operaciones en memoria (iguales que InMemoryInvertedIndex)
+    // In-memory operations (same as InMemoryInvertedIndex)
     // ------------------------------------------------------------------
 
     @Override
@@ -77,7 +77,7 @@ public class MonolithicJsonIndex implements InvertedIndex {
         Objects.requireNonNull(terms, "terms");
         for (String term : terms) {
             if (index.computeIfAbsent(term, t -> new TreeSet<>()).add(bookId)) {
-                dirty = true;                                 // sólo si el id era nuevo
+                dirty = true;                                 // only if the id was new
             }
         }
     }
@@ -89,18 +89,18 @@ public class MonolithicJsonIndex implements InvertedIndex {
     }
 
     // ------------------------------------------------------------------
-    // Persistencia
+    // Persistence
     // ------------------------------------------------------------------
 
     /**
-     * Reescribe el JSON COMPLETO: aunque sólo haya cambiado un término, se escriben todos.
-     * Primero a inverted_index.json.tmp y después se renombra (como en el reto 11), para
-     * que un corte a mitad nunca deje un JSON a medias con el nombre bueno.
+     * Rewrites the WHOLE JSON: even if only one term has changed, all of them are written.
+     * First to inverted_index.json.tmp and then it is renamed (as in challenge 11), so
+     * that a crash halfway never leaves a half-written JSON with the good name.
      */
     @Override
     public void flush() {
         if (!dirty) {
-            return;                                           // nada nuevo: no se toca el disco
+            return;                                           // nothing new: the disk is not touched
         }
         try {
             Path parent = file.toAbsolutePath().getParent();
@@ -108,7 +108,7 @@ public class MonolithicJsonIndex implements InvertedIndex {
                 Files.createDirectories(parent);
             }
             try (OutputStream out = Files.newOutputStream(tmpFile)) {
-                MAPPER.writeValue(out, index);                // se escribe directo al fichero
+                MAPPER.writeValue(out, index);                // written straight to the file
             }
             try {
                 Files.move(tmpFile, file, ATOMIC_MOVE, REPLACE_EXISTING);
@@ -120,7 +120,7 @@ public class MonolithicJsonIndex implements InvertedIndex {
             try {
                 Files.deleteIfExists(tmpFile);
             } catch (IOException ignored) {
-                // lo importante es el error original
+                // what matters is the original error
             }
             throw new UncheckedIOException("No se pudo guardar el índice " + file, e);
         }
@@ -147,14 +147,14 @@ public class MonolithicJsonIndex implements InvertedIndex {
         }
     }
 
-    /** No hay nada abierto entre llamadas. No hace flush: eso lo decide quien usa el índice. */
+    /** Nothing is open between calls. It does not flush: whoever uses the index decides that. */
     @Override
     public void close() {
     }
 
-    // --- Fuera del contrato: útil para tests y depuración ---
+    // --- Outside the contract: useful for tests and debugging ---
 
-    /** Número de términos distintos. */
+    /** Number of distinct terms. */
     public int termCount() {
         return index.size();
     }

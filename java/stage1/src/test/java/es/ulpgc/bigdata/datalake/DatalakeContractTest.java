@@ -22,14 +22,14 @@ import java.util.stream.Stream;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Tests que cualquier Datalake debe pasar, sea cual sea su organización física.
- * Cada test se ejecuta tres veces: book, range y time.
+ * Tests that any Datalake must pass, whatever its physical organisation.
+ * Each test runs three times: book, range and time.
  */
 class DatalakeContractTest {
 
     @TempDir Path tmp;
 
-    /** Las tres implementaciones: nombre esperado + receta para crear una nueva. */
+    /** The three implementations: expected name + recipe to create a new one. */
     static Stream<Arguments> structures() {
         return Stream.of(
                 Arguments.of("book", (Function<Path, Datalake>) BookBasedDatalake::new),
@@ -37,20 +37,20 @@ class DatalakeContractTest {
                 Arguments.of("time", (Function<Path, Datalake>) TimeBasedDatalake::new));
     }
 
-    /** Datalake nuevo y vacío en su propia subcarpeta temporal. */
+    /** New, empty datalake in its own temporary subfolder. */
     private Datalake create(String name, Function<Path, Datalake> factory) {
         return factory.apply(tmp.resolve(name));
     }
 
     // ------------------------------------------------------------------
-    // Tus tests del reto 7, ahora para las tres estructuras
+    // Your challenge 7 tests, now for the three structures
     // ------------------------------------------------------------------
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("structures")
     void cumpleElContratoDatalake(String name, Function<Path, Datalake> factory) {
-        // Tipo declarado como Datalake, no como la clase concreta:
-        // el test no sabe (ni le importa) cuál es la implementación.
+        // Type declared as Datalake, not as the concrete class:
+        // the test does not know (or care) which implementation it is.
         Datalake datalake = create(name, factory);
 
         assertEquals(name, datalake.name());
@@ -71,14 +71,14 @@ class DatalakeContractTest {
         Datalake datalake = create(name, factory);
         datalake.save(new RawBook(10, "h", "b"));
 
-        // carpeta basura: existe pero no tiene ningún libro
+        // garbage folder: it exists but has no book at all
         Files.createDirectories(tmp.resolve(name).resolve("basura"));
 
         assertEquals(List.of(10), datalake.listBookIds());
     }
 
     // ------------------------------------------------------------------
-    // Contrato del reto 10
+    // Contract of challenge 10
     // ------------------------------------------------------------------
 
     @ParameterizedTest(name = "{0}")
@@ -116,7 +116,7 @@ class DatalakeContractTest {
         d.save(new RawBook(1, "H", "B"));
         BookLocation loc = d.save(new RawBook(1342, "H", "B"));
 
-        Files.delete(loc.headerPath());                 // simula un guardado a medias
+        Files.delete(loc.headerPath());                 // simulates a half-done save
 
         assertTrue(d.locate(1342).isEmpty());
         assertEquals(List.of(1), d.listBookIds());
@@ -128,14 +128,14 @@ class DatalakeContractTest {
         Datalake d = create(name, factory);
         BookLocation loc = d.save(new RawBook(1342, "H", "B"));
 
-        // Junto al libro: temporales y ficheros ajenos. Se colocan a partir de las
-        // rutas que devolvió save, así sirve para las tres estructuras.
+        // Next to the book: temporary and foreign files. They are placed based on the
+        // paths returned by save, so it works for the three structures.
         Files.writeString(Path.of(loc.bodyPath() + ".tmp"), "x");
         Files.writeString(Path.of(loc.headerPath() + ".tmp"), "x");
         Files.writeString(loc.bodyPath().resolveSibling("notas.txt"), "x");
 
-        // En la raíz: un fichero suelto y una carpeta con nombre inválido que imita
-        // los nombres de fichero de las tres estructuras.
+        // At the root: a loose file and a folder with an invalid name that imitates
+        // the file names of the three structures.
         Path root = tmp.resolve(name);
         Files.writeString(root.resolve("suelto.body.txt"), "x");
         Path basura = Files.createDirectories(root.resolve("basura"));
@@ -164,7 +164,7 @@ class DatalakeContractTest {
     }
 
     // ------------------------------------------------------------------
-    // Tests nuevos tras mejorar listBookIds
+    // New tests after improving listBookIds
     // ------------------------------------------------------------------
 
     @ParameterizedTest(name = "{0}")
@@ -184,9 +184,9 @@ class DatalakeContractTest {
         Datalake d = create(name, factory);
         List<Integer> ids = new ArrayList<>();
         for (int i = 0; i < 100; i++) {
-            ids.add(i * 37);                        // repartidos entre varios rangos
+            ids.add(i * 37);                        // spread across several ranges
         }
-        Collections.shuffle(ids, new Random(42));   // semilla fija: siempre el mismo desorden
+        Collections.shuffle(ids, new Random(42));   // fixed seed: always the same shuffle
         for (int id : ids) {
             d.save(new RawBook(id, "H", "B"));
         }
@@ -197,7 +197,7 @@ class DatalakeContractTest {
     }
 
     // ------------------------------------------------------------------
-    // Reto 11: interrupciones durante save
+    // Challenge 11: interruptions during save
     // ------------------------------------------------------------------
 
     @ParameterizedTest(name = "{0}")
@@ -208,8 +208,8 @@ class DatalakeContractTest {
         d.save(new RawBook(1, "H", "B"));
         BookLocation loc = d.save(new RawBook(1342, "H", "B"));
 
-        // Simula que el proceso murió después de escribir body.tmp pero antes de moverlo:
-        // el header está en su sitio y el body sólo existe como .tmp.
+        // Simulates that the process died after writing body.tmp but before moving it:
+        // the header is in place and the body only exists as .tmp.
         Files.move(loc.bodyPath(), Path.of(loc.bodyPath() + ".tmp"));
 
         assertTrue(d.locate(1342).isEmpty());

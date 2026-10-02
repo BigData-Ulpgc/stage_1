@@ -7,14 +7,14 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * Primer componente compuesto: descarga un libro, lo separa y lo guarda.
+ * First composite component: downloads a book, splits it and saves it.
  *
- *   fetch  -> si hay texto,    split
- *   split  -> si es válido,    save
+ *   fetch  -> if there is text,  split
+ *   split  -> if it is valid,    save
  *   save   -> BookLocation
  *
- * No hace nada por sí mismo: coordina tres piezas que recibe por constructor.
- * Tampoco toca ficheros de control; eso es responsabilidad del reto 24.
+ * It does nothing by itself: it coordinates three pieces it receives through the constructor.
+ * It does not touch control files either; that is the responsibility of challenge 24.
  */
 public class BookDownloader {
 
@@ -29,11 +29,11 @@ public class BookDownloader {
     }
 
     /**
-     * @return dónde quedó guardado el libro, o vacío si no estaba disponible
-     *         o su texto no tenía los marcadores de Gutenberg. En ambos casos
-     *         no se escribe nada en el datalake.
-     * @throws RuntimeException si falla la red o el disco: el libro no queda
-     *         guardado y quien llama decide si reintentar.
+     * @return where the book was saved, or empty if it was not available
+     *         or its text did not have the Gutenberg markers. In both cases
+     *         nothing is written to the datalake.
+     * @throws RuntimeException if the network or the disk fails: the book is not
+     *         saved and the caller decides whether to retry.
      */
     public Optional<BookLocation> download(int bookId) {
         if (bookId < 0) {

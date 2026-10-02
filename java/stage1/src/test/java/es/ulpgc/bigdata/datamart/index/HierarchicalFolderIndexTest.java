@@ -22,7 +22,7 @@ class HierarchicalFolderIndexTest {
 
     @BeforeEach
     void setUp() {
-        root = tmp.resolve("datamarts/inverted_index");       // aún no existe
+        root = tmp.resolve("datamarts/inverted_index");       // does not exist yet
     }
 
     private HierarchicalFolderIndex open() {
@@ -39,7 +39,7 @@ class HierarchicalFolderIndexTest {
         return Files.readString(root.resolve(relative), StandardCharsets.UTF_8);
     }
 
-    // --- Criterios del reto --------------------------------------------------
+    // --- Challenge criteria --------------------------------------------------
 
     @Test
     void adventureSeGuardaEnAAdventureTxt() throws IOException {
@@ -57,11 +57,11 @@ class HierarchicalFolderIndexTest {
         try (HierarchicalFolderIndex index = open()) {
             index.addDocument(10, Set.of("boat"));
             index.flush();
-            index.addDocument(10, Set.of("boat"));              // otra vez, ya guardado
-            index.addDocument(10, Set.of("boat"));              // y otra, en el mismo lote
+            index.addDocument(10, Set.of("boat"));              // again, already saved
+            index.addDocument(10, Set.of("boat"));              // and once more, in the same batch
             index.flush();
         }
-        try (HierarchicalFolderIndex index = open()) {        // y en otra ejecución
+        try (HierarchicalFolderIndex index = open()) {        // and in another run
             index.addDocument(10, Set.of("boat"));
             index.flush();
             assertEquals(List.of(10), index.postings("boat"));
@@ -72,11 +72,11 @@ class HierarchicalFolderIndexTest {
     @Test
     void terminoInexistenteDaListaVacia() {
         try (HierarchicalFolderIndex index = open()) {
-            assertEquals(List.of(), index.postings("whale"));   // ni la carpeta existe
+            assertEquals(List.of(), index.postings("whale"));   // not even the folder exists
             addPaperBooks(index);
             index.flush();
             assertEquals(List.of(), index.postings("whale"));
-            assertEquals(List.of(), index.postings("bottle"));  // existe B/, pero no bottle.txt
+            assertEquals(List.of(), index.postings("bottle"));  // B/ exists, but not bottle.txt
         }
     }
 
@@ -98,7 +98,7 @@ class HierarchicalFolderIndexTest {
         }
     }
 
-    // --- Formato en disco -------------------------------------------------------
+    // --- On-disk format ---------------------------------------------------------
 
     @Test
     void unIdPorLineaOrdenadosAunqueLleguenDesordenados() throws IOException {
@@ -140,15 +140,15 @@ class HierarchicalFolderIndexTest {
         assertEquals("1342\n", read("3/3rd.txt"));
     }
 
-    // --- addDocument acumula hasta flush ---------------------------------------
+    // --- addDocument accumulates until flush -----------------------------------
 
     @Test
     void loAnadidoSeVeAntesDelFlushPeroNoLlegaAlDiscoSinEl() {
         try (HierarchicalFolderIndex index = open()) {
             addPaperBooks(index);
-            assertEquals(List.of(10, 20), index.postings("boat"));   // en memoria sí
-            assertFalse(Files.exists(root));                          // en disco nada
-        }                                                             // close NO hace flush
+            assertEquals(List.of(10, 20), index.postings("boat"));   // in memory, yes
+            assertFalse(Files.exists(root));                          // nothing on disk
+        }                                                             // close does NOT flush
         try (HierarchicalFolderIndex reopened = open()) {
             assertEquals(List.of(), reopened.postings("boat"));
         }
@@ -159,7 +159,7 @@ class HierarchicalFolderIndexTest {
         try (HierarchicalFolderIndex index = open()) {
             index.addDocument(10, Set.of("boat"));
             index.flush();
-            index.addDocument(20, Set.of("boat"));                    // pendiente
+            index.addDocument(20, Set.of("boat"));                    // pending
 
             assertEquals(List.of(10, 20), index.postings("boat"));
         }
@@ -180,7 +180,7 @@ class HierarchicalFolderIndexTest {
         assertEquals("20\n", read("B/blue.txt"));
     }
 
-    // --- Sólo se toca lo necesario ----------------------------------------------
+    // --- Only what is needed is touched -----------------------------------------
 
     @Test
     void flushSoloReescribeLosTerminosQueCambian() throws IOException {
@@ -191,7 +191,7 @@ class HierarchicalFolderIndexTest {
             Files.setLastModifiedTime(root.resolve("R/red.txt"), old);
             Files.setLastModifiedTime(root.resolve("B/boat.txt"), old);
 
-            index.addDocument(40, Set.of("boat"));                    // sólo cambia boat
+            index.addDocument(40, Set.of("boat"));                    // only boat changes
             index.flush();
 
             assertEquals(old, Files.getLastModifiedTime(root.resolve("R/red.txt")));
@@ -205,10 +205,10 @@ class HierarchicalFolderIndexTest {
             addPaperBooks(index);
             index.flush();
         }
-        Files.writeString(root.resolve("R/red.txt"), "esto no es un id\n");   // otro término, corrupto
+        Files.writeString(root.resolve("R/red.txt"), "esto no es un id\n");   // another term, corrupt
 
         try (HierarchicalFolderIndex index = open()) {
-            assertEquals(List.of(10, 20), index.postings("boat"));            // no le afecta
+            assertEquals(List.of(10, 20), index.postings("boat"));            // it is not affected
             assertThrows(java.io.UncheckedIOException.class, () -> index.postings("red"));
         }
     }
@@ -223,7 +223,7 @@ class HierarchicalFolderIndexTest {
         }
     }
 
-    // --- Entradas raras ---------------------------------------------------------
+    // --- Odd inputs -------------------------------------------------------------
 
     @Test
     void leeFicherosEscritosPorOtroProgramaDesordenadosYConDuplicados() throws IOException {
@@ -241,10 +241,10 @@ class HierarchicalFolderIndexTest {
             index.addDocument(10, Set.of("boat"));
             index.flush();
 
-            assertEquals(List.of(), index.postings("Boat"));                  // no es un término
+            assertEquals(List.of(), index.postings("Boat"));                  // not a term
             assertEquals(List.of(), index.postings("../B/boat"));
             assertThrows(IllegalArgumentException.class, () -> index.addDocument(20, Set.of("../evil")));
-            assertEquals(List.of(10), index.postings("boat"));               // nada a medias
+            assertEquals(List.of(10), index.postings("boat"));               // nothing half-done
         }
     }
 

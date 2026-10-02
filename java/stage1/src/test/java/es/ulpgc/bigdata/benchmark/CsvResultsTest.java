@@ -23,7 +23,7 @@ class CsvResultsTest {
         return new BenchmarkRow("java", "index_build", structure, 100, repetition, "elapsed", value, "ms");
     }
 
-    // --- Formato de una fila ------------------------------------------------------
+    // --- Format of a row ----------------------------------------------------------
 
     @Test
     void laFilaDelEjemploDelSpec() {
@@ -35,7 +35,7 @@ class CsvResultsTest {
     void elValorSiempreConPuntoAunqueElOrdenadorEsteEnEspanol() {
         Locale original = Locale.getDefault();
         try {
-            Locale.setDefault(Locale.forLanguageTag("es-ES"));             // aquí 1234,5 sería lo "normal"
+            Locale.setDefault(Locale.forLanguageTag("es-ES"));             // here 1234,5 would be the "normal" one
             assertEquals("java,index_build,monolithic,100,1,elapsed,1234.5,ms",
                     row("monolithic", 1, 1234.5).toCsvLine());
         } finally {
@@ -47,8 +47,8 @@ class CsvResultsTest {
     void elValorSeRedondeaAMicrosegundosSinNotacionCientifica() {
         assertEquals("0.001", BenchmarkRow.formatValue(0.0012345));
         assertEquals("0.123", BenchmarkRow.formatValue(0.12345));
-        assertEquals("12345", BenchmarkRow.formatValue(12345.0));            // bytes, recuentos...
-        assertEquals("1500000", BenchmarkRow.formatValue(1_500_000.0));     // no "1.5E+6"
+        assertEquals("12345", BenchmarkRow.formatValue(12345.0));            // bytes, counts...
+        assertEquals("1500000", BenchmarkRow.formatValue(1_500_000.0));     // not "1.5E+6"
         assertEquals("0", BenchmarkRow.formatValue(0.0000001));
     }
 
@@ -61,7 +61,7 @@ class CsvResultsTest {
         assertThrows(IllegalArgumentException.class, () -> row("monolithic", 1, Double.NaN));
     }
 
-    // --- Ficheros -----------------------------------------------------------------------
+    // --- Files --------------------------------------------------------------------------
 
     @Test
     void nombreDelFicheroSegunElSpec() {
@@ -70,7 +70,7 @@ class CsvResultsTest {
 
     @Test
     void escribeCabeceraYFilasYSeVuelvenALeerIguales() throws IOException {
-        Path file = tmp.resolve("benchmarks/results/java_index_build.csv");          // carpetas nuevas
+        Path file = tmp.resolve("benchmarks/results/java_index_build.csv");          // new folders
         List<BenchmarkRow> rows = List.of(row("monolithic", 1, 1234.5), row("monolithic", 2, 1100.25));
 
         CsvResults.write(file, rows);
@@ -103,7 +103,7 @@ class CsvResultsTest {
         Scenario scenario = new Scenario("java", "index_build", "monolithic", 100);
         assertThrows(BenchmarkRunner.BenchmarkException.class, () -> {
             List<BenchmarkRow> rows = runner.run(scenario, () -> { throw new IOException("fallo"); });
-            CsvResults.write(file, rows);                                           // nunca se llega aquí
+            CsvResults.write(file, rows);                                           // never reached
         });
 
         assertEquals(before, Files.readString(file));
@@ -120,7 +120,7 @@ class CsvResultsTest {
 
     @Test
     void variasEstructurasEnElMismoExperimentoSonAnalizables() {
-        // Así lo usará el reto 27: se juntan las filas de todas las estructuras y se escribe una vez.
+        // This is how challenge 27 will use it: the rows of all structures are gathered and written once.
         BenchmarkRunner runner = new BenchmarkRunner(1, 3);
         List<BenchmarkRow> all = new ArrayList<>();
         for (String structure : List.of("book", "range", "time")) {
@@ -131,7 +131,7 @@ class CsvResultsTest {
 
         List<BenchmarkRow> read = CsvResults.read(file);
         assertEquals(9, read.size());
-        // Cada (estructura, repetición) aparece una sola vez: se puede agrupar sin ambigüedad.
+        // Each (structure, repetition) appears only once: it can be grouped without ambiguity.
         assertEquals(9, read.stream().map(r -> r.structure() + "#" + r.repetition()).distinct().count());
     }
 

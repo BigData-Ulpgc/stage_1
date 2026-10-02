@@ -13,8 +13,8 @@ import java.util.Optional;
 import java.util.stream.Stream;
 
 /**
- * Datalake que organiza los libros con la estructura más simple:
- * un directorio por libro, nombrado con su id.
+ * Datalake that organises the books with the simplest structure:
+ * one directory per book, named after its id.
  *   <root>/<id>/header.txt
  *   <root>/<id>/body.txt
  */

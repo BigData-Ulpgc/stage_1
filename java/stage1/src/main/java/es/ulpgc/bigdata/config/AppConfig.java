@@ -15,30 +15,30 @@ import java.util.Objects;
 import java.util.Properties;
 
 /**
- * TODA la configuración del programa, y el ÚNICO sitio que sabe dónde vive cada cosa:
+ * ALL the program's configuration, and the ONLY place that knows where each thing lives:
  *
- *   <data>/datalake/<estructura>/            DatalakeFactory
+ *   <data>/datalake/<structure>/             DatalakeFactory
  *   <data>/datamarts/metadata.db             SQLite
- *   <data>/datamarts/inverted_index.json     índice monolithic
- *   <data>/datamarts/inverted_index/         índice hierarchical
+ *   <data>/datamarts/inverted_index.json     monolithic index
+ *   <data>/datamarts/inverted_index/         hierarchical index
  *   <data>/control/                          ControlFiles
  *   <shared>/book_ids.txt, stopwords.txt, queries.txt
  *   <benchmarks>/results/, <benchmarks>/work/
  *
- * Ninguna otra clase escribe "data/..." ni "inverted_index.json": piden la ruta aquí.
+ * No other class writes "data/..." or "inverted_index.json": they ask for the path here.
  *
- * De dónde sale cada valor (lo de abajo gana a lo de arriba):
- *   1. los valores por defecto de esta clase
- *   2. el fichero .properties (config.properties si existe, o el de --config)
- *   3. la variable de entorno MONGO_URI (la que usan docker y los tests)
- *   4. las propiedades del sistema: java -Dindex.structure=hierarchical ...
+ * Where each value comes from (lower entries win over upper ones):
+ *   1. this class's default values
+ *   2. the .properties file (config.properties if it exists, or the one given with --config)
+ *   3. the MONGO_URI environment variable (the one used by docker and the tests)
+ *   4. the system properties: java -Dindex.structure=hierarchical ...
  */
 public record AppConfig(Path dataDir, Path sharedDir, Path benchmarksDir,
                         String datalakeStructure, String indexStructure,
                         String mongoUri, String mongoDatabase, String mongoCollection,
                         Duration connectTimeout, Duration requestTimeout) {
 
-    // --- Claves del fichero .properties ---
+    // --- Keys of the .properties file ---
     public static final String DATA_DIR = "data.dir";
     public static final String SHARED_DIR = "shared.dir";
     public static final String BENCHMARKS_DIR = "benchmarks.dir";
@@ -50,15 +50,15 @@ public record AppConfig(Path dataDir, Path sharedDir, Path benchmarksDir,
     public static final String CONNECT_TIMEOUT = "http.connect.timeout.seconds";
     public static final String REQUEST_TIMEOUT = "http.request.timeout.seconds";
 
-    /** Todas las claves, en el orden en que se muestran. */
+    /** All the keys, in the order they are shown. */
     public static final List<String> KEYS = List.of(DATA_DIR, SHARED_DIR, BENCHMARKS_DIR,
             DATALAKE_STRUCTURE, INDEX_STRUCTURE, MONGO_URI, MONGO_DATABASE, MONGO_COLLECTION,
             CONNECT_TIMEOUT, REQUEST_TIMEOUT);
 
-    /** Fichero que se lee si no se indica otro y existe en la carpeta actual. */
+    /** File that is read if no other is given and it exists in the current folder. */
     public static final Path DEFAULT_FILE = Path.of("config.properties");
 
-    /** Valores por defecto: pensados para ejecutar desde java/stage1. */
+    /** Default values: meant for running from java/stage1. */
     private static final Map<String, String> DEFAULTS = Map.of(
             DATA_DIR, "data",
             SHARED_DIR, "../../shared",
@@ -71,7 +71,7 @@ public record AppConfig(Path dataDir, Path sharedDir, Path benchmarksDir,
             CONNECT_TIMEOUT, "10",
             REQUEST_TIMEOUT, "15");
 
-    /** Comprueba los valores al crearse: un error de configuración sale al arrancar, no a mitad. */
+    /** Checks the values on creation: a configuration error shows up at startup, not halfway. */
     public AppConfig {
         Objects.requireNonNull(dataDir, DATA_DIR);
         Objects.requireNonNull(sharedDir, SHARED_DIR);
@@ -86,20 +86,20 @@ public record AppConfig(Path dataDir, Path sharedDir, Path benchmarksDir,
     }
 
     // ------------------------------------------------------------------
-    // Cómo se crea
+    // How it is created
     // ------------------------------------------------------------------
 
-    /** Sólo los valores por defecto (sin fichero, entorno ni -D): útil en tests. */
+    /** Only the default values (no file, environment or -D): useful in tests. */
     public static AppConfig defaults() {
         return fromProperties(new Properties());
     }
 
-    /** config.properties si existe + MONGO_URI + -D. Lo que usan los main. */
+    /** config.properties if it exists + MONGO_URI + -D. What the main methods use. */
     public static AppConfig load() {
         return load(Files.exists(DEFAULT_FILE) ? DEFAULT_FILE : null);
     }
 
-    /** Este fichero (null = ninguno) + MONGO_URI + -D. */
+    /** This file (null = none) + MONGO_URI + -D. */
     public static AppConfig load(Path file) {
         Properties merged = new Properties();
         if (file != null) {
@@ -118,7 +118,7 @@ public record AppConfig(Path dataDir, Path sharedDir, Path benchmarksDir,
         return fromProperties(merged);
     }
 
-    /** Las claves que falten toman el valor por defecto; las desconocidas son un error (erratas). */
+    /** Missing keys take the default value; unknown ones are an error (typos). */
     public static AppConfig fromProperties(Properties p) {
         for (String key : p.stringPropertyNames()) {
             if (!KEYS.contains(key)) {
@@ -138,22 +138,22 @@ public record AppConfig(Path dataDir, Path sharedDir, Path benchmarksDir,
                 seconds(p, REQUEST_TIMEOUT));
     }
 
-    /** La misma configuración con otra carpeta de datos (los benchmarks trabajan en su propia carpeta). */
+    /** The same configuration with another data folder (the benchmarks work in their own folder). */
     public AppConfig withDataDir(Path newDataDir) {
         return new AppConfig(newDataDir, sharedDir, benchmarksDir, datalakeStructure, indexStructure,
                 mongoUri, mongoDatabase, mongoCollection, connectTimeout, requestTimeout);
     }
 
     // ------------------------------------------------------------------
-    // Rutas: el único sitio donde se construyen
+    // Paths: the only place where they are built
     // ------------------------------------------------------------------
 
-    /** <data>/datalake/<estructura>: cada estructura en su carpeta, así pueden convivir. */
+    /** <data>/datalake/<structure>: each structure in its own folder, so they can coexist. */
     public Path datalakeDir(String structure) {
         return dataDir.resolve("datalake").resolve(structure);
     }
 
-    /** La carpeta de la estructura activa. */
+    /** The folder of the active structure. */
     public Path datalakeDir() {
         return datalakeDir(datalakeStructure);
     }
@@ -194,12 +194,12 @@ public record AppConfig(Path dataDir, Path sharedDir, Path benchmarksDir,
         return benchmarksDir.resolve("results");
     }
 
-    /** Carpeta de trabajo de un benchmark: <benchmarks>/work/<nombre>. */
+    /** Work folder of a benchmark: <benchmarks>/work/<name>. */
     public Path benchmarkWorkDir(String benchmark) {
         return benchmarksDir.resolve("work").resolve(benchmark);
     }
 
-    /** Una línea por clave, con el valor efectivo (comando "config" de Main). */
+    /** One line per key, with the effective value (Main's "config" command). */
     public String describe() {
         return String.join("\n",
                 DATA_DIR + " = " + dataDir,
@@ -215,7 +215,7 @@ public record AppConfig(Path dataDir, Path sharedDir, Path benchmarksDir,
     }
 
     // ------------------------------------------------------------------
-    // Auxiliares
+    // Helpers
     // ------------------------------------------------------------------
 
     private static Properties readFile(Path file) {

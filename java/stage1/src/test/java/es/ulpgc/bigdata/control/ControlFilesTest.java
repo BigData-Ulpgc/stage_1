@@ -21,7 +21,7 @@ class ControlFilesTest {
 
     @BeforeEach
     void setUp() {
-        controlDir = tmp.resolve("data/control");            // aún no existe
+        controlDir = tmp.resolve("data/control");            // does not exist yet
     }
 
     private ControlFiles open() {
@@ -37,7 +37,7 @@ class ControlFilesTest {
         Files.writeString(controlDir.resolve(file), content, StandardCharsets.UTF_8);
     }
 
-    // --- Criterios del reto --------------------------------------------------
+    // --- Challenge criteria --------------------------------------------------
 
     @Test
     void marcarDosVecesNoRompeReadyToIndexNiDuplicaLaLinea() throws IOException {
@@ -46,7 +46,7 @@ class ControlFilesTest {
         control.markDownloaded(1342);
 
         assertEquals(List.of(1342), control.readyToIndex());
-        assertEquals("1342\n", read(ControlFiles.DOWNLOADED_FILE));   // una sola línea
+        assertEquals("1342\n", read(ControlFiles.DOWNLOADED_FILE));   // a single line
     }
 
     @Test
@@ -59,7 +59,7 @@ class ControlFilesTest {
         assertEquals(List.of(1342), control.readyToIndex());
     }
 
-    // --- Conjuntos ----------------------------------------------------------------
+    // --- Sets ---------------------------------------------------------------------
 
     @Test
     void readyToIndexEsLaDiferenciaDeConjuntosOrdenada() {
@@ -68,7 +68,7 @@ class ControlFilesTest {
             control.markDownloaded(id);
         }
         control.markIndexed(1342);
-        control.markIndexed(7);                                         // indexado sin descargar: no afecta
+        control.markIndexed(7);                                         // indexed without being downloaded: no effect
 
         assertEquals(List.of(11, 84, 2000), control.readyToIndex());
     }
@@ -93,7 +93,7 @@ class ControlFilesTest {
         assertFalse(Files.exists(controlDir));
     }
 
-    // --- Persistencia ---------------------------------------------------------------
+    // --- Persistence ----------------------------------------------------------------
 
     @Test
     void lasMarcasSobrevivenAReabrir() {
@@ -102,7 +102,7 @@ class ControlFilesTest {
         first.markDownloaded(1342);
         first.markIndexed(84);
 
-        ControlFiles reopened = open();                                  // "otra ejecución"
+        ControlFiles reopened = open();                                  // "another run"
 
         assertTrue(reopened.isDownloaded(1342));
         assertTrue(reopened.isIndexed(84));
@@ -119,7 +119,7 @@ class ControlFilesTest {
         assertEquals("84\n1342\n", read(ControlFiles.DOWNLOADED_FILE));
     }
 
-    // --- Líneas inválidas --------------------------------------------------------------
+    // --- Invalid lines -----------------------------------------------------------------
 
     @Test
     void ignoraLineasVaciasYQueNoSonIds() throws IOException {
@@ -137,12 +137,12 @@ class ControlFilesTest {
 
     @Test
     void unaUltimaLineaCortadaSeIgnora() throws IOException {
-        // El programa murió escribiendo "1342\n": sólo llegó "13".
+        // The program died while writing "1342\n": only "13" made it.
         write(ControlFiles.DOWNLOADED_FILE, "84\n13");
 
         ControlFiles control = open();
 
-        assertEquals(Set.of(84), control.downloaded());                 // el 13 NO cuenta
+        assertEquals(Set.of(84), control.downloaded());                 // the 13 does NOT count
     }
 
     @Test
@@ -151,12 +151,12 @@ class ControlFilesTest {
 
         open().markDownloaded(2000);
 
-        // Sin el recorte, el fichero quedaría "84\n132000\n": un id inventado.
+        // Without the truncation, the file would end up as "84\n132000\n": a made-up id.
         assertEquals("84\n2000\n", read(ControlFiles.DOWNLOADED_FILE));
         assertEquals(Set.of(84, 2000), open().downloaded());
     }
 
-    // --- Validación y encapsulación -------------------------------------------------------
+    // --- Validation and encapsulation -----------------------------------------------------
 
     @Test
     void idNegativoSeRechaza() {

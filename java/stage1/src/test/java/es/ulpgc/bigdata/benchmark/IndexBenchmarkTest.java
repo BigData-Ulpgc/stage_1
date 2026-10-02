@@ -27,7 +27,7 @@ class IndexBenchmarkTest {
     private static final Tokenizer TOKENIZER = new Tokenizer(Set.of("the", "and", "of"));
     private static final List<String> QUERIES = List.of("whale", "ship sea", "king queen", "war peace");
 
-    /** 40 libros pequeños con vocabulario Zipf: rápido, pero con listas de tamaños distintos. */
+    /** 40 small books with Zipf vocabulary: fast, but with lists of different sizes. */
     private static final List<TokenizedBook> DATASET =
             IndexBenchmark.tokenizeAll(BenchmarkBooks.syntheticZipf(40, 600, 5000, 3), TOKENIZER);
 
@@ -45,7 +45,7 @@ class IndexBenchmarkTest {
         return rows.stream().filter(r -> r.structure().equals(structure) && r.metric().equals(metric)).toList();
     }
 
-    // --- Los backends reciben los mismos términos ----------------------------------------
+    // --- The backends receive the same terms ---------------------------------------------
 
     @Test
     void tokenizarAntesDaLosMismosTerminosQueElTokenizer() {
@@ -61,7 +61,7 @@ class IndexBenchmarkTest {
 
     @Test
     void todosLosBackendsTienenElMismoIndiceLogico() {
-        List<BenchmarkRow> disk = benchmark.disk(DATASET);     // verify lanzaría si un backend diera otras postings
+        List<BenchmarkRow> disk = benchmark.disk(DATASET);     // verify would throw if a backend gave other postings
 
         for (String metric : List.of("terms", "postings")) {
             Set<Double> values = disk.stream().filter(r -> r.metric().equals(metric))
@@ -73,14 +73,14 @@ class IndexBenchmarkTest {
     @Test
     void unIndiceConOtrosTerminosNoPasaLaVerificacion() {
         InvertedIndex wrong = new MonolithicJsonIndex(tmp.resolve("wrong.json"));
-        for (TokenizedBook b : DATASET.subList(0, DATASET.size() - 1)) {    // falta el último libro
+        for (TokenizedBook b : DATASET.subList(0, DATASET.size() - 1)) {    // the last book is missing
             wrong.addDocument(b.id(), b.terms());
         }
 
         assertThrows(IllegalStateException.class, () -> benchmark.verify(wrong, DATASET, "test"));
     }
 
-    // --- clear deja cada backend en estado equivalente ------------------------------------
+    // --- clear leaves each backend in an equivalent state ---------------------------------
 
     @Test
     void freshIndexBorraLosRestosDeUnaEjecucionAnterior() {
@@ -117,7 +117,7 @@ class IndexBenchmarkTest {
         }
     }
 
-    // --- Experimentos -----------------------------------------------------------------------
+    // --- Experiments ------------------------------------------------------------------------
 
     @Test
     void buildQueryYUpdateDanTiempoPorBackendYRepeticion() {
@@ -138,9 +138,9 @@ class IndexBenchmarkTest {
     void diskMideBytesFicherosYBloques() {
         List<BenchmarkRow> disk = benchmark.disk(DATASET);
 
-        assertEquals(1, rows(disk, "monolithic", "files").get(0).value());         // un solo JSON
+        assertEquals(1, rows(disk, "monolithic", "files").get(0).value());         // a single JSON
         double terms = rows(disk, "hierarchical", "terms").get(0).value();
-        assertEquals(terms, rows(disk, "hierarchical", "files").get(0).value());   // un fichero por término
+        assertEquals(terms, rows(disk, "hierarchical", "files").get(0).value());   // one file per term
         for (String backend : List.of("monolithic", "hierarchical")) {
             assertTrue(rows(disk, backend, "bytes").get(0).value() > 0);
             assertTrue(rows(disk, backend, "allocated_bytes").get(0).value() >= rows(disk, backend, "bytes").get(0).value());
@@ -181,7 +181,7 @@ class IndexBenchmarkTest {
         assertThrows(IllegalArgumentException.class, () -> benchmark.runAll(DATASET, List.of(1)));
     }
 
-    // --- Dataset sintético ------------------------------------------------------------------
+    // --- Synthetic dataset ------------------------------------------------------------------
 
     @Test
     void elDatasetZipfEsReproducibleYLasConsultasTienenSelectividadDistinta() {
@@ -189,7 +189,7 @@ class IndexBenchmarkTest {
 
         Map<String, Integer> booksWith = new HashMap<>();
         for (TokenizedBook b : DATASET) {
-            for (String word : List.of("adventure", "father")) {             // rango 10 y rango 2560
+            for (String word : List.of("adventure", "father")) {             // rank 10 and rank 2560
                 if (b.terms().contains(word)) {
                     booksWith.merge(word, 1, Integer::sum);
                 }
@@ -198,7 +198,7 @@ class IndexBenchmarkTest {
         assertTrue(booksWith.getOrDefault("adventure", 0) > booksWith.getOrDefault("father", 0), booksWith.toString());
     }
 
-    // --- Mongo (se salta si no está arrancado) --------------------------------------------
+    // --- Mongo (skipped if it is not running) ---------------------------------------------
 
     @Test
     void mongoRecibeLosMismosTerminosYQuedaVacioEntreRepeticiones() {
@@ -210,16 +210,16 @@ class IndexBenchmarkTest {
         IndexBenchmark withMongo = new IndexBenchmark(new BenchmarkRunner(1, 2), tmp.resolve("mongo"),
                 backends, TOKENIZER, QUERIES, 1);
 
-        List<BenchmarkRow> build = withMongo.build(DATASET);                   // verify en cada backend
+        List<BenchmarkRow> build = withMongo.build(DATASET);                   // verify on each backend
         List<BenchmarkRow> update = withMongo.update(DATASET);
         List<BenchmarkRow> disk = withMongo.disk(DATASET);
 
         assertEquals(2, rows(build, "mongo", "elapsed").size());
         assertEquals(2, rows(update, "mongo", "elapsed").size());
-        assertTrue(rows(disk, "mongo", "files").isEmpty());                     // Mongo no escribe en la carpeta
+        assertTrue(rows(disk, "mongo", "files").isEmpty());                     // Mongo does not write to the folder
         assertEquals(rows(disk, "monolithic", "postings").get(0).value(), rows(disk, "mongo", "postings").get(0).value());
 
-        InvertedIndex left = mongo.open().apply(tmp);                           // discard la dejó vacía
+        InvertedIndex left = mongo.open().apply(tmp);                           // discard left it empty
         assertEquals(List.of(), left.postings("whale"));
         left.clear();
         left.close();

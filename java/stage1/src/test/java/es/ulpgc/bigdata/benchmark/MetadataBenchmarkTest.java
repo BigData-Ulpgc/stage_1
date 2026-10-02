@@ -41,7 +41,7 @@ class MetadataBenchmarkTest {
         return rows.stream().map(BenchmarkRow::metric).collect(Collectors.toSet());
     }
 
-    // --- Criterio: cada tipo de consulta queda distinguido ---------------------------
+    // --- Criterion: each query type is told apart ------------------------------------
 
     @Test
     void cadaTipoDeConsultaTieneSuPropiaMetrica() {
@@ -59,7 +59,7 @@ class MetadataBenchmarkTest {
         }
     }
 
-    // --- Criterio: se puede representar cómo cambia el tiempo al crecer N ---------------
+    // --- Criterion: how the time changes as N grows can be plotted ----------------------
 
     @Test
     void hayUnaSerieDeMedidasPorCadaTamano() {
@@ -69,7 +69,7 @@ class MetadataBenchmarkTest {
             Set<Integer> sizes = all.get(experiment).stream().map(BenchmarkRow::datasetSize).collect(Collectors.toSet());
             assertEquals(Set.copyOf(SIZES), sizes, experiment);
         }
-        // Una curva por variante y consulta: 2 tamaños × 3 repeticiones.
+        // One curve per variant and query: 2 sizes × 3 repetitions.
         long points = all.get("metadata_query").stream()
                 .filter(r -> r.structure().equals("sqlite") && r.metric().equals("find_by_author")).count();
         assertEquals(6, points);
@@ -91,11 +91,11 @@ class MetadataBenchmarkTest {
         }
     }
 
-    // --- Inserción ----------------------------------------------------------------------------
+    // --- Insertion ----------------------------------------------------------------------------
 
     @Test
     void insertDaTiempoYThroughputPorVariante() {
-        List<BenchmarkRow> rows = benchmark.insert(DATASET.subList(0, 100));   // si faltaran filas, lanzaría excepción
+        List<BenchmarkRow> rows = benchmark.insert(DATASET.subList(0, 100));   // if rows were missing, it would throw an exception
 
         for (String backend : List.of("sqlite", "sqlite_no_index")) {
             assertEquals(3, rows.stream().filter(r -> r.structure().equals(backend) && r.metric().equals("elapsed")).count());
@@ -123,7 +123,7 @@ class MetadataBenchmarkTest {
         }
     }
 
-    // --- La variante sin índices -----------------------------------------------------------------
+    // --- The variant without indexes -------------------------------------------------------------
 
     private static List<String> indexes(Path db) throws Exception {
         List<String> names = new ArrayList<>();
@@ -145,10 +145,10 @@ class MetadataBenchmarkTest {
         MetadataBenchmark.defaultBackends().get(1).open().apply(noIdx).close();
 
         assertEquals(List.of("idx_books_author", "idx_books_title"), indexes(withIdx));
-        assertEquals(List.of(), indexes(noIdx));            // book_id sigue siendo PRIMARY KEY
+        assertEquals(List.of(), indexes(noIdx));            // book_id is still the PRIMARY KEY
     }
 
-    // --- Resultados en disco -----------------------------------------------------------------------
+    // --- Results on disk ---------------------------------------------------------------------------
 
     @Test
     void escribeLosDosCsvDelSpec() {

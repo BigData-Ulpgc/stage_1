@@ -5,31 +5,31 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Repite una tarea y mide cuánto tarda cada vez.
+ * Repeats a task and measures how long it takes each time.
  *
- *   para cada repetición (warmups + runs):
- *       setup()                    <- NO se mide (p. ej. vaciar el índice)
+ *   for each repetition (warmups + runs):
+ *       setup()                    <- NOT measured (e.g. emptying the index)
  *       t0 = nanoTime()
- *       task()                     <- SÍ se mide
+ *       task()                     <- measured
  *       t1 = nanoTime()
- *   los warmups se descartan; cada run da una fila CSV con repetition 1..runs.
+ *   warmups are discarded; each run gives one CSV row with repetition 1..runs.
  */
 public final class BenchmarkRunner {
 
-    /** Metodología común del SPEC: 2 repeticiones descartadas y 5 medidas. */
+    /** Common SPEC methodology: 2 discarded repetitions and 5 measured ones. */
     public static final int N_WARMUP = 2;
     public static final int N_RUNS = 5;
 
     public static final String METRIC = "elapsed";
     public static final String UNIT = "ms";
 
-    /** Una acción que puede lanzar excepciones comprobadas (IOException, SQLException...). */
+    /** An action that may throw checked exceptions (IOException, SQLException...). */
     @FunctionalInterface
     public interface Action {
         void run() throws Exception;
     }
 
-    /** Qué se está midiendo: las columnas del CSV que no cambian entre repeticiones. */
+    /** What is being measured: the CSV columns that do not change between repetitions. */
     public record Scenario(String language, String experiment, String structure, int datasetSize) {
     }
 
@@ -47,21 +47,21 @@ public final class BenchmarkRunner {
         this.runs = runs;
     }
 
-    /** 2 warmups + 5 runs, como fija el SPEC. */
+    /** 2 warmups + 5 runs, as set by the SPEC. */
     public static BenchmarkRunner standard() {
         return new BenchmarkRunner(N_WARMUP, N_RUNS);
     }
 
-    /** Sin nada que preparar entre repeticiones. */
+    /** Nothing to prepare between repetitions. */
     public List<BenchmarkRow> run(Scenario scenario, Action task) {
         return run(scenario, () -> { }, task);
     }
 
     /**
-     * @param setup se ejecuta antes de CADA repetición (también de los warmups) y no se mide
-     * @param task  lo que se mide
-     * @return una fila por run medido (nunca por warmup), con repetition 1, 2, ... runs
-     * @throws BenchmarkException si setup o task fallan; no se devuelven filas a medias
+     * @param setup runs before EVERY repetition (warmups included) and is not measured
+     * @param task  what is measured
+     * @return one row per measured run (never per warmup), with repetition 1, 2, ... runs
+     * @throws BenchmarkException if setup or task fail; partial rows are never returned
      */
     public List<BenchmarkRow> run(Scenario scenario, Action setup, Action task) {
         Objects.requireNonNull(scenario, "scenario");
@@ -69,7 +69,7 @@ public final class BenchmarkRunner {
         Objects.requireNonNull(task, "task");
 
         for (int i = 1; i <= warmups; i++) {
-            measureOnce(setup, task, "warmup " + i);          // se ejecuta, pero el tiempo se tira
+            measureOnce(setup, task, "warmup " + i);          // it runs, but the time is thrown away
         }
 
         List<BenchmarkRow> rows = new ArrayList<>(runs);
@@ -81,7 +81,7 @@ public final class BenchmarkRunner {
         return List.copyOf(rows);
     }
 
-    /** setup sin medir, y task medido con nanoTime. Devuelve milisegundos. */
+    /** setup not measured, and task measured with nanoTime. Returns milliseconds. */
     private static double measureOnce(Action setup, Action task, String label) {
         try {
             setup.run();
@@ -98,7 +98,7 @@ public final class BenchmarkRunner {
         return elapsedNanos / 1_000_000.0;
     }
 
-    /** Error durante un benchmark: indica en qué repetición ocurrió. */
+    /** Error during a benchmark: tells in which repetition it happened. */
     public static final class BenchmarkException extends RuntimeException {
         public BenchmarkException(String message, Throwable cause) {
             super(message + ": " + cause, cause);

@@ -35,50 +35,50 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
 /**
- * Benchmark de los tres índices invertidos (monolithic, hierarchical, mongo), con los
- * experimentos de la sección 9 del SPEC:
+ * Benchmark of the three inverted indexes (monolithic, hierarchical, mongo), with the
+ * experiments of section 9 of the SPEC:
  *
- *   index_build    índice vacío -> N libros añadidos + flush           elapsed (ms) + throughput (books/s)
- *   index_query    la carga de queries.txt (AND) sobre el índice en disco elapsed (ms) + per_query (µs)
- *   index_update   índice con N-k libros -> añadir k, flush por libro   elapsed (ms) + per_book (ms)
- *   index_memory   heap de Java con el índice construido / reabierto     heap_after_build, heap_after_open (bytes)
- *   index_disk     ocupación tras construir                              bytes (+ files, allocated_bytes) + terms, postings
+ *   index_build    empty index -> N books added + flush                elapsed (ms) + throughput (books/s)
+ *   index_query    the queries.txt workload (AND) on the on-disk index  elapsed (ms) + per_query (µs)
+ *   index_update   index with N-k books -> add k, flush per book        elapsed (ms) + per_book (ms)
+ *   index_memory   Java heap with the index built / reopened            heap_after_build, heap_after_open (bytes)
+ *   index_disk     disk usage after building                            bytes (+ files, allocated_bytes) + terms, postings
  *
- * Reglas para que la comparación sea justa:
- *  - Los libros se tokenizan UNA vez, antes de todo (tokenizeAll). Los tres backends reciben
- *    la MISMA lista de TokenizedBook: el tokenizador no está en ninguna medida.
- *  - Antes de cada repetición, freshIndex deja el backend vacío (clear) y comprueba que lo está.
- *  - Después de medir, se comprueba que el índice da los mismos resultados que un índice
- *    en memoria construido con los mismos términos (verify). Si no, el benchmark falla.
- *  - Cada tamaño N usa los N primeros libros del dataset: los tamaños son prefijos del mismo dataset.
+ * Rules to keep the comparison fair:
+ *  - Books are tokenized ONCE, before everything (tokenizeAll). The three backends receive
+ *    the SAME list of TokenizedBook: the tokenizer is not in any measurement.
+ *  - Before each repetition, freshIndex leaves the backend empty (clear) and checks that it is.
+ *  - After measuring, it checks that the index gives the same results as an in-memory
+ *    index built with the same terms (verify). If not, the benchmark fails.
+ *  - Each size N uses the first N books of the dataset: the sizes are prefixes of the same dataset.
  */
 public class IndexBenchmark {
 
     public static final String LANGUAGE = "java";
 
-    /** Veces que se repite la carga de queries.txt dentro de una medida (10 consultas solas duran µs). */
+    /** Times the queries.txt workload is repeated inside one measurement (10 queries alone take µs). */
     public static final int DEFAULT_QUERY_ROUNDS = 100;
 
-    /** Base de Mongo del benchmark: nunca la del índice real (search_engine). */
+    /** Mongo database for the benchmark: never the one of the real index (search_engine). */
     public static final String BENCH_DATABASE = "search_engine_bench";
 
-    /** Un libro ya tokenizado: lo único que reciben los índices. */
+    /** An already tokenized book: the only thing the indexes receive. */
     public record TokenizedBook(int id, Set<String> terms) {
         public TokenizedBook {
-            terms = Set.copyOf(terms);                         // inmodificable: nadie lo cambia entre backends
+            terms = Set.copyOf(terms);                         // unmodifiable: nobody changes it between backends
         }
     }
 
     /**
-     * Un backend a comparar: su nombre en el CSV y cómo abrir el índice que vive en una carpeta.
-     * Abrir dos veces la misma carpeta debe dar el mismo índice (así se "reabre" tras un flush).
+     * A backend to compare: its name in the CSV and how to open the index that lives in a folder.
+     * Opening the same folder twice must give the same index (this is how it is "reopened" after a flush).
      */
     public record Backend(String name, Function<Path, InvertedIndex> open) {
     }
 
     /**
-     * monolithic y hierarchical, creados por InvertedIndexFactory con la carpeta de datos
-     * apuntando a 'dir': las rutas de dentro (datamarts/inverted_index.json...) las decide AppConfig.
+     * monolithic and hierarchical, created by InvertedIndexFactory with the data folder
+     * pointing to 'dir': the paths inside it (datamarts/inverted_index.json...) are decided by AppConfig.
      */
     public static List<Backend> fileBackends() {
         AppConfig base = AppConfig.defaults();
@@ -87,12 +87,12 @@ public class IndexBenchmark {
                 .toList();
     }
 
-    /** Mongo no usa la carpeta: siempre la misma colección, que freshIndex vacía. */
+    /** Mongo does not use the folder: always the same collection, which freshIndex empties. */
     public static Backend mongoBackend(String uri, String database, String collection) {
         return new Backend("mongo", dir -> new MongoInvertedIndex(uri, database, collection));
     }
 
-    /** ¿Responde Mongo en esta dirección? (para saltarlo en vez de fallar si no está arrancado) */
+    /** Does Mongo answer at this address? (to skip it instead of failing if it is not running) */
     public static boolean mongoAvailable(String uri) {
         MongoClientSettings quick = MongoClientSettings.builder()
                 .applyConnectionString(new ConnectionString(uri))
@@ -106,7 +106,7 @@ public class IndexBenchmark {
         }
     }
 
-    /** Tokeniza todos los libros. Se llama ANTES de cualquier medida. */
+    /** Tokenizes all the books. Called BEFORE any measurement. */
     public static List<TokenizedBook> tokenizeAll(List<RawBook> books, Tokenizer tokenizer) {
         List<TokenizedBook> tokenized = new ArrayList<>(books.size());
         for (RawBook book : books) {
@@ -135,7 +135,7 @@ public class IndexBenchmark {
         this.queryRounds = queryRounds;
     }
 
-    /** Los cinco experimentos para cada tamaño (prefijos de 'dataset'). */
+    /** The five experiments for each size (prefixes of 'dataset'). */
     public Map<String, List<BenchmarkRow>> runAll(List<TokenizedBook> dataset, List<Integer> sizes) {
         Map<String, List<BenchmarkRow>> results = new LinkedHashMap<>();
         for (String experiment : List.of("index_build", "index_query", "index_update", "index_memory", "index_disk")) {
@@ -161,12 +161,12 @@ public class IndexBenchmark {
     }
 
     // ------------------------------------------------------------------
-    // index_build: de índice vacío a índice persistido con N libros
+    // index_build: from an empty index to a persisted index with N books
     // ------------------------------------------------------------------
 
     /**
-     * Se mide: N addDocument con términos ya calculados + UN flush final (hasta que está en disco).
-     * No se mide: leer libros, tokenizar, vaciar el índice ni abrir la conexión.
+     * Measured: N addDocument calls with precomputed terms + ONE final flush (until it is on disk).
+     * Not measured: reading books, tokenizing, emptying the index or opening the connection.
      */
     public List<BenchmarkRow> build(List<TokenizedBook> books) {
         List<BenchmarkRow> rows = new ArrayList<>();
@@ -174,7 +174,7 @@ public class IndexBenchmark {
             Path dir = dirFor("build", backend);
             InvertedIndex[] index = new InvertedIndex[1];
             List<BenchmarkRow> elapsed = runner.run(scenario("index_build", backend, books.size()),
-                    () -> index[0] = freshIndex(backend, dir, index[0]),      // setup: índice vacío
+                    () -> index[0] = freshIndex(backend, dir, index[0]),      // setup: empty index
                     () -> {
                         addAll(index[0], books);
                         index[0].flush();
@@ -190,13 +190,13 @@ public class IndexBenchmark {
     }
 
     // ------------------------------------------------------------------
-    // index_query: la misma carga AND para todos
+    // index_query: the same AND workload for all of them
     // ------------------------------------------------------------------
 
     /**
-     * El índice se construye y se REABRE antes de medir: así se consulta lo que hay en disco
-     * (para monolithic, el JSON ya cargado en memoria al abrir; para los otros, sus ficheros o Mongo).
-     * Se mide: queryRounds veces la carga de queries.txt con SearchService (incluye tokenizar la consulta).
+     * The index is built and REOPENED before measuring: this way what is on disk is queried
+     * (for monolithic, the JSON already loaded into memory when opening; for the others, their files or Mongo).
+     * Measured: queryRounds times the queries.txt workload with SearchService (includes tokenizing the query).
      */
     public List<BenchmarkRow> query(List<TokenizedBook> books) {
         int totalQueries = queryRounds * queries.size();
@@ -209,7 +209,7 @@ public class IndexBenchmark {
             built.close();
 
             InvertedIndex index = backend.open().apply(dir);
-            verify(index, books, backend.name() + " query");                  // mismos resultados que la referencia
+            verify(index, books, backend.name() + " query");                  // same results as the reference
             SearchService search = new SearchService(tokenizer, index);
             long[] found = {0};
             List<BenchmarkRow> elapsed = runner.run(scenario("index_query", backend, books.size()),
@@ -217,7 +217,7 @@ public class IndexBenchmark {
                     () -> {
                         for (int round = 0; round < queryRounds; round++) {
                             for (String q : queries) {
-                                found[0] += search.search(q).size();          // usar el resultado
+                                found[0] += search.search(q).size();          // use the result
                             }
                         }
                     });
@@ -231,16 +231,16 @@ public class IndexBenchmark {
     }
 
     // ------------------------------------------------------------------
-    // index_update: añadir k libros a un índice que ya tiene N-k
+    // index_update: add k books to an index that already has N-k
     // ------------------------------------------------------------------
 
     /**
-     * k = 10 % de N (mínimo 1), como datalake_incremental.
-     * Setup (sin medir): índice vacío, N-k libros, flush, cerrar y reabrir (como lo encontraría
-     * una ejecución posterior del pipeline).
-     * Se mide: los k libros, cada uno con addDocument + flush, igual que hace Indexer (reto 21).
-     * Aquí monolithic reescribe el JSON COMPLETO en cada flush; hierarchical sólo los
-     * ficheros de los términos del libro; mongo sólo esos documentos.
+     * k = 10 % of N (minimum 1), like datalake_incremental.
+     * Setup (not measured): empty index, N-k books, flush, close and reopen (as a later run
+     * of the pipeline would find it).
+     * Measured: the k books, each one with addDocument + flush, just like Indexer does (challenge 21).
+     * Here monolithic rewrites the WHOLE JSON on every flush; hierarchical only the
+     * files of the book's terms; mongo only those documents.
      */
     public List<BenchmarkRow> update(List<TokenizedBook> books) {
         int k = Math.max(1, books.size() / 10);
@@ -252,7 +252,7 @@ public class IndexBenchmark {
             Path dir = dirFor("update", backend);
             InvertedIndex[] index = new InvertedIndex[1];
             List<BenchmarkRow> elapsed = runner.run(scenario("index_update", backend, books.size()),
-                    () -> {                                                   // setup, sin medir
+                    () -> {                                                   // setup, not measured
                         InvertedIndex previous = freshIndex(backend, dir, index[0]);
                         addAll(previous, base);
                         previous.flush();
@@ -265,7 +265,7 @@ public class IndexBenchmark {
                             index[0].flush();
                         }
                     });
-            verify(index[0], books, backend.name() + " update");              // N-k + k == construir N
+            verify(index[0], books, backend.name() + " update");              // N-k + k == building N
             discard(index[0]);
             rows.addAll(elapsed);
             for (BenchmarkRow e : elapsed) {
@@ -276,20 +276,20 @@ public class IndexBenchmark {
     }
 
     // ------------------------------------------------------------------
-    // index_memory: heap de Java (estimación)
+    // index_memory: Java heap (estimate)
     // ------------------------------------------------------------------
 
     /**
-     * Heap usado (tras pedir GC) antes y después, con el índice todavía vivo:
-     *   heap_after_build  índice construido con N libros y flush hecho
-     *   heap_after_open   índice recién abierto desde disco (lo que ocupa un buscador en marcha)
+     * Heap used (after requesting GC) before and after, with the index still alive:
+     *   heap_after_build  index built with N books and flushed
+     *   heap_after_open   index just opened from disk (what a running search engine takes)
      *
-     * Es una ESTIMACIÓN: System.gc() es una petición, no una orden, y puede salir algún valor
-     * negativo o con ruido de unos KB.
+     * It is an ESTIMATE: System.gc() is a request, not an order, and some value may come out
+     * negative or with a few KB of noise.
      *
-     * Limitación de Mongo: aquí sólo se ve el heap del CLIENTE (driver, conexiones, lo pendiente).
-     * Los datos viven en otro proceso, mongod, con su propia caché (WiredTiger), que no está en
-     * nuestro heap y además es compartida por todas las colecciones: no es comparable con el heap.
+     * Mongo limitation: here only the CLIENT heap is seen (driver, connections, pending work).
+     * The data lives in another process, mongod, with its own cache (WiredTiger), which is not in
+     * our heap and is also shared by all collections: it is not comparable with the heap.
      */
     public List<BenchmarkRow> memory(List<TokenizedBook> books) {
         List<BenchmarkRow> rows = new ArrayList<>();
@@ -303,7 +303,7 @@ public class IndexBenchmark {
             addAll(index, books);
             index.flush();
             long afterBuild = usedHeapAfterGc();
-            Reference.reachabilityFence(index);                               // que el GC no lo dé por muerto antes
+            Reference.reachabilityFence(index);                               // so the GC does not consider it dead too early
             index.close();
             index = null;
 
@@ -320,7 +320,7 @@ public class IndexBenchmark {
         return rows;
     }
 
-    /** Heap ocupado tras un par de GC (lo que queda es lo que sigue vivo). */
+    /** Heap in use after a couple of GCs (what remains is what is still alive). */
     static long usedHeapAfterGc() {
         Runtime rt = Runtime.getRuntime();
         for (int i = 0; i < 3; i++) {
@@ -330,15 +330,15 @@ public class IndexBenchmark {
     }
 
     // ------------------------------------------------------------------
-    // index_disk: bytes en disco tras construir
+    // index_disk: bytes on disk after building
     // ------------------------------------------------------------------
 
     /**
-     * bytes            diskUsageBytes() del contrato (Mongo: storageSize + totalIndexSize, comprimido)
-     * files            ficheros en la carpeta (sólo backends de ficheros)
-     * allocated_bytes  bloques que reserva el disco (sólo backends de ficheros): con miles de
-     *                  ficheros pequeños, hierarchical ocupa mucho más de lo que suman sus bytes
-     * terms, postings  tamaño del índice lógico: IGUAL en todos los backends (mismos términos)
+     * bytes            diskUsageBytes() from the contract (Mongo: storageSize + totalIndexSize, compressed)
+     * files            files in the folder (file backends only)
+     * allocated_bytes  blocks the disk reserves (file backends only): with thousands of
+     *                  small files, hierarchical takes much more than its bytes add up to
+     * terms, postings  size of the logical index: the SAME in every backend (same terms)
      */
     public List<BenchmarkRow> disk(List<TokenizedBook> books) {
         long terms = distinctTerms(books);
@@ -353,7 +353,7 @@ public class IndexBenchmark {
             verify(index, books, backend.name() + " disk");
 
             rows.add(single(backend, n, "index_disk", "bytes", index.diskUsageBytes(), "bytes"));
-            if (Files.isDirectory(dir)) {                                     // Mongo no escribe en la carpeta
+            if (Files.isDirectory(dir)) {                                     // Mongo does not write to the folder
                 rows.add(single(backend, n, "index_disk", "files", DatalakeStats.of(dir).files(), "count"));
                 rows.add(single(backend, n, "index_disk", "allocated_bytes", DatalakeBenchmark.allocatedBytes(dir), "bytes"));
             }
@@ -365,19 +365,19 @@ public class IndexBenchmark {
     }
 
     // ------------------------------------------------------------------
-    // Estado inicial equivalente y comprobación de resultados
+    // Equivalent initial state and result checking
     // ------------------------------------------------------------------
 
     /**
-     * Cierra el índice anterior, borra lo que hubiera (clear) y abre uno nuevo.
-     * Comprueba que el nuevo está vacío de verdad: ningún fichero en la carpeta y ninguna
-     * posting list para los términos de las consultas. Siempre en el setup, nunca medido.
+     * Closes the previous index, deletes whatever was there (clear) and opens a new one.
+     * Checks that the new one is really empty: no file in the folder and no
+     * posting list for the query terms. Always in the setup, never measured.
      */
     InvertedIndex freshIndex(Backend backend, Path dir, InvertedIndex previous) {
         if (previous != null) {
             previous.close();
         }
-        InvertedIndex old = backend.open().apply(dir);                        // puede traer restos de otra ejecución
+        InvertedIndex old = backend.open().apply(dir);                        // it may carry leftovers from another run
         old.clear();
         old.close();
         InvertedIndex index = backend.open().apply(dir);
@@ -389,9 +389,9 @@ public class IndexBenchmark {
     }
 
     /**
-     * El índice debe coincidir con uno en memoria construido con los MISMOS TokenizedBook:
-     * posting lists de los términos de las consultas y de unos cuantos términos del primer y
-     * del último libro, y resultado de cada consulta AND.
+     * The index must match an in-memory one built with the SAME TokenizedBook list:
+     * posting lists of the query terms and of a few terms of the first and
+     * last book, and the result of each AND query.
      */
     void verify(InvertedIndex index, List<TokenizedBook> books, String what) {
         InMemoryInvertedIndex reference = new InMemoryInvertedIndex();
@@ -411,14 +411,14 @@ public class IndexBenchmark {
         }
     }
 
-    /** Vacía el índice (para no dejar datos entre experimentos) y lo cierra. */
+    /** Empties the index (so no data is left between experiments) and closes it. */
     private static void discard(InvertedIndex index) {
         index.clear();
         index.close();
     }
 
     // ------------------------------------------------------------------
-    // Auxiliares
+    // Helpers
     // ------------------------------------------------------------------
 
     private static void addAll(InvertedIndex index, List<TokenizedBook> books) {
@@ -463,7 +463,7 @@ public class IndexBenchmark {
         }
     }
 
-    /** shared/queries.txt: una consulta por línea; se ignoran vacías y las que empiezan por '#'. */
+    /** shared/queries.txt: one query per line; empty lines and those starting with '#' are ignored. */
     public static List<String> readQueries(Path file) {
         try {
             List<String> queries = new ArrayList<>();
@@ -480,15 +480,15 @@ public class IndexBenchmark {
     }
 
     // ------------------------------------------------------------------
-    // Ejecutable
+    // Executable
     // ------------------------------------------------------------------
 
     /**
-     * Uso:  IndexBenchmark [tamaños] [datalake_book]
-     *   tamaños        separados por comas (por defecto 50,100,200; unos 10 min con mongo)
-     *   datalake_book  libros reales ya descargados; sin él, libros sintéticos (Zipf)
-     * shared/, benchmarks/ y la dirección de Mongo salen de AppConfig. Si Mongo no responde, se salta.
-     * Mongo usa la base BENCH_DATABASE, nunca la del índice real.
+     * Usage:  IndexBenchmark [sizes] [book_datalake]
+     *   sizes          separated by commas (default 50,100,200; about 10 min with mongo)
+     *   book_datalake  real books already downloaded; without it, synthetic books (Zipf)
+     * shared/, benchmarks/ and the Mongo address come from AppConfig. If Mongo does not answer, it is skipped.
+     * Mongo uses the BENCH_DATABASE database, never the one of the real index.
      */
     public static void main(String[] args) {
         List<Integer> sizes = new ArrayList<>();
@@ -503,8 +503,8 @@ public class IndexBenchmark {
         List<RawBook> raw = args.length > 1
                 ? BenchmarkBooks.fromDatalake(new BookBasedDatalake(Path.of(args[1])))
                 : BenchmarkBooks.syntheticZipf(max, 5000, 30_000, 1);
-        List<TokenizedBook> dataset = tokenizeAll(raw, tokenizer);         // ANTES de medir nada
-        raw = null;                                                          // el texto ya no hace falta
+        List<TokenizedBook> dataset = tokenizeAll(raw, tokenizer);         // BEFORE measuring anything
+        raw = null;                                                          // the text is no longer needed
 
         List<Backend> backends = new ArrayList<>(fileBackends());
         String uri = config.mongoUri();

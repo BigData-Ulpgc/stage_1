@@ -7,7 +7,7 @@ import java.util.Objects;
 import java.util.regex.Pattern;
 
 /**
- * Una medida = una fila del CSV común (shared/SPEC.md, sección 9):
+ * One measurement = one row of the common CSV (shared/SPEC.md, section 9):
  *
  *   language,experiment,structure,dataset_size,repetition,metric,value,unit
  *   java,index_build,monolithic,100,1,elapsed,1234.5,ms
@@ -19,8 +19,8 @@ public record BenchmarkRow(String language, String experiment, String structure,
             "language,experiment,structure,dataset_size,repetition,metric,value,unit";
 
     /**
-     * Los campos de texto no pueden llevar comas, comillas ni saltos de línea: así el CSV
-     * no necesita escapar nada y Python, C y cualquier hoja de cálculo lo leen igual.
+     * Text fields cannot contain commas, quotes or line breaks: this way the CSV
+     * needs no escaping and Python, C and any spreadsheet read it the same way.
      */
     private static final Pattern SAFE_TEXT = Pattern.compile("[A-Za-z0-9_.\\-]+");
 
@@ -48,7 +48,7 @@ public record BenchmarkRow(String language, String experiment, String structure,
         }
     }
 
-    /** La fila en formato CSV, sin salto de línea final. */
+    /** The row in CSV format, without a trailing line break. */
     public String toCsvLine() {
         return String.join(",", language, experiment, structure,
                 Integer.toString(datasetSize), Integer.toString(repetition),
@@ -56,16 +56,16 @@ public record BenchmarkRow(String language, String experiment, String structure,
     }
 
     /**
-     * Siempre con punto decimal (nunca "1234,5", que partiría la columna), sin notación
-     * científica y con 3 decimales como máximo: 1234.5, 12345, 0.001.
-     * 3 decimales de milisegundo = microsegundos, más precisión que el ruido de la medida.
+     * Always with a decimal point (never "1234,5", which would split the column), without
+     * scientific notation and with at most 3 decimals: 1234.5, 12345, 0.001.
+     * 3 decimals of a millisecond = microseconds, more precision than the measurement noise.
      */
     static String formatValue(double value) {
         BigDecimal rounded = BigDecimal.valueOf(value).setScale(3, RoundingMode.HALF_UP).stripTrailingZeros();
         return rounded.signum() == 0 ? "0" : rounded.toPlainString();
     }
 
-    /** Lee una línea escrita por toCsvLine (útil para comprobar y analizar resultados). */
+    /** Reads a line written by toCsvLine (useful to check and analyse results). */
     public static BenchmarkRow parse(String line) {
         List<String> f = List.of(line.split(",", -1));
         if (f.size() != 8) {

@@ -32,7 +32,7 @@ class BookMetadataTest {
         assertNull(meta.author());
         assertNull(meta.language());
         assertNull(meta.releaseDate());
-        // el título y el id SÍ deben estar siempre presentes
+        // the title and the id MUST always be present
         assertNotNull(meta.title());
         assertEquals(20, meta.bookId());
     }

@@ -7,9 +7,9 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Contrato común para cualquier organización física del datalake
- * (book, range, time). El resto del sistema depende de esta interfaz,
- * nunca de una implementación concreta.
+ * Common contract for any physical organisation of the datalake
+ * (book, range, time). The rest of the system depends on this interface,
+ * never on a concrete implementation.
  */
 public interface Datalake {
 

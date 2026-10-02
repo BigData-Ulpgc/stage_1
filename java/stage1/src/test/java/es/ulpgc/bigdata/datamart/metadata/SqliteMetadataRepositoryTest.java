@@ -21,7 +21,7 @@ class SqliteMetadataRepositoryTest {
     @TempDir Path tmp;
 
     private Path dbFile;
-    private MetadataRepository repo;      // se usa como interfaz, no como clase concreta
+    private MetadataRepository repo;      // used as an interface, not as a concrete class
 
     @BeforeEach
     void open() {
@@ -67,7 +67,7 @@ class SqliteMetadataRepositoryTest {
         assertEquals(sinDatos, repo.findById(16328).orElseThrow());
     }
 
-    // --- save: idempotente --------------------------------------------------
+    // --- save: idempotent ---------------------------------------------------
 
     @Test
     void guardarOtraVezElMismoIdLoActualiza() {
@@ -88,7 +88,7 @@ class SqliteMetadataRepositoryTest {
         assertEquals("Frankenstein", repo.findById(84).orElseThrow().title());
     }
 
-    // --- Consultas por autor y título --------------------------------------
+    // --- Queries by author and title ---------------------------------------
 
     @Test
     void findByAuthorDevuelveSusLibrosOrdenadosPorId() {
@@ -118,8 +118,8 @@ class SqliteMetadataRepositoryTest {
     void lasConsultasSonDeIgualdadExacta() {
         repo.save(book(158, "Emma", "Jane Austen"));
 
-        assertEquals(List.of(), repo.findByAuthor("Austen"));        // no es "contiene"
-        assertEquals(List.of(), repo.findByAuthor("jane austen"));   // distingue mayúsculas
+        assertEquals(List.of(), repo.findByAuthor("Austen"));        // it is not "contains"
+        assertEquals(List.of(), repo.findByAuthor("jane austen"));   // case-sensitive
         assertEquals(List.of(), repo.findByTitle("Em"));
     }
 
@@ -132,7 +132,7 @@ class SqliteMetadataRepositoryTest {
         assertEquals(List.of(), repo.findByTitle(null));
     }
 
-    // --- saveAll: una transacción ------------------------------------------
+    // --- saveAll: one transaction ------------------------------------------
 
     @Test
     void saveAllGuardaTodoElLote() {
@@ -143,8 +143,8 @@ class SqliteMetadataRepositoryTest {
 
     @Test
     void saveAllEsTodoONadaSiFallaLaBaseDeDatos() throws SQLException {
-        // Un trigger hace que SQLite rechace el libro 3 cuando las filas 1 y 2
-        // ya se han enviado a la base. Sin transacción, el 1 y el 2 quedarían guardados.
+        // A trigger makes SQLite reject book 3 when rows 1 and 2
+        // have already been sent to the database. Without a transaction, 1 and 2 would stay saved.
         try (Connection c = DriverManager.getConnection(SqliteSchema.jdbcUrl(dbFile));
              Statement st = c.createStatement()) {
             st.execute("""
@@ -161,8 +161,8 @@ class SqliteMetadataRepositoryTest {
 
     @Test
     void saveAllEsTodoONadaSiFallaUnElementoDelLote() {
-        // Aquí el fallo ocurre en Java, al preparar el tercer elemento.
-        // Si saveAll llamara a save() fila a fila, el 1 y el 2 quedarían guardados.
+        // Here the failure happens in Java, while preparing the third element.
+        // If saveAll called save() row by row, 1 and 2 would stay saved.
         List<BookMetadata> batch = Arrays.asList(book(1, "A", "X"), book(2, "B", "Y"), null);
 
         assertThrows(NullPointerException.class, () -> repo.saveAll(batch));
@@ -177,7 +177,7 @@ class SqliteMetadataRepositoryTest {
 
         repo.save(book(84, "Frankenstein", "Mary Shelley"));
         repo.close();
-        repo = new SqliteMetadataRepository(dbFile);        // ¿llegó al disco?
+        repo = new SqliteMetadataRepository(dbFile);        // did it reach the disk?
 
         assertEquals(List.of(84), ids(repo.findByAuthor("Mary Shelley")));
     }
@@ -188,7 +188,7 @@ class SqliteMetadataRepositoryTest {
         assertEquals(0, repo.count());
     }
 
-    // --- count y clear ------------------------------------------------------
+    // --- count and clear ----------------------------------------------------
 
     @Test
     void clearVaciaLaTablaYElRepositorioSigueFuncionando() {
@@ -198,7 +198,7 @@ class SqliteMetadataRepositoryTest {
         assertEquals(0, repo.count());
         assertTrue(repo.findById(1).isEmpty());
 
-        repo.save(book(3, "C", "Z"));                       // tabla e índices siguen ahí
+        repo.save(book(3, "C", "Z"));                       // table and indexes are still there
         assertEquals(1, repo.count());
     }
 }

@@ -17,7 +17,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class SearchServiceTest {
 
-    /** Los tres libros del ejercicio en papel. */
+    /** The three books of the paper exercise. */
     private static final List<RawBook> PAPER_BOOKS = List.of(
             new RawBook(10, "", "red boat sails"),
             new RawBook(20, "", "blue boat sails fast"),
@@ -36,7 +36,7 @@ class SearchServiceTest {
         search = new SearchService(tokenizer, index);
     }
 
-    // --- Criterios del reto ----------------------------------------------------
+    // --- Challenge criteria ----------------------------------------------------
 
     @Test
     void boatSailsDevuelveLosLibrosConAmbosTerminos() {
@@ -53,14 +53,14 @@ class SearchServiceTest {
     @Test
     void unTerminoInexistenteDaResultadoVacio() {
         assertEquals(List.of(), search.search("whale"));
-        assertEquals(List.of(), search.search("boat whale"));   // aunque "boat" exista
+        assertEquals(List.of(), search.search("boat whale"));   // even though "boat" exists
         assertEquals(List.of(), search.search("whale boat"));
     }
 
     @Test
     void laInterseccionEsLinealYNoCuadratica() {
-        // 200.000 elementos por lista. Con contains dentro de un bucle serían
-        // unos 40.000 millones de comparaciones: minutos. Con dos punteros, milisegundos.
+        // 200,000 elements per list. With contains inside a loop it would be
+        // about 40 billion comparisons: minutes. With two pointers, milliseconds.
         List<Integer> evens = IntStream.range(0, 200_000).map(i -> i * 2).boxed().toList();
         List<Integer> multiplesOf3 = IntStream.range(0, 200_000).map(i -> i * 3).boxed().toList();
 
@@ -68,10 +68,10 @@ class SearchServiceTest {
                 () -> SearchService.intersect(evens, multiplesOf3));
 
         assertEquals(List.of(0, 6, 12), result.subList(0, 3));
-        assertEquals(66_667, result.size());                    // múltiplos de 6 por debajo de 400.000
+        assertEquals(66_667, result.size());                    // multiples of 6 below 400,000
     }
 
-    // --- La consulta pasa por el mismo tokenizador --------------------------
+    // --- The query goes through the same tokenizer --------------------------
 
     @Test
     void mayusculasYPuntuacionNoCambianElResultado() {
@@ -92,8 +92,8 @@ class SearchServiceTest {
     @Test
     void consultaSinTerminosValidosDaResultadoVacio() {
         assertEquals(List.of(), search.search(""));
-        assertEquals(List.of(), search.search("the of"));        // sólo stopwords
-        assertEquals(List.of(), search.search("a ! ?"));         // nada de longitud >= 2
+        assertEquals(List.of(), search.search("the of"));        // only stopwords
+        assertEquals(List.of(), search.search("a ! ?"));         // nothing with length >= 2
     }
 
     @Test
@@ -110,10 +110,10 @@ class SearchServiceTest {
     @Test
     void elResultadoNoSePuedeModificar() {
         assertThrows(UnsupportedOperationException.class, () -> search.search("red").add(99));
-        assertEquals(List.of(10, 30), search.search("red"));    // el índice no se ha tocado
+        assertEquals(List.of(10, 30), search.search("red"));    // the index has not been touched
     }
 
-    // --- Cortar pronto --------------------------------------------------------
+    // --- Stopping early -------------------------------------------------------
 
     @Test
     void dejaDePedirPostingsEnCuantoUnaEstaVacia() {
@@ -122,10 +122,10 @@ class SearchServiceTest {
 
         assertEquals(List.of(), spied.search("boat whale sails"));
 
-        assertEquals(List.of("boat", "whale"), spy.requested);   // "sails" ni se pide
+        assertEquals(List.of("boat", "whale"), spy.requested);   // "sails" is not even requested
     }
 
-    /** Índice que apunta qué términos le piden y delega el resto en otro índice. */
+    /** Index that records which terms are requested and delegates the rest to another index. */
     private static final class SpyIndex implements InvertedIndex {
         private final InvertedIndex delegate;
         private final List<String> requested = new ArrayList<>();
@@ -145,21 +145,21 @@ class SearchServiceTest {
         @Override public void close() { }
     }
 
-    // --- intersect, con dos listas pequeñas -----------------------------------
+    // --- intersect, with two small lists --------------------------------------
 
     @Test
     void intersectCasosBasicos() {
         assertEquals(List.of(3, 7), SearchService.intersect(List.of(1, 3, 5, 7), List.of(2, 3, 4, 7, 9)));
-        assertEquals(List.of(), SearchService.intersect(List.of(1, 3), List.of(2, 4)));      // sin comunes
-        assertEquals(List.of(), SearchService.intersect(List.of(), List.of(1, 2)));          // una vacía
-        assertEquals(List.of(1, 2), SearchService.intersect(List.of(1, 2), List.of(1, 2)));  // iguales
+        assertEquals(List.of(), SearchService.intersect(List.of(1, 3), List.of(2, 4)));      // no common elements
+        assertEquals(List.of(), SearchService.intersect(List.of(), List.of(1, 2)));          // one of them empty
+        assertEquals(List.of(1, 2), SearchService.intersect(List.of(1, 2), List.of(1, 2)));  // equal
         assertEquals(List.of(5), SearchService.intersect(List.of(5), List.of(1, 2, 3, 4, 5, 6, 7)));
     }
 
     @Test
     void intersectFuncionaConIdsGrandes() {
-        // Con Integer == Integer (en vez de int) esto fallaría: Java sólo reutiliza
-        // los objetos Integer entre -128 y 127.
+        // With Integer == Integer (instead of int) this would fail: Java only reuses
+        // the Integer objects between -128 and 127.
         assertEquals(List.of(1342, 84000), SearchService.intersect(
                 List.of(84, 1342, 84000), new ArrayList<>(List.of(1342, 2000, 84000))));
     }

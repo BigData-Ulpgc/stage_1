@@ -83,7 +83,7 @@ class BookBasedDatalakeTest {
         assertEquals(List.of(84), datalake.listBookIds());
     }
 
-    /** Carpeta con header y body, como si fuera un libro, pero creada a mano. */
+    /** Folder with header and body, as if it were a book, but created by hand. */
     private static void crearLibroFalso(Path dir) throws IOException {
         Files.createDirectories(dir);
         Files.writeString(dir.resolve("header.txt"), "x");

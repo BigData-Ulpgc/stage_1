@@ -23,21 +23,21 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
- * Datalake organizado por fecha y hora local de la descarga (shared/SPEC.md, sección 3):
+ * Datalake organised by local date and time of the download (shared/SPEC.md, section 3):
  *   <root>/YYYYMMDD/HH/<ID>.header.txt
  *   <root>/YYYYMMDD/HH/<ID>.body.txt
  *
- * La ruta NO se puede calcular a partir del id, así que locate tiene que buscar.
- * save es append-only; ante copias repetidas de un id gana la más reciente
- * y listBookIds no repite ids.
+ * The path CANNOT be computed from the id, so locate has to search.
+ * save is append-only; when there are repeated copies of an id the most recent one wins
+ * and listBookIds does not repeat ids.
  */
 public class TimeBasedDatalake extends AbstractFileDatalake {
 
     private static final String HEADER_SUFFIX = ".header.txt";
     private static final String BODY_SUFFIX = ".body.txt";
 
-    // "yyyy" = año de calendario ("YYYY" sería año de semana ISO)
-    // "HH"   = hora 00-23             ("hh" sería 01-12 sin AM/PM)
+    // "yyyy" = calendar year ("YYYY" would be ISO week year)
+    // "HH"   = hour 00-23             ("hh" would be 01-12 without AM/PM)
     private static final DateTimeFormatter DAY_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd", Locale.ROOT);
     private static final DateTimeFormatter HOUR_FORMAT = DateTimeFormatter.ofPattern("HH", Locale.ROOT);
 
@@ -66,7 +66,7 @@ public class TimeBasedDatalake extends AbstractFileDatalake {
 
     @Override
     public BookLocation save(RawBook book) {
-        Path folder = folderFor(LocalDateTime.now(clock));   // se lee el reloj UNA vez
+        Path folder = folderFor(LocalDateTime.now(clock));   // the clock is read ONCE
         return writeBook(book,
                 folder.resolve(book.id() + HEADER_SUFFIX),
                 folder.resolve(book.id() + BODY_SUFFIX));
@@ -90,7 +90,7 @@ public class TimeBasedDatalake extends AbstractFileDatalake {
 
     @Override
     public List<Integer> listBookIds() {
-        SortedSet<Integer> ids = new TreeSet<>(); // ordena y elimina repetidos
+        SortedSet<Integer> ids = new TreeSet<>(); // sorts and removes duplicates
         for (Path hourDir : hourDirsNewestFirst()) {
             try (Stream<Path> files = Files.list(hourDir)) {
                 for (Path file : (Iterable<Path>) files::iterator) {
@@ -106,7 +106,7 @@ public class TimeBasedDatalake extends AbstractFileDatalake {
         return List.copyOf(ids);
     }
 
-    /** Todas las carpetas YYYYMMDD/HH válidas, de la más reciente a la más antigua. */
+    /** All the valid YYYYMMDD/HH folders, from the most recent to the oldest. */
     private List<Path> hourDirsNewestFirst() {
         List<Path> result = new ArrayList<>();
         for (Path dayDir : subdirsNewestFirst(root, DAY_DIR)) {

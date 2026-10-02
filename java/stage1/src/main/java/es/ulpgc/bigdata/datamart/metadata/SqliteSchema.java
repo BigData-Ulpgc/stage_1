@@ -6,8 +6,8 @@ import java.sql.SQLException;
 import java.sql.Statement;
 
 /**
- * Esquema de la base de metadatos (shared/SPEC.md): tabla books + dos índices.
- * Todo usa IF NOT EXISTS, así que se puede ejecutar cada vez que se abre la base.
+ * Schema of the metadata database (shared/SPEC.md): books table + two indexes.
+ * Everything uses IF NOT EXISTS, so it can be run every time the database is opened.
  */
 public final class SqliteSchema {
 
@@ -31,12 +31,12 @@ public final class SqliteSchema {
     private SqliteSchema() {
     }
 
-    /** URL JDBC para un fichero de base de datos. */
+    /** JDBC URL for a database file. */
     public static String jdbcUrl(Path dbFile) {
         return "jdbc:sqlite:" + dbFile.toAbsolutePath();
     }
 
-    /** Crea tabla e índices si todavía no existen. */
+    /** Creates the table and indexes if they do not exist yet. */
     public static void create(Connection connection) throws SQLException {
         try (Statement st = connection.createStatement()) {
             st.execute(CREATE_BOOKS_TABLE);

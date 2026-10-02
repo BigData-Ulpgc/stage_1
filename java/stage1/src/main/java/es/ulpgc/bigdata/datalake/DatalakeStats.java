@@ -9,12 +9,12 @@ import java.util.Map;
 import java.util.stream.Stream;
 
 /**
- * Foto de cómo ocupa un datalake el sistema de ficheros.
+ * Snapshot of how a datalake occupies the file system.
  *
- * @param directories     carpetas bajo la raíz (sin contar la raíz)
- * @param files           ficheros regulares
- * @param bytes           suma del tamaño lógico de los ficheros
- * @param maxEntriesInDir entradas del directorio más poblado (incluida la raíz)
+ * @param directories     folders under the root (not counting the root)
+ * @param files           regular files
+ * @param bytes           sum of the logical size of the files
+ * @param maxEntriesInDir entries of the most populated directory (root included)
  */
 public record DatalakeStats(long directories, long files, long bytes, long maxEntriesInDir) {
 
@@ -27,7 +27,7 @@ public record DatalakeStats(long directories, long files, long bytes, long maxEn
         long bytes = 0;
         Map<Path, Long> entriesPerDir = new HashMap<>();
 
-        // Aquí SÍ queremos Files.walk: el objetivo es contarlo absolutamente todo.
+        // Here we DO want Files.walk: the goal is to count absolutely everything.
         try (Stream<Path> all = Files.walk(root)) {
             for (Path p : (Iterable<Path>) all::iterator) {
                 if (p.equals(root)) {

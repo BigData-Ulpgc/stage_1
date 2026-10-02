@@ -29,25 +29,25 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
- * Prueba de sistema (reto 31): el programa entero, montado por SearchEngine igual que en Main,
- * con 3 libros controlados y SIN red (una BookSource falsa en lugar de Gutenberg).
+ * System test (challenge 31): the whole program, assembled by SearchEngine just like in Main,
+ * with 3 controlled books and NO network (a fake BookSource instead of Gutenberg).
  *
- *   1. pipeline hasta IDLE: descargar al datalake + indexar (metadatos + índice) + control
- *   2. comprobar metadatos y varias búsquedas AND
- *   3. cerrar, volver a abrir desde disco y repetir: mismos resultados, nada se descarga otra vez
+ *   1. pipeline until IDLE: download to the datalake + index (metadata + index) + control
+ *   2. check metadata and several AND searches
+ *   3. close, reopen from disk and repeat: same results, nothing is downloaded again
  *
- * Se repite con varias combinaciones de datalake e índice; mongo sólo si está arrancado.
+ * It is repeated with several combinations of datalake and index; mongo only if it is running.
  */
 class EndToEndTest {
 
     @TempDir Path tmp;
 
     // ------------------------------------------------------------------
-    // Los libros: pequeños, conocidos, en tres rangos de 1000 distintos
+    // The books: small, known, in three different ranges of 1000
     // ------------------------------------------------------------------
 
     private static String gutenberg(int id, String title, String author, String body) {
-        return "The Project Gutenberg eBook of " + title + "\r\n\r\n"         // \r\n como los ficheros reales
+        return "The Project Gutenberg eBook of " + title + "\r\n\r\n"         // \r\n like the real files
                 + "Title: " + title + "\r\n"
                 + "Author: " + author + "\r\n"
                 + "Release date: March 3, 2001 [eBook #" + id + "]\r\n"
@@ -55,7 +55,7 @@ class EndToEndTest {
                 + "*** START OF THE PROJECT GUTENBERG EBOOK " + title.toUpperCase() + " ***\r\n"
                 + body + "\r\n"
                 + "*** END OF THE PROJECT GUTENBERG EBOOK " + title.toUpperCase() + " ***\r\n"
-                + "Please donate to keep the license alive.\r\n";              // footer: no debe indexarse
+                + "Please donate to keep the license alive.\r\n";              // footer: must not be indexed
     }
 
     private static final Map<Integer, String> BOOKS = Map.of(
@@ -68,22 +68,22 @@ class EndToEndTest {
             2003, gutenberg(2003, "Letters of Love", "Mary Quill",
                     "A love letter from a mother to a father, written in the spring of 1813."));
 
-    /** Consulta -> resultado esperado. Cada una prueba algo distinto del camino completo. */
+    /** Query -> expected result. Each one tests something different of the full path. */
     private static final Map<String, List<Integer>> EXPECTED = new LinkedHashMap<>();
     static {
-        EXPECTED.put("ship sea", List.of(10, 1500));            // AND de dos términos en dos libros
+        EXPECTED.put("ship sea", List.of(10, 1500));            // AND of two terms in two books
         EXPECTED.put("ship", List.of(10, 1500));
-        EXPECTED.put("WHALE!", List.of(10));                     // mayúsculas y puntuación en consulta y libro
+        EXPECTED.put("WHALE!", List.of(10));                     // uppercase and punctuation in query and book
         EXPECTED.put("crew, treasure", List.of(1500));
-        EXPECTED.put("love father 1813", List.of(2003));         // números también son términos
-        EXPECTED.put("whale love", List.of());                   // cada uno existe, juntos no
-        EXPECTED.put("the of", List.of());                       // sólo stopwords (shared/stopwords.txt)
-        EXPECTED.put("letters", List.of());                      // sólo en el título: el header NO se indexa
-        EXPECTED.put("testville", List.of());                    // sólo en el autor
-        EXPECTED.put("donate", List.of());                       // sólo en el footer: se descarta
+        EXPECTED.put("love father 1813", List.of(2003));         // numbers are terms too
+        EXPECTED.put("whale love", List.of());                   // each one exists, together they do not
+        EXPECTED.put("the of", List.of());                       // only stopwords (shared/stopwords.txt)
+        EXPECTED.put("letters", List.of());                      // only in the title: the header is NOT indexed
+        EXPECTED.put("testville", List.of());                    // only in the author
+        EXPECTED.put("donate", List.of());                       // only in the footer: discarded
     }
 
-    /** Gutenberg falso que cuenta cuántas veces se le pide un libro. */
+    /** Fake Gutenberg that counts how many times a book is requested. */
     private static final class FakeGutenberg implements BookSource {
         final AtomicInteger fetches = new AtomicInteger();
 
@@ -94,27 +94,27 @@ class EndToEndTest {
         }
     }
 
-    /** Después del reinicio no se debe descargar nada: si se pide un libro, la prueba falla. */
+    /** After the restart nothing must be downloaded: if a book is requested, the test fails. */
     private static final BookSource MUST_NOT_FETCH = id -> {
         throw new AssertionError("tras el reinicio se volvió a descargar el libro " + id);
     };
 
     // ------------------------------------------------------------------
-    // Configuración aislada: todo bajo una carpeta temporal
+    // Isolated configuration: everything under a temporary folder
     // ------------------------------------------------------------------
 
     private AppConfig config(String datalake, String index) throws IOException {
         Path shared = tmp.resolve("shared");
         Files.createDirectories(shared);
         Files.writeString(shared.resolve("book_ids.txt"), "# dataset de la prueba\n10\n1500\n2003\n");
-        Files.copy(AppConfig.defaults().stopwordsFile(), shared.resolve("stopwords.txt"));   // las stopwords del contrato
+        Files.copy(AppConfig.defaults().stopwordsFile(), shared.resolve("stopwords.txt"));   // the contract stopwords
 
         Properties p = new Properties();
         p.setProperty(AppConfig.DATA_DIR, tmp.resolve("data").toString());
         p.setProperty(AppConfig.SHARED_DIR, shared.toString());
         p.setProperty(AppConfig.DATALAKE_STRUCTURE, datalake);
         p.setProperty(AppConfig.INDEX_STRUCTURE, index);
-        p.setProperty(AppConfig.MONGO_DATABASE, "search_engine_test");            // nunca el índice real
+        p.setProperty(AppConfig.MONGO_DATABASE, "search_engine_test");            // never the real index
         p.setProperty(AppConfig.MONGO_COLLECTION, "e2e_" + System.nanoTime());
         return AppConfig.fromProperties(p);
     }
@@ -128,7 +128,7 @@ class EndToEndTest {
     }
 
     // ------------------------------------------------------------------
-    // La prueba
+    // The test
     // ------------------------------------------------------------------
 
     @ParameterizedTest(name = "datalake={0}, index={1}")
@@ -141,7 +141,7 @@ class EndToEndTest {
         FakeGutenberg gutenberg = new FakeGutenberg();
         Map<String, List<Integer>> before;
 
-        // --- 1. Primera ejecución: datalake + índice + metadatos + control -------------------
+        // --- 1. First run: datalake + index + metadata + control -----------------------------
         try (SearchEngine engine = SearchEngine.open(config, gutenberg)) {
             List<StepResult> steps = engine.pipeline().runUntilIdle(100);
 
@@ -150,37 +150,37 @@ class EndToEndTest {
             assertEquals(3, gutenberg.fetches.get());
             assertEquals(List.of(10, 1500, 2003), engine.datalake().listBookIds());
 
-            // --- 2. Metadatos: parseados del header y enlazados con el datalake ---------------
+            // --- 2. Metadata: parsed from the header and linked to the datalake ---------------
             BookMetadata whale = engine.metadata().findById(10).orElseThrow();
             assertEquals("The Whale and the Sea", whale.title());
             assertEquals("Herman Testville", whale.author());
             assertEquals("English", whale.language());
-            assertEquals("March 3, 2001", whale.releaseDate());                    // sin "[eBook #10]"
+            assertEquals("March 3, 2001", whale.releaseDate());                    // without "[eBook #10]"
             BookLocation stored = engine.datalake().locate(10).orElseThrow();
             assertEquals(stored.bodyPath(), whale.bodyPath());
             assertEquals(stored.headerPath(), whale.headerPath());
             assertTrue(Files.readString(whale.bodyPath()).startsWith("Call me Tester."));
-            assertFalse(Files.readString(whale.bodyPath()).contains("\r"));          // saltos normalizados
+            assertFalse(Files.readString(whale.bodyPath()).contains("\r"));          // normalised line breaks
             assertEquals(List.of(2003), engine.metadata().findByAuthor("Mary Quill").stream()
                     .map(BookMetadata::bookId).toList());
             assertEquals(3, engine.metadata().count());
 
-            // --- Búsquedas AND --------------------------------------------------------------------
+            // --- AND searches ---------------------------------------------------------------------
             before = runAllQueries(engine);
             assertEquals(EXPECTED, before);
         }
 
-        // --- Dónde está cada parte del estado (con todo cerrado) --------------------------------
+        // --- Where each part of the state is (with everything closed) ---------------------------
         assertStateOnDisk(config);
 
-        // --- 3. Reinicio: todo se vuelve a abrir desde disco -------------------------------------
+        // --- 3. Restart: everything is reopened from disk ----------------------------------------
         try (SearchEngine reopened = SearchEngine.open(config, MUST_NOT_FETCH)) {
             assertEquals(before, runAllQueries(reopened), "el resultado cambió tras el reinicio");
             assertEquals(List.of(), reopened.pipeline().runUntilIdle(100), "no debía quedar nada pendiente");
             assertEquals(Set.of(10, 1500, 2003), reopened.control().indexed());
             assertEquals("The Whale and the Sea", reopened.metadata().findById(10).orElseThrow().title());
             if (indexName.equals("mongo")) {
-                reopened.index().clear();                                          // no dejar colecciones de prueba
+                reopened.index().clear();                                          // do not leave test collections behind
             }
         }
     }
@@ -192,7 +192,7 @@ class EndToEndTest {
         SearchEngine crashed = SearchEngine.open(config, new FakeGutenberg());
         crashed.pipeline().runUntilIdle(100);
         Map<String, List<Integer>> before = runAllQueries(crashed);
-        // Sin close(): como si el proceso muriera aquí. Lo que ya se marcó debe estar en disco.
+        // No close(): as if the process died here. What was already marked must be on disk.
 
         try (SearchEngine reopened = SearchEngine.open(config, MUST_NOT_FETCH)) {
             assertEquals(before, runAllQueries(reopened));
@@ -203,11 +203,11 @@ class EndToEndTest {
     }
 
     // ------------------------------------------------------------------
-    // Criterio: señalar qué archivo/base contiene cada parte del estado
+    // Criterion: point out which file/database holds each part of the state
     // ------------------------------------------------------------------
 
     private static void assertStateOnDisk(AppConfig c) throws IOException {
-        // Datalake: header y body de cada libro, bajo <data>/datalake/<estructura>/
+        // Datalake: header and body of each book, under <data>/datalake/<structure>/
         try (var files = Files.walk(c.datalakeDir())) {
             List<String> names = new ArrayList<>(files.filter(Files::isRegularFile)
                     .map(p -> p.getFileName().toString()).toList());
@@ -216,13 +216,13 @@ class EndToEndTest {
         switch (c.datalakeStructure()) {
             case "book" -> assertTrue(Files.exists(c.datalakeDir().resolve("10/body.txt")));
             case "range" -> assertTrue(Files.exists(c.datalakeDir().resolve("01000-01999/1500.body.txt")));
-            default -> { }                                                        // time: depende de la hora
+            default -> { }                                                        // time: depends on the hour
         }
 
-        // Metadatos: SQLite
+        // Metadata: SQLite
         assertTrue(Files.size(c.metadataDb()) > 0);
 
-        // Índice invertido: su fichero o carpeta (Mongo vive en otro proceso)
+        // Inverted index: its file or folder (Mongo lives in another process)
         switch (c.indexStructure()) {
             case "monolithic" -> {
                 String json = Files.readString(c.monolithicIndexFile());
@@ -236,7 +236,7 @@ class EndToEndTest {
             default -> { }
         }
 
-        // Control: un id por línea
+        // Control: one id per line
         assertEquals(Set.of(10, 1500, 2003), idsIn(c.controlDir().resolve(ControlFiles.DOWNLOADED_FILE)));
         assertEquals(Set.of(10, 1500, 2003), idsIn(c.controlDir().resolve(ControlFiles.INDEXED_FILE)));
     }

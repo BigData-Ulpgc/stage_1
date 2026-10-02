@@ -10,9 +10,9 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * Cliente responsable únicamente de descargar el texto crudo de un libro
- * de Project Gutenberg dado su id. No separa header/body ni guarda nada
- * en disco: eso es responsabilidad de otras clases (BookSplitter, Datalake).
+ * Client whose only responsibility is downloading the raw text of a
+ * Project Gutenberg book given its id. It does not split header/body or save anything
+ * to disk: that is the responsibility of other classes (BookSplitter, Datalake).
  */
 public class GutenbergClient implements BookSource {
 
@@ -22,7 +22,7 @@ public class GutenbergClient implements BookSource {
     private final HttpClient httpClient;
     private final Duration requestTimeout;
 
-    /** Los timeouts vienen de AppConfig (http.connect.timeout.seconds, http.request.timeout.seconds). */
+    /** The timeouts come from AppConfig (http.connect.timeout.seconds, http.request.timeout.seconds). */
     public GutenbergClient(Duration connectTimeout, Duration requestTimeout) {
         this.requestTimeout = Objects.requireNonNull(requestTimeout, "requestTimeout");
         this.httpClient = HttpClient.newBuilder()
@@ -31,11 +31,11 @@ public class GutenbergClient implements BookSource {
     }
 
     /**
-     * Descarga el texto completo del libro con el id dado.
+     * Downloads the full text of the book with the given id.
      *
-     * @return el texto si la descarga tuvo éxito (HTTP 2xx),
-     *         Optional.empty() si el libro no está disponible o hay un
-     *         fallo de red/timeout.
+     * @return the text if the download succeeded (HTTP 2xx),
+     *         Optional.empty() if the book is not available or there is a
+     *         network failure/timeout.
      */
     @Override
     public Optional<String> fetch(int bookId) {

@@ -16,7 +16,7 @@ class MetadataParserTest {
             Path.of("datalake/book/1342/header.txt"),
             Path.of("datalake/book/1342/body.txt"));
 
-    /** Así empieza de verdad el header de Pride and Prejudice. */
+    /** This is how the Pride and Prejudice header really starts. */
     private static final String FULL_HEADER = String.join("\n",
             "The Project Gutenberg eBook of Pride and Prejudice",
             "",
@@ -39,7 +39,7 @@ class MetadataParserTest {
         return parser.parse(LOCATION, header);
     }
 
-    // --- Los tres headers que pide el reto ----------------------------------
+    // --- The three headers the challenge asks for ---------------------------
 
     @Test
     void headerCompleto() {
@@ -70,7 +70,7 @@ class MetadataParserTest {
                 parse("Release date: June 1, 1998 [eBook #1342]\n").releaseDate());
     }
 
-    // --- Detalles del contrato ----------------------------------------------
+    // --- Contract details ---------------------------------------------------
 
     @Test
     void fechaSinCorchetesSeQuedaEntera() {
@@ -79,7 +79,7 @@ class MetadataParserTest {
 
     @Test
     void soloCuentaLaPrimeraLineaDelValor() {
-        // La línea "Most recently updated" pertenece a la fecha pero no se incluye.
+        // The "Most recently updated" line belongs to the date but is not included.
         assertEquals("June 1, 1998", parse(FULL_HEADER).releaseDate());
     }
 
@@ -104,7 +104,7 @@ class MetadataParserTest {
 
     @Test
     void elCampoTieneQueEmpezarLaLinea() {
-        // Gracias a MULTILINE, ^ es "principio de línea": "Original Title:" no cuenta.
+        // Thanks to MULTILINE, ^ is "start of line": "Original Title:" does not count.
         BookMetadata m = parse("Original Title: Otra cosa\nTitle: Emma\n");
         assertEquals("Emma", m.title());
     }
@@ -133,21 +133,21 @@ class MetadataParserTest {
         assertEquals(LOCATION.bodyPath(), m.bodyPath());
     }
 
-    // --- Comportamiento del SPEC que conviene tener documentado -------------
+    // --- SPEC behaviour worth having documented -----------------------------
 
     @Test
     void releaseDateConDMayusculaNoCoincide() {
-        // La regex del SPEC distingue mayúsculas. Algunos libros antiguos usan
-        // "Release Date:". Si el equipo decide aceptarlo, cambia la regex en los
-        // tres lenguajes y este test.
+        // The SPEC regex is case-sensitive. Some old books use
+        // "Release Date:". If the team decides to accept it, change the regex in the
+        // three languages and this test.
         assertNull(parse("Release Date: March 1, 1994 [EBook #84]\n").releaseDate());
     }
 
     @Test
     void autorVacioCapturaLaLineaSiguiente() {
-        // \s* también consume saltos de línea, así que con "Author:" vacío la
-        // regex del SPEC se come la línea siguiente. Es el comportamiento acordado
-        // hoy; si el equipo lo cambia a [ \t]*, este test debe esperar null.
+        // \s* also consumes line breaks, so with an empty "Author:" the
+        // SPEC regex swallows the next line. It is the behaviour agreed
+        // today; if the team changes it to [ \t]*, this test must expect null.
         assertEquals("Language: English", parse("Author:\nLanguage: English\n").author());
     }
 }
