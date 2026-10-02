@@ -43,8 +43,6 @@ Thumbs.db
 java/stage1/data/
 java/stage1/benchmarks/work/
 
-# ---- Memoria del proyecto ----
-java/stage1/docs/Memoria_Stage1_Java.pdf
 
 # ---- Material de vídeo (solo local) ----
 video/
