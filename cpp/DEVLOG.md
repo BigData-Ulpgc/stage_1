@@ -2235,3 +2235,36 @@ ready-made diagram for the report's "System architecture" section.
     uses it.
   - `util/` is new because `file_io`/`text_utils` are used by almost every module, whereas Java keeps
     such helpers inside each class.
+
+## Entry 46 – A user guide for the module: `cpp/README.md` (2026-10-02)
+
+### What was done
+Added `cpp/README.md`, a short user guide covering:
+- requirements, and where each one comes from on macOS;
+- building and testing (`make`, `make test`);
+- the four CLI commands (`pipeline`, `search`, `status`, `benchmark`): what each does, whether it
+  needs the network, and what it writes;
+- a quick start with real output;
+- the layout of `data/`, mapped to the datalake, datamarts and control layer, plus three commands to
+  check the CLI's answers against the files themselves;
+- a by-hand test of resuming after an interruption;
+- a table of edge cases with their exit codes;
+- practical notes: benchmarks overwrite committed CSVs, zsh quoting, `make run ARGS=...`, starting
+  over.
+
+Every non-destructive command in it was run before committing and produces exactly the output the
+guide shows. The resume scenario was already verified for real in Entry 44.
+
+### Why
+- **The "how" had no home.** How to use the module was scattered across Entries 25, 29, 43 and 44,
+  and the DEVLOG is the wrong place to collect it. The DEVLOG records *why* decisions were taken and is
+  append-only, whereas a usage guide must be edited in place whenever a command changes.
+- **A module README, not the group README.** The root `README.md` belongs to the whole group (and its
+  C/C++ section is still the original template, see Entry 44). `cpp/README.md` lives entirely in this
+  module, so it can be kept accurate without touching shared files. The group can later link to it,
+  as the root README already intends to do for `java/README.md`.
+- **The assignment asks for it.** The repository must "include a README.md with detailed setup and
+  execution instructions", and instructors must be able to try the pipeline quickly.
+- **Commands safe to paste into zsh.** No inline `#` comments (interactive zsh may pass them on as
+  arguments), and single quotes for literal queries (`!"` inside double quotes leaves zsh at a
+  `dquote>` prompt). Both pitfalls actually happened while testing the CLI by hand.
