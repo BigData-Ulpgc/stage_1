@@ -13,13 +13,13 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class InMemoryInvertedIndexTest {
 
-    /** Los tres libros del ejercicio en papel (sección 4 de la guía). */
+    /** The three books of the paper exercise (section 4 of the guide). */
     private static final List<RawBook> PAPER_BOOKS = List.of(
             new RawBook(10, "", "red boat sails"),
             new RawBook(20, "", "blue boat sails fast"),
             new RawBook(30, "", "red island"));
 
-    private final Tokenizer tokenizer = new Tokenizer(Set.of());   // sin stopwords: no afectan aquí
+    private final Tokenizer tokenizer = new Tokenizer(Set.of());   // no stopwords: they do not matter here
     private InMemoryInvertedIndex index;
 
     @BeforeEach
@@ -35,7 +35,7 @@ class InMemoryInvertedIndexTest {
         PAPER_BOOKS.forEach(this::indexBook);
     }
 
-    // --- Criterios del reto ------------------------------------------------
+    // --- Challenge criteria ------------------------------------------------
 
     @Test
     void coincideConElIndiceManualDelApendiceA() {
@@ -53,13 +53,13 @@ class InMemoryInvertedIndexTest {
         for (String term : index.terms()) {
             actual.put(term, index.postings(term));
         }
-        assertEquals(expected, actual);                  // ni un término de más ni de menos
+        assertEquals(expected, actual);                  // not one term too many or too few
     }
 
     @Test
     void indexarDosVecesElMismoLibroNoDuplicaSuId() {
         indexPaperBooks();
-        indexBook(PAPER_BOOKS.get(0));                   // el 10 otra vez
+        indexBook(PAPER_BOOKS.get(0));                   // 10 again
 
         assertEquals(List.of(10, 20), index.postings("boat"));
         assertEquals(List.of(10, 30), index.postings("red"));
@@ -72,7 +72,7 @@ class InMemoryInvertedIndexTest {
         assertEquals(List.of(), index.postings("whale"));
     }
 
-    // --- Detalles ----------------------------------------------------------
+    // --- Details -----------------------------------------------------------
 
     @Test
     void lasPostingsSalenOrdenadasAunqueLosLibrosLleguenDesordenados() {
@@ -102,7 +102,7 @@ class InMemoryInvertedIndexTest {
     void elTerminoDebeVenirTokenizado() {
         indexPaperBooks();
 
-        assertEquals(List.of(), index.postings("Boat"));            // mayúscula: no es un término
+        assertEquals(List.of(), index.postings("Boat"));            // uppercase: not a term
         assertEquals(List.of(10, 20), index.postings("boat"));
     }
 
@@ -127,9 +127,9 @@ class InMemoryInvertedIndexTest {
         assertThrows(IllegalArgumentException.class, () -> index.addDocument(-1, Set.of("boat")));
     }
 
-    // --- Las tres consultas del ejercicio en papel -------------------------
-    // Aún no hay búsqueda (llega en el reto 20); aquí sólo se comprueba que las
-    // posting lists contienen lo necesario para resolverlas a mano.
+    // --- The three queries of the paper exercise ---------------------------
+    // There is no search yet (it arrives in challenge 20); here it is only checked that the
+    // posting lists contain what is needed to solve them by hand.
 
     private List<Integer> andByHand(String a, String b) {
         return index.postings(a).stream().filter(index.postings(b)::contains).toList();

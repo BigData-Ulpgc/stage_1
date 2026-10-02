@@ -1,8 +1,8 @@
 package es.ulpgc.bigdata.datamart.metadata;
 
 /**
- * Error del almacén de metadatos. Envuelve la SQLException para que quien usa
- * el repositorio no tenga que importar nada de JDBC.
+ * Error of the metadata store. It wraps the SQLException so that whoever uses
+ * the repository does not have to import anything from JDBC.
  */
 public class MetadataRepositoryException extends RuntimeException {
 

@@ -3,9 +3,9 @@ package es.ulpgc.bigdata.model;
 import java.nio.file.Path;
 
 /**
- * Datos descriptivos de un libro, extraídos del header y de su
- * ubicación en el datalake. Los campos ausentes en el header son null,
- * según el contrato común (shared/SPEC.md).
+ * Descriptive data of a book, extracted from the header and from its
+ * location in the datalake. Fields missing from the header are null,
+ * according to the common contract (shared/SPEC.md).
  */
 
 public record BookMetadata(

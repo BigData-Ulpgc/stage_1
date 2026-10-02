@@ -14,7 +14,7 @@ class BenchmarkRunnerTest {
 
     private static final Scenario SCENARIO = new Scenario("java", "index_build", "monolithic", 100);
 
-    // --- Criterios del reto --------------------------------------------------
+    // --- Challenge criteria --------------------------------------------------
 
     @Test
     void losWarmupsSeEjecutanPeroNoAparecenComoResultados() {
@@ -22,8 +22,8 @@ class BenchmarkRunnerTest {
 
         List<BenchmarkRow> rows = new BenchmarkRunner(2, 5).run(SCENARIO, () -> calls.add("task"));
 
-        assertEquals(7, calls.size());                     // 2 warmups + 5 runs se ejecutan
-        assertEquals(5, rows.size());                      // sólo los 5 runs se devuelven
+        assertEquals(7, calls.size());                     // 2 warmups + 5 runs are executed
+        assertEquals(5, rows.size());                      // only the 5 runs are returned
     }
 
     @Test
@@ -62,8 +62,8 @@ class BenchmarkRunnerTest {
     @Test
     void elSetupNoSeMide() {
         List<BenchmarkRow> rows = new BenchmarkRunner(1, 3).run(SCENARIO,
-                () -> Thread.sleep(200),                   // setup lento
-                () -> { });                                // tarea instantánea
+                () -> Thread.sleep(200),                   // slow setup
+                () -> { });                                // instant task
 
         for (BenchmarkRow row : rows) {
             assertTrue(row.value() < 100, "el setup se coló en la medida: " + row.value() + " ms");
@@ -79,14 +79,14 @@ class BenchmarkRunnerTest {
         }
     }
 
-    // --- Errores ------------------------------------------------------------------------
+    // --- Errors -------------------------------------------------------------------------
 
     @Test
     void siLaTareaFallaSeSabeEnQueRepeticionYNoHayFilasAMedias() {
         int[] calls = {0};
         BenchmarkException e = assertThrows(BenchmarkException.class,
                 () -> new BenchmarkRunner(2, 5).run(SCENARIO, () -> {
-                    if (++calls[0] == 4) {                   // 2 warmups + 2º run
+                    if (++calls[0] == 4) {                   // 2 warmups + 2nd run
                         throw new IOException("disco lleno (simulado)");
                     }
                 }));
@@ -103,7 +103,7 @@ class BenchmarkRunnerTest {
         assertTrue(e.getMessage().contains("setup") && e.getMessage().contains("warmup 1"), e.getMessage());
     }
 
-    // --- Configuración -------------------------------------------------------------------
+    // --- Configuration -------------------------------------------------------------------
 
     @Test
     void standardUsaLaMetodologiaDelSpec() {
@@ -118,6 +118,6 @@ class BenchmarkRunnerTest {
     void valoresDeConfiguracionInvalidos() {
         assertThrows(IllegalArgumentException.class, () -> new BenchmarkRunner(-1, 5));
         assertThrows(IllegalArgumentException.class, () -> new BenchmarkRunner(2, 0));
-        assertEquals(1, new BenchmarkRunner(0, 1).run(SCENARIO, () -> { }).size());   // sin warmups vale
+        assertEquals(1, new BenchmarkRunner(0, 1).run(SCENARIO, () -> { }).size());   // no warmups is fine
     }
 }

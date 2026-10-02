@@ -30,29 +30,29 @@ import java.util.function.Function;
 import java.util.stream.Stream;
 
 /**
- * Benchmark de las tres estructuras del datalake (book, range, time), con los
- * experimentos de la sección 9 del SPEC:
+ * Benchmark of the three datalake structures (book, range, time), with the
+ * experiments of section 9 of the SPEC:
  *
- *   datalake_write        guardar todos los libros             elapsed (ms) + throughput (books/s)
- *   datalake_lookup       locate de todos los ids              elapsed (ms) + per_lookup (µs)
- *   datalake_incremental  detectar el 10 % de libros nuevos    elapsed (ms) + detected (books)
- *   datalake_recovery     reparar un corte simulado            elapsed (ms) + recovered/lost/duplicates
- *   datalake_storage      ocupación tras guardar todo          files, directories, bytes...
+ *   datalake_write        save all the books                   elapsed (ms) + throughput (books/s)
+ *   datalake_lookup       locate every id                      elapsed (ms) + per_lookup (µs)
+ *   datalake_incremental  detect the 10 % of new books         elapsed (ms) + detected (books)
+ *   datalake_recovery     repair a simulated crash             elapsed (ms) + recovered/lost/duplicates
+ *   datalake_storage      disk usage after saving everything   files, directories, bytes...
  *
- * Todas las estructuras reciben EXACTAMENTE la misma lista de libros, en el mismo orden.
- * Preparar y limpiar va siempre en el setup del runner: nunca dentro del tiempo medido.
+ * Every structure receives EXACTLY the same list of books, in the same order.
+ * Preparing and cleaning always go in the runner's setup: never inside the measured time.
  */
 public class DatalakeBenchmark {
 
     public static final String LANGUAGE = "java";
 
-    /** Una estructura a comparar: su nombre en el CSV y cómo crear un datalake vacío en una carpeta. */
+    /** A structure to compare: its name in the CSV and how to create an empty datalake in a folder. */
     public record Structure(String name, Function<Path, Datalake> factory) {
     }
 
     /**
-     * Todas las estructuras de DatalakeFactory. "time" recibe un reloj simulado (10 libros por hora)
-     * nuevo en cada creación, así cada repetición es idéntica; las demás lo ignoran.
+     * Every structure of DatalakeFactory. "time" receives a new simulated clock (10 books per hour)
+     * on each creation, so every repetition is identical; the others ignore it.
      */
     public static List<Structure> defaultStructures() {
         return DatalakeFactory.NAMES.stream()
@@ -70,7 +70,7 @@ public class DatalakeBenchmark {
         this.structures = List.copyOf(structures);
     }
 
-    /** Los cinco experimentos. Clave = nombre del experimento, valor = sus filas CSV. */
+    /** The five experiments. Key = experiment name, value = its CSV rows. */
     public Map<String, List<BenchmarkRow>> runAll(List<RawBook> books) {
         Map<String, List<BenchmarkRow>> results = new LinkedHashMap<>();
         results.put("datalake_write", write(books));
@@ -81,14 +81,14 @@ public class DatalakeBenchmark {
         return results;
     }
 
-    /** Escribe benchmarks/results/java_<experimento>.csv por cada experimento. */
+    /** Writes benchmarks/results/java_<experiment>.csv for each experiment. */
     public static void writeResults(Path resultsDir, Map<String, List<BenchmarkRow>> results) {
         results.forEach((experiment, rows) ->
                 CsvResults.write(CsvResults.fileFor(resultsDir, LANGUAGE, experiment), rows));
     }
 
     // ------------------------------------------------------------------
-    // 1. Escritura: guardar todos los libros en un datalake vacío
+    // 1. Write: save all the books into an empty datalake
     // ------------------------------------------------------------------
 
     public List<BenchmarkRow> write(List<RawBook> books) {
@@ -97,7 +97,7 @@ public class DatalakeBenchmark {
             Path dir = dirFor("write", s);
             Datalake[] datalake = new Datalake[1];
             List<BenchmarkRow> elapsed = runner.run(scenario("datalake_write", s, books),
-                    () -> datalake[0] = freshDatalake(s, dir),                  // setup: carpeta vacía
+                    () -> datalake[0] = freshDatalake(s, dir),                  // setup: empty folder
                     () -> {
                         for (RawBook book : books) {
                             datalake[0].save(book);
@@ -111,23 +111,23 @@ public class DatalakeBenchmark {
     }
 
     // ------------------------------------------------------------------
-    // 2. Lookup: locate de todos los ids, en un orden fijo "aleatorio"
+    // 2. Lookup: locate every id, in a fixed "random" order
     // ------------------------------------------------------------------
 
     public List<BenchmarkRow> lookup(List<RawBook> books) {
-        List<Integer> ids = shuffledIds(books);                                 // mismo orden para todas
+        List<Integer> ids = shuffledIds(books);                                 // same order for all of them
         List<BenchmarkRow> rows = new ArrayList<>();
         for (Structure s : structures) {
             Path dir = dirFor("lookup", s);
             Datalake datalake = freshDatalake(s, dir);
-            books.forEach(datalake::save);                                      // preparación única, sin medir
+            books.forEach(datalake::save);                                      // one-off preparation, not measured
             int[] found = {0};
             List<BenchmarkRow> elapsed = runner.run(scenario("datalake_lookup", s, books),
                     () -> found[0] = 0,
                     () -> {
                         for (int id : ids) {
                             if (datalake.locate(id).isPresent()) {
-                                found[0]++;                                     // usar el resultado
+                                found[0]++;                                     // use the result
                             }
                         }
                     });
@@ -139,13 +139,13 @@ public class DatalakeBenchmark {
     }
 
     // ------------------------------------------------------------------
-    // 3. Incremental: ¿qué libros son nuevos desde la última vez?
+    // 3. Incremental: which books are new since last time?
     // ------------------------------------------------------------------
 
     /**
-     * Definición común: el datalake tiene un 90 % de libros ya conocidos y se añade el
-     * 10 % restante. Se mide listBookIds() menos los ids conocidos. Es la operación que
-     * el contrato Datalake permite hacer igual en las tres estructuras.
+     * Common definition: the datalake holds 90 % of already known books and the remaining
+     * 10 % is added. What is measured is listBookIds() minus the known ids. It is the operation
+     * the Datalake contract allows doing the same way in all three structures.
      */
     public List<BenchmarkRow> incremental(List<RawBook> books) {
         require(books.size() >= 2, "hacen falta al menos 2 libros");
@@ -160,10 +160,10 @@ public class DatalakeBenchmark {
             Datalake[] datalake = new Datalake[1];
             AtomicReference<Set<Integer>> detected = new AtomicReference<>(Set.of());
             List<BenchmarkRow> elapsed = runner.run(scenario("datalake_incremental", s, books),
-                    () -> {                                                      // setup, sin medir
+                    () -> {                                                      // setup, not measured
                         datalake[0] = freshDatalake(s, dir);
                         known.forEach(datalake[0]::save);
-                        fresh.forEach(datalake[0]::save);                        // "llegan" los nuevos
+                        fresh.forEach(datalake[0]::save);                        // the new ones "arrive"
                     },
                     () -> {
                         Set<Integer> all = new TreeSet<>(datalake[0].listBookIds());
@@ -178,14 +178,14 @@ public class DatalakeBenchmark {
     }
 
     // ------------------------------------------------------------------
-    // 4. Recovery: un corte simulado y su reparación
+    // 4. Recovery: a simulated crash and its repair
     // ------------------------------------------------------------------
 
     /**
-     * Fallo controlado y reproducible: tras guardar todo, a 1 de cada 10 libros se le
-     * "corta" el guardado justo antes de mover el body (body.txt -> body.txt.tmp), que es
-     * lo que dejaría un proceso muerto en ese instante (reto 11).
-     * Recovery = detectar los que faltan con listBookIds() y volver a guardarlos.
+     * Controlled and reproducible failure: after saving everything, the save of 1 in every 10
+     * books is "cut" right before moving the body (body.txt -> body.txt.tmp), which is
+     * what a process that died at that instant would leave behind (challenge 11).
+     * Recovery = detect the missing ones with listBookIds() and save them again.
      */
     public List<BenchmarkRow> recovery(List<RawBook> books) {
         List<RawBook> damaged = everyTenth(books);
@@ -197,7 +197,7 @@ public class DatalakeBenchmark {
             Datalake[] datalake = new Datalake[1];
             int[] recovered = {0};
             List<BenchmarkRow> elapsed = runner.run(scenario("datalake_recovery", s, books),
-                    () -> {                                                      // setup, sin medir
+                    () -> {                                                      // setup, not measured
                         datalake[0] = freshDatalake(s, dir);
                         books.forEach(datalake[0]::save);
                         for (RawBook book : damaged) {
@@ -214,10 +214,10 @@ public class DatalakeBenchmark {
                             }
                         }
                     });
-            // Comprobación sobre el estado final (todas las repeticiones son idénticas).
+            // Check on the final state (all repetitions are identical).
             List<Integer> listed = datalake[0].listBookIds();
             long lost = expected.stream().filter(id -> !listed.contains(id)).count();
-            long duplicates = countFiles(dir, "body.txt") - books.size();          // bodies completos de más
+            long duplicates = countFiles(dir, "body.txt") - books.size();          // extra complete bodies
             require(recovered[0] == damaged.size(), s.name() + ": no recuperó todos los libros dañados");
             require(lost == 0 && duplicates == 0, s.name() + ": recovery dejó pérdidas o duplicados");
 
@@ -230,7 +230,7 @@ public class DatalakeBenchmark {
         return rows;
     }
 
-    /** Simula que el proceso murió después de escribir el body en .tmp y antes de moverlo. */
+    /** Simulates that the process died after writing the body to .tmp and before moving it. */
     static void interruptBeforeBodyMove(BookLocation location) {
         try {
             Files.move(location.bodyPath(), Path.of(location.bodyPath() + ".tmp"));
@@ -240,7 +240,7 @@ public class DatalakeBenchmark {
     }
 
     // ------------------------------------------------------------------
-    // 5. Almacenamiento: ficheros, carpetas y bytes
+    // 5. Storage: files, folders and bytes
     // ------------------------------------------------------------------
 
     public List<BenchmarkRow> storage(List<RawBook> books) {
@@ -262,9 +262,9 @@ public class DatalakeBenchmark {
     }
 
     /**
-     * Espacio que el disco reserva de verdad: cada fichero y carpeta ocupa bloques
-     * enteros (normalmente 4 KB) aunque tenga 3 bytes. Es una estimación: no incluye
-     * los metadatos internos del sistema de ficheros.
+     * Space the disk actually reserves: every file and folder takes whole blocks
+     * (usually 4 KB) even if it has 3 bytes. It is an estimate: it does not include
+     * the file system's internal metadata.
      */
     static long allocatedBytes(Path root) {
         try (Stream<Path> all = Files.walk(root)) {
@@ -272,7 +272,7 @@ public class DatalakeBenchmark {
             long total = 0;
             for (Path p : (Iterable<Path>) all::iterator) {
                 long size = Files.isDirectory(p) ? 1 : Files.size(p);
-                total += ((size + block - 1) / block) * block;                  // redondear a bloques
+                total += ((size + block - 1) / block) * block;                  // round up to blocks
             }
             return total;
         } catch (IOException e) {
@@ -281,14 +281,14 @@ public class DatalakeBenchmark {
     }
 
     // ------------------------------------------------------------------
-    // Auxiliares
+    // Helpers
     // ------------------------------------------------------------------
 
     private Path dirFor(String experiment, Structure s) {
         return workDir.resolve(experiment).resolve(s.name());
     }
 
-    /** Borra la carpeta y crea un datalake vacío en ella (siempre dentro de un setup). */
+    /** Deletes the folder and creates an empty datalake in it (always inside a setup). */
     private static Datalake freshDatalake(Structure s, Path dir) {
         deleteRecursively(dir);
         return s.factory().apply(dir);
@@ -316,12 +316,12 @@ public class DatalakeBenchmark {
         return new BenchmarkRow(LANGUAGE, experiment, s.name(), size, 1, metric, value, unit);
     }
 
-    /** Una métrica calculada a partir de cada fila "elapsed", con la misma repetición. */
+    /** A metric computed from each "elapsed" row, with the same repetition. */
     private static List<BenchmarkRow> derived(List<BenchmarkRow> elapsed, String metric, String unit,
                                               DoubleUnaryOperator fromMillis) {
         List<BenchmarkRow> rows = new ArrayList<>();
         for (BenchmarkRow e : elapsed) {
-            double ms = Math.max(e.value(), 0.001);                              // evita dividir entre 0
+            double ms = Math.max(e.value(), 0.001);                              // avoids dividing by 0
             rows.add(new BenchmarkRow(e.language(), e.experiment(), e.structure(), e.datasetSize(),
                     e.repetition(), metric, fromMillis.applyAsDouble(ms), unit));
         }
@@ -330,7 +330,7 @@ public class DatalakeBenchmark {
 
     private static List<Integer> shuffledIds(List<RawBook> books) {
         List<Integer> ids = new ArrayList<>(idsOf(books));
-        Collections.shuffle(ids, new Random(42));                               // semilla fija
+        Collections.shuffle(ids, new Random(42));                               // fixed seed
         return ids;
     }
 
@@ -363,14 +363,14 @@ public class DatalakeBenchmark {
     }
 
     // ------------------------------------------------------------------
-    // Ejecutable
+    // Executable
     // ------------------------------------------------------------------
 
     /**
-     * Uso:  DatalakeBenchmark [datalake_book_con_los_libros]
-     *   p. ej. data/datalake/book  (lo que dejó el pipeline, o sample_dataset/ en estructura book)
-     * Sin argumentos usa 200 libros sintéticos de 300 KB.
-     * Carpetas de trabajo y resultados: AppConfig (benchmarks.dir).
+     * Usage:  DatalakeBenchmark [book_datalake_with_the_books]
+     *   e.g. data/datalake/book  (what the pipeline left, or sample_dataset/ in book structure)
+     * Without arguments it uses 200 synthetic books of 300 KB.
+     * Work and results folders: AppConfig (benchmarks.dir).
      */
     public static void main(String[] args) {
         AppConfig config = AppConfig.load();

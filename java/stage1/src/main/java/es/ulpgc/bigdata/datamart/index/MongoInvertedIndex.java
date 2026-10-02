@@ -27,16 +27,16 @@ import java.util.TreeSet;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Índice invertido en MongoDB (shared/SPEC.md, sección 6):
+ * Inverted index in MongoDB (shared/SPEC.md, section 6):
  *
- *   base de datos:  search_engine
- *   colección:      inverted_index
- *   documentos:     {"term": "boat", "postings": [10, 20]}
- *   índice único sobre "term": un solo documento por término.
+ *   database:       search_engine
+ *   collection:     inverted_index
+ *   documents:      {"term": "boat", "postings": [10, 20]}
+ *   unique index on "term": a single document per term.
  *
- * addDocument acumula en memoria; flush envía TODOS los términos pendientes en una
- * sola operación bulkWrite, con un upsert + $addToSet por término (sin duplicados).
- * Mongo no garantiza el orden del array, así que postings ordena antes de devolver.
+ * addDocument accumulates in memory; flush sends ALL the pending terms in a
+ * single bulkWrite operation, with one upsert + $addToSet per term (no duplicates).
+ * Mongo does not guarantee the order of the array, so postings sorts before returning.
  */
 public class MongoInvertedIndex implements InvertedIndex {
 
@@ -51,33 +51,33 @@ public class MongoInvertedIndex implements InvertedIndex {
     private final String collectionName;
     private final MongoCollection<Document> collection;
 
-    /** Ids añadidos desde el último flush, por término. */
+    /** Ids added since the last flush, per term. */
     private final Map<String, SortedSet<Integer>> pending = new HashMap<>();
 
-    /** false tras clear: el índice único se recrea antes de la siguiente escritura. */
+    /** false after clear: the unique index is recreated before the next write. */
     private boolean uniqueIndexReady = false;
 
-    /** Base y colección del SPEC. */
+    /** SPEC database and collection. */
     public MongoInvertedIndex(String connectionString) {
         this(connectionString, DEFAULT_DATABASE, DEFAULT_COLLECTION);
     }
 
-    /** Base y colección configurables (los tests usan una base propia). */
+    /** Configurable database and collection (the tests use their own database). */
     public MongoInvertedIndex(String connectionString, String databaseName, String collectionName) {
         Objects.requireNonNull(connectionString, "connectionString");
         this.collectionName = Objects.requireNonNull(collectionName, "collectionName");
         MongoClientSettings settings = MongoClientSettings.builder()
                 .applyConnectionString(new ConnectionString(connectionString))
-                // Si Mongo no está arrancado, fallar en 3 s en vez de esperar 30 s.
+                // If Mongo is not running, fail in 3 s instead of waiting 30 s.
                 .applyToClusterSettings(b -> b.serverSelectionTimeout(3, TimeUnit.SECONDS))
                 .build();
         this.client = MongoClients.create(settings);
         this.database = client.getDatabase(Objects.requireNonNull(databaseName, "databaseName"));
         this.collection = database.getCollection(collectionName);
         try {
-            ensureUniqueIndex();                       // además comprueba que Mongo responde
+            ensureUniqueIndex();                       // also checks that Mongo answers
         } catch (RuntimeException e) {
-            client.close();                            // no dejar la conexión abierta si el constructor falla
+            client.close();                            // do not leave the connection open if the constructor fails
             throw e;
         }
     }
@@ -87,17 +87,17 @@ public class MongoInvertedIndex implements InvertedIndex {
         return "mongo";
     }
 
-    /** Un documento por término: dos upserts del mismo término nunca crean dos documentos. */
+    /** One document per term: two upserts of the same term never create two documents. */
     private void ensureUniqueIndex() {
         collection.createIndex(Indexes.ascending(TERM), new IndexOptions().unique(true));
         uniqueIndexReady = true;
     }
 
     // ------------------------------------------------------------------
-    // addDocument y postings
+    // addDocument and postings
     // ------------------------------------------------------------------
 
-    /** Sólo en memoria: no habla con Mongo hasta flush. */
+    /** Only in memory: does not talk to Mongo until flush. */
     @Override
     public void addDocument(int bookId, Set<String> terms) {
         if (bookId < 0) {
@@ -109,19 +109,19 @@ public class MongoInvertedIndex implements InvertedIndex {
         }
     }
 
-    /** Un solo documento de Mongo + lo pendiente, ordenado y sin repetir. */
+    /** A single Mongo document + what is pending, sorted and without repetitions. */
     @Override
     public List<Integer> postings(String term) {
         if (term == null) {
             return List.of();
         }
-        SortedSet<Integer> ids = new TreeSet<>();      // Mongo guarda el array en orden de llegada
+        SortedSet<Integer> ids = new TreeSet<>();      // Mongo stores the array in arrival order
         Document doc = collection.find(Filters.eq(TERM, term)).first();
         if (doc != null) {
             List<Object> stored = doc.getList(POSTINGS, Object.class);
             if (stored != null) {
                 for (Object id : stored) {
-                    ids.add(((Number) id).intValue()); // int32 o int64 (Python/C pueden guardar int64)
+                    ids.add(((Number) id).intValue()); // int32 or int64 (Python/C may store int64)
                 }
             }
         }
@@ -133,13 +133,13 @@ public class MongoInvertedIndex implements InvertedIndex {
     }
 
     // ------------------------------------------------------------------
-    // Persistencia
+    // Persistence
     // ------------------------------------------------------------------
 
     /**
-     * Un upsert por término con $addToSet + $each: si el documento no existe se crea;
-     * si existe, sólo se añaden los ids que no estuvieran. Todos van en UN bulkWrite,
-     * así que son unas pocas idas y vueltas a Mongo en lugar de una por término.
+     * One upsert per term with $addToSet + $each: if the document does not exist it is created;
+     * if it exists, only the ids that were not there are added. They all go in ONE bulkWrite,
+     * so it takes a few round trips to Mongo instead of one per term.
      */
     @Override
     public void flush() {
@@ -158,10 +158,10 @@ public class MongoInvertedIndex implements InvertedIndex {
                     upsert));
         }
         collection.bulkWrite(updates, new BulkWriteOptions().ordered(false));
-        pending.clear();                                // sólo si Mongo aceptó todo; si falla, se puede reintentar
+        pending.clear();                                // only if Mongo accepted everything; if it fails, it can be retried
     }
 
-    /** Borra la colección entera; el índice único se recrea antes de la siguiente escritura. */
+    /** Deletes the whole collection; the unique index is recreated before the next write. */
     @Override
     public void clear() {
         pending.clear();
@@ -170,12 +170,12 @@ public class MongoInvertedIndex implements InvertedIndex {
     }
 
     /**
-     * Bytes que Mongo dice ocupar en disco para esta colección: datos (storageSize)
-     * más índices (totalIndexSize). 0 si la colección no existe.
+     * Bytes Mongo reports on disk for this collection: data (storageSize)
+     * plus indexes (totalIndexSize). 0 if the collection does not exist.
      *
-     * Antes se pide un fsync: WiredTiger sólo pasa los datos al fichero de la colección
-     * en cada checkpoint (unos 60 s); justo después de escribir, storageSize aún sería
-     * el de la colección casi vacía.
+     * An fsync is requested first: WiredTiger only moves the data to the collection file
+     * at each checkpoint (about 60 s); right after writing, storageSize would still be
+     * that of the almost empty collection.
      */
     @Override
     public long diskUsageBytes() {
@@ -186,7 +186,7 @@ public class MongoInvertedIndex implements InvertedIndex {
         try {
             client.getDatabase("admin").runCommand(new Document("fsync", 1));
         } catch (RuntimeException e) {
-            // Sin permisos para fsync (p. ej. un Mongo gestionado): el número puede ir retrasado.
+            // No permission for fsync (e.g. a managed Mongo): the number may lag behind.
         }
         Document stats = collection.aggregate(List.of(
                 new Document("$collStats", new Document("storageStats", new Document())))).first();
@@ -202,7 +202,7 @@ public class MongoInvertedIndex implements InvertedIndex {
         return value instanceof Number n ? n.longValue() : 0;
     }
 
-    /** Cierra la conexión. No hace flush: eso lo decide quien usa el índice. */
+    /** Closes the connection. It does not flush: whoever uses the index decides that. */
     @Override
     public void close() {
         client.close();

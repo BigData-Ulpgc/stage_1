@@ -3,28 +3,28 @@ package es.ulpgc.bigdata.control;
 import java.util.Objects;
 
 /**
- * Qué hizo un paso del pipeline.
+ * What a pipeline step did.
  *
- * @param action  lo que ocurrió
- * @param bookId  el libro afectado (-1 si no había nada que hacer)
- * @param detail  mensaje del error, o "" si no lo hubo
+ * @param action  what happened
+ * @param bookId  the affected book (-1 if there was nothing to do)
+ * @param detail  error message, or "" if there was none
  */
 public record StepResult(Action action, int bookId, String detail) {
 
     public enum Action {
-        /** Indexado y marcado en indexed_books.txt. */
+        /** Indexed and marked in indexed_books.txt. */
         INDEXED,
-        /** Descargado, guardado en el datalake y marcado en downloaded_books.txt. */
+        /** Downloaded, saved in the datalake and marked in downloaded_books.txt. */
         DOWNLOADED,
-        /** Gutenberg no lo tiene o no tiene marcadores: no se marca, se salta en esta ejecución. */
+        /** Gutenberg does not have it or it has no markers: not marked, skipped in this run. */
         NOT_AVAILABLE,
-        /** El control dice "descargado" pero el libro no está en el datalake. */
+        /** The control says "downloaded" but the book is not in the datalake. */
         MISSING_FROM_DATALAKE,
-        /** La descarga lanzó un error (red, disco...): no se marca. */
+        /** The download threw an error (network, disk...): not marked. */
         DOWNLOAD_FAILED,
-        /** La indexación lanzó un error: no se marca. */
+        /** The indexing threw an error: not marked. */
         INDEX_FAILED,
-        /** No quedaba nada por indexar ni por descargar. */
+        /** There was nothing left to index or download. */
         IDLE
     }
 
@@ -45,7 +45,7 @@ public record StepResult(Action action, int bookId, String detail) {
         return new StepResult(Action.IDLE, -1, "");
     }
 
-    /** true si el paso terminó bien y marcó algo en el control. */
+    /** true if the step finished successfully and marked something in the control. */
     public boolean marked() {
         return action == Action.INDEXED || action == Action.DOWNLOADED;
     }

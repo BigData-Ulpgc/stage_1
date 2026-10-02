@@ -1,8 +1,8 @@
 package es.ulpgc.bigdata.model;
 
 /**
- * Representa un libro justo después de descargarlo y separar
- * header/body, ANTES de guardarlo en el datalake.
+ * Represents a book right after downloading it and splitting
+ * header/body, BEFORE saving it in the datalake.
  */
 public record RawBook(int id, String header, String body) {
 }

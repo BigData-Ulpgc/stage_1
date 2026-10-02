@@ -11,9 +11,9 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * Lee shared/book_ids.txt (shared/SPEC.md, sección 1): los libros del dataset
- * común, uno por línea, en el MISMO orden en Java, Python y C.
- * Se ignoran las líneas vacías y las que empiezan por '#'.
+ * Reads shared/book_ids.txt (shared/SPEC.md, section 1): the books of the common
+ * dataset, one per line, in the SAME order in Java, Python and C.
+ * Empty lines and those starting with '#' are ignored.
  */
 public final class BookIdList {
 
@@ -23,13 +23,13 @@ public final class BookIdList {
     }
 
     /**
-     * @return los ids en el orden del fichero, sin repetidos
-     * @throws IllegalArgumentException si una línea no es un id: es un fichero que
-     *         escribe el equipo a mano, y una errata no debe pasar desapercibida
+     * @return the ids in file order, without duplicates
+     * @throws IllegalArgumentException if a line is not an id: it is a file the team
+     *         writes by hand, and a typo must not go unnoticed
      */
     public static List<Integer> load(Path file) {
         try {
-            Set<Integer> ids = new LinkedHashSet<>();          // conserva el orden, quita repetidos
+            Set<Integer> ids = new LinkedHashSet<>();          // keeps the order, removes duplicates
             List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
             for (int i = 0; i < lines.size(); i++) {
                 String line = lines.get(i).strip();

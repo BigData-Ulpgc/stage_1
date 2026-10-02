@@ -4,46 +4,46 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Índice invertido: término -> ids de los libros que lo contienen.
+ * Inverted index: term -> ids of the books that contain it.
  *
- * El índice LÓGICO es siempre el mismo; cada implementación decide cómo
- * guardarlo (memoria, un JSON, un fichero por término, MongoDB). Quien busca
- * sólo usa addDocument y postings, y no sabe ni le importa dónde viven los datos.
+ * The LOGICAL index is always the same; each implementation decides how
+ * to store it (memory, one JSON, one file per term, MongoDB). Whoever searches
+ * only uses addDocument and postings, and neither knows nor cares where the data lives.
  *
- * Qué significa flush en cada backend:
- *  - memory:       nada. No hay nada que persistir; los datos se pierden al cerrar.
- *  - monolithic:   reescribe el JSON COMPLETO (temporal + mover), con todos los términos.
- *  - hierarchical: escribe sólo los ficheros de los términos modificados desde el último flush.
- *  - mongo:        envía a la base las actualizaciones pendientes, si se acumularon en memoria.
- * En todos: después de flush, cerrar y reabrir el índice conserva todo lo añadido.
+ * What flush means in each backend:
+ *  - memory:       nothing. There is nothing to persist; the data is lost on close.
+ *  - monolithic:   rewrites the WHOLE JSON (temp file + move), with every term.
+ *  - hierarchical: writes only the files of the terms modified since the last flush.
+ *  - mongo:        sends the pending updates to the database, if they were accumulated in memory.
+ * In all of them: after flush, closing and reopening the index keeps everything that was added.
  *
- * Reglas que toda implementación cumple:
- *  - postings devuelve ids ordenados de menor a mayor, sin repetir; lista vacía si el término no existe.
- *  - postings refleja lo añadido aunque todavía no se haya hecho flush.
- *  - addDocument es idempotente: añadir otra vez el mismo libro no cambia nada.
- *  - clear deja el índice vacío, también en disco.
+ * Rules every implementation follows:
+ *  - postings returns ids sorted from lowest to highest, without repetitions; empty list if the term does not exist.
+ *  - postings reflects what was added even if no flush has been done yet.
+ *  - addDocument is idempotent: adding the same book again changes nothing.
+ *  - clear leaves the index empty, on disk too.
  */
 public interface InvertedIndex extends AutoCloseable {
 
-    /** Nombre de la estructura, como en el SPEC y el CSV del benchmark: "memory", "monolithic"... */
+    /** Name of the structure, as in the SPEC and the benchmark CSV: "memory", "monolithic"... */
     String name();
 
-    /** Añade el libro a la posting list de cada término (ya tokenizados). */
+    /** Adds the book to the posting list of each term (already tokenized). */
     void addDocument(int bookId, Set<String> terms);
 
-    /** Ids de los libros que contienen el término: ordenados, sin repetir, inmodificables. */
+    /** Ids of the books that contain the term: sorted, without repetitions, unmodifiable. */
     List<Integer> postings(String term);
 
-    /** Hace persistente todo lo añadido hasta ahora. Ver tabla en el comentario de la interfaz. */
+    /** Makes everything added so far persistent. See the table in the interface comment. */
     void flush();
 
-    /** Vacía el índice por completo, en memoria y en disco. */
+    /** Empties the index completely, in memory and on disk. */
     void clear();
 
-    /** Bytes que ocupa el índice en disco ahora mismo (0 si no usa disco). Para el benchmark. */
+    /** Bytes the index takes on disk right now (0 if it does not use disk). For the benchmark. */
     long diskUsageBytes();
 
-    /** Libera recursos (conexiones, ficheros abiertos). No implica flush. */
+    /** Releases resources (connections, open files). Does not imply flush. */
     @Override
     void close();
 }

@@ -10,12 +10,12 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * Buscador AND (shared/SPEC.md, sección 7):
+ * AND search engine (shared/SPEC.md, section 7):
  *
- *   consulta -> tokens -> posting lists -> intersección
+ *   query -> tokens -> posting lists -> intersection
  *
- * Nunca lee libros: sólo usa el Tokenizer y el InvertedIndex, sea cual sea
- * su organización física (memoria, JSON, carpetas o Mongo).
+ * It never reads books: it only uses the Tokenizer and the InvertedIndex, whatever
+ * its physical organisation (memory, JSON, folders or Mongo).
  */
 public class SearchService {
 
@@ -28,22 +28,22 @@ public class SearchService {
     }
 
     /**
-     * Ids de los libros que contienen TODOS los términos de la consulta,
-     * ordenados de menor a mayor. Si la consulta no tiene ningún término
-     * válido (vacía, sólo stopwords o palabras de 1 letra), devuelve [].
+     * Ids of the books that contain ALL the terms of the query,
+     * sorted from lowest to highest. If the query has no valid
+     * term (empty, only stopwords or 1-letter words), returns [].
      */
     public List<Integer> search(String query) {
         Objects.requireNonNull(query, "query");
 
-        // 1. Mismo tokenizador que al indexar. uniqueTerms ya quita repetidos
-        //    y conserva el orden de primera aparición.
+        // 1. Same tokenizer as when indexing. uniqueTerms already removes repetitions
+        //    and keeps the order of first appearance.
         Set<String> terms = tokenizer.uniqueTerms(query);
         if (terms.isEmpty()) {
             return List.of();
         }
 
-        // 2. Posting list de cada término. Si una está vacía, el AND ya es vacío:
-        //    no hace falta ni pedir las demás (en Mongo o en disco, cada una cuesta).
+        // 2. Posting list of each term. If one is empty, the AND is already empty:
+        //    there is no need to even ask for the others (in Mongo or on disk, each one costs).
         List<List<Integer>> postingLists = new ArrayList<>();
         for (String term : terms) {
             List<Integer> postings = index.postings(term);
@@ -53,11 +53,11 @@ public class SearchService {
             postingLists.add(postings);
         }
 
-        // 3. Primero las listas más cortas: el resultado nunca puede ser más
-        //    largo que la lista más corta, así que cada intersección trabaja menos.
+        // 3. Shortest lists first: the result can never be longer
+        //    than the shortest list, so each intersection does less work.
         postingLists.sort(Comparator.comparingInt(List::size));
 
-        // 4. Intersecciones encadenadas, cortando en cuanto el resultado queda vacío.
+        // 4. Chained intersections, stopping as soon as the result is empty.
         List<Integer> result = postingLists.get(0);
         for (int i = 1; i < postingLists.size() && !result.isEmpty(); i++) {
             result = intersect(result, postingLists.get(i));
@@ -66,8 +66,8 @@ public class SearchService {
     }
 
     /**
-     * Intersección de dos listas ORDENADAS y sin repetidos, con dos punteros.
-     * Cada paso avanza al menos un puntero, así que hace como mucho n + m pasos.
+     * Intersection of two SORTED lists without repetitions, with two pointers.
+     * Each step moves at least one pointer forward, so it takes at most n + m steps.
      */
     static List<Integer> intersect(List<Integer> a, List<Integer> b) {
         List<Integer> result = new ArrayList<>(Math.min(a.size(), b.size()));
@@ -76,13 +76,13 @@ public class SearchService {
         while (i < a.size() && j < b.size()) {
             int x = a.get(i);
             int y = b.get(j);
-            if (x == y) {          // está en las dos: se guarda y avanzan ambos
+            if (x == y) {          // it is in both: it is kept and both move forward
                 result.add(x);
                 i++;
                 j++;
-            } else if (x < y) {    // x no puede estar en b (todo lo que queda en b es mayor)
+            } else if (x < y) {    // x cannot be in b (everything left in b is greater)
                 i++;
-            } else {               // y no puede estar en a
+            } else {               // y cannot be in a
                 j++;
             }
         }

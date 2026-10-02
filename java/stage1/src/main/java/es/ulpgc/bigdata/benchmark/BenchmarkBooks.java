@@ -14,15 +14,15 @@ import java.util.List;
 import java.util.Random;
 
 /**
- * De dónde salen los libros del benchmark. Nunca de la red: se leen de un datalake
- * que ya existe (el que llenó el pipeline, o sample_dataset/) o se generan.
+ * Where the benchmark books come from. Never from the network: they are read from a
+ * datalake that already exists (the one filled by the pipeline, or sample_dataset/) or generated.
  */
 public final class BenchmarkBooks {
 
     private BenchmarkBooks() {
     }
 
-    /** Todos los libros de un datalake ya lleno, en orden de id. */
+    /** All the books of an already filled datalake, in id order. */
     public static List<RawBook> fromDatalake(Datalake source) {
         List<RawBook> books = new ArrayList<>();
         for (int id : source.listBookIds()) {
@@ -39,8 +39,8 @@ public final class BenchmarkBooks {
     }
 
     /**
-     * Libros inventados pero siempre iguales para la misma semilla (tests, o si aún
-     * no hay dataset). Ids repartidos entre varios rangos de 1000, como los reales.
+     * Made-up books, but always the same for the same seed (tests, or when there is no
+     * dataset yet). Ids spread across several ranges of 1000, like the real ones.
      */
     public static List<RawBook> synthetic(int count, int bodyKilobytes, long seed) {
         Random random = new Random(seed);
@@ -61,21 +61,21 @@ public final class BenchmarkBooks {
         return List.copyOf(books);
     }
 
-    /** Las palabras de shared/queries.txt: así las consultas del benchmark encuentran libros. */
+    /** The words of shared/queries.txt: this way the benchmark queries find books. */
     private static final String[] QUERY_WORDS = {"adventure", "island", "love", "ship", "sea", "king",
             "queen", "monster", "creature", "whale", "detective", "crime", "war", "peace", "mother", "father"};
 
     /**
-     * Libros para el benchmark del índice: 'synthetic' sólo tiene 16 palabras, y un índice
-     * de 16 términos no se parece en nada al de libros reales.
+     * Books for the index benchmark: 'synthetic' only has 16 words, and an index
+     * of 16 terms looks nothing like one built from real books.
      *
-     * Aquí hay 'vocabularySize' palabras y se eligen con la ley de Zipf, como en un texto real:
-     * la palabra de rango r sale con probabilidad proporcional a 1/r. Unas pocas están en
-     * todos los libros y la mayoría en muy pocos, y el vocabulario crece al crecer N.
+     * Here there are 'vocabularySize' words, chosen with Zipf's law, as in a real text:
+     * the word of rank r appears with probability proportional to 1/r. A few are in
+     * every book and most are in very few, and the vocabulary grows as N grows.
      *
-     * Las palabras de las consultas van en rangos repartidos (10, 40, 90, ... 2560): unas
-     * están en casi todos los libros y otras en pocos, así los AND no devuelven siempre todo.
-     * El resto son palabras inventadas "xaa", "xab"... (ninguna es stopword).
+     * The query words go in spread-out ranks (10, 40, 90, ... 2560): some are
+     * in almost every book and others in few, so the ANDs do not always return everything.
+     * The rest are made-up words "xaa", "xab"... (none of them is a stopword).
      */
     public static List<RawBook> syntheticZipf(int count, int tokensPerBook, int vocabularySize, long seed) {
         if (vocabularySize < 3000) {
@@ -83,7 +83,7 @@ public final class BenchmarkBooks {
         }
         String[] vocabulary = new String[vocabularySize];
         for (int i = 0; i < QUERY_WORDS.length; i++) {
-            vocabulary[10 * (i + 1) * (i + 1) - 1] = QUERY_WORDS[i];       // rango 10, 40, 90...
+            vocabulary[10 * (i + 1) * (i + 1) - 1] = QUERY_WORDS[i];       // rank 10, 40, 90...
         }
         int next = 0;
         for (int r = 0; r < vocabularySize; r++) {
@@ -92,7 +92,7 @@ public final class BenchmarkBooks {
             }
         }
 
-        double[] cumulative = new double[vocabularySize];                  // P(rango <= r), para buscar con binarySearch
+        double[] cumulative = new double[vocabularySize];                  // P(rank <= r), to search with binarySearch
         double sum = 0;
         for (int r = 0; r < vocabularySize; r++) {
             sum += 1.0 / (r + 1);
@@ -116,7 +116,7 @@ public final class BenchmarkBooks {
         return List.copyOf(books);
     }
 
-    /** 0 -> "aa", 1 -> "ab", 26 -> "ba"... siempre al menos 2 letras. */
+    /** 0 -> "aa", 1 -> "ab", 26 -> "ba"... always at least 2 letters. */
     private static String base26(int n) {
         StringBuilder s = new StringBuilder();
         do {

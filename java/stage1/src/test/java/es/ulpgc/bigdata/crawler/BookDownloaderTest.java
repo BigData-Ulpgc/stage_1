@@ -24,8 +24,8 @@ import java.util.stream.Stream;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * BookDownloader sin red: la fuente es una lambda. El splitter y el datalake
- * son los reales, porque no tocan la red y son deterministas.
+ * BookDownloader without network: the source is a lambda. The splitter and the datalake
+ * are the real ones, because they do not touch the network and are deterministic.
  */
 class BookDownloaderTest {
 
@@ -53,7 +53,7 @@ class BookDownloaderTest {
         datalake = new BookBasedDatalake(tmp.resolve("datalake"));
     }
 
-    /** Cuenta ficheros de cualquier tipo, incluidos .tmp: "no crea archivos" es literal. */
+    /** Counts files of any type, .tmp included: "creates no files" is meant literally. */
     private long filesUnder(Path dir) throws IOException {
         if (!Files.exists(dir)) {
             return 0;
@@ -63,7 +63,7 @@ class BookDownloaderTest {
         }
     }
 
-    // --- Criterios del reto ------------------------------------------------
+    // --- Challenge criteria ------------------------------------------------
 
     @Test
     void libroValidoDevuelveSuLocationConLoQueProduceElSplitter() throws IOException {
@@ -82,7 +82,7 @@ class BookDownloaderTest {
 
     @Test
     void errorHttpNoCreaArchivos() throws IOException {
-        // Así se ve un 404 desde fuera del cliente: Optional vacío.
+        // This is what a 404 looks like from outside the client: empty Optional.
         BookDownloader downloader =
                 new BookDownloader(id -> Optional.empty(), splitter, datalake);
 
@@ -99,7 +99,7 @@ class BookDownloaderTest {
         assertEquals(0L, filesUnder(tmp));
     }
 
-    // --- Comportamiento adicional -----------------------------------------
+    // --- Additional behaviour ---------------------------------------------
 
     @Test
     void pideALaFuenteElIdCorrectoUnaSolaVez() {

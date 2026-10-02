@@ -3,18 +3,18 @@ package es.ulpgc.bigdata.crawler;
 import java.util.Optional;
 
 /**
- * De dónde sale el texto completo de un libro.
+ * Where the full text of a book comes from.
  *
- * GutenbergClient es la implementación real (HTTP). En los tests se sustituye
- * por una lambda, así BookDownloader se prueba sin red.
+ * GutenbergClient is the real implementation (HTTP). In the tests it is replaced
+ * by a lambda, so BookDownloader is tested without network.
  */
 @FunctionalInterface
 public interface BookSource {
 
     /**
-     * @return el texto del libro, o vacío si no está disponible
-     *         (por ejemplo, el servidor respondió 404).
-     *         Un fallo de red se señala con una excepción, no con vacío.
+     * @return the text of the book, or empty if it is not available
+     *         (for example, the server answered 404).
+     *         A network failure is signalled with an exception, not with empty.
      */
     Optional<String> fetch(int bookId);
 }

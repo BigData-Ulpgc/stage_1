@@ -16,19 +16,19 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * Puente datalake -> datamarts:
+ * Bridge datalake -> datamarts:
  *
  *   header.txt --(MetadataParser)--> MetadataRepository (SQLite)
- *   body.txt   --(Tokenizer)-------> InvertedIndex (JSON, carpetas, Mongo...)
+ *   body.txt   --(Tokenizer)-------> InvertedIndex (JSON, folders, Mongo...)
  *
- * Orden de trabajo:
- *  1. Leer y calcular TODO (header, body, metadatos, términos) sin escribir nada.
- *     Si algo falla aquí, no queda ningún estado a medias.
- *  2. Guardar metadatos.
- *  3. Añadir al índice y hacer flush.
- * Sólo cuando termina bien, quien llama puede marcar el libro como indexado (reto 24).
+ * Order of work:
+ *  1. Read and compute EVERYTHING (header, body, metadata, terms) without writing anything.
+ *     If something fails here, no half-done state is left.
+ *  2. Save metadata.
+ *  3. Add to the index and flush.
+ * Only when it finishes successfully can the caller mark the book as indexed (challenge 24).
  *
- * Indexar dos veces el mismo libro es seguro: save es un upsert y addDocument no duplica ids.
+ * Indexing the same book twice is safe: save is an upsert and addDocument does not duplicate ids.
  */
 public class Indexer {
 
@@ -48,12 +48,12 @@ public class Indexer {
     }
 
     /**
-     * Indexa un libro que ya está en el datalake.
+     * Indexes a book that is already in the datalake.
      *
-     * @return los metadatos guardados, o vacío si el libro no está en el datalake
-     *         (en ese caso no se toca ni SQLite ni el índice).
-     * @throws RuntimeException si falla la lectura, SQLite o el índice. El libro NO
-     *         debe marcarse como indexado; reindexarlo más tarde es seguro.
+     * @return the saved metadata, or empty if the book is not in the datalake
+     *         (in that case neither SQLite nor the index is touched).
+     * @throws RuntimeException if reading, SQLite or the index fails. The book must NOT
+     *         be marked as indexed; reindexing it later is safe.
      */
     public Optional<BookMetadata> index(int bookId) {
         Optional<BookLocation> found = datalake.locate(bookId);
@@ -62,17 +62,17 @@ public class Indexer {
         }
         BookLocation location = found.get();
 
-        // 1. Leer y calcular. Nada de lo de aquí escribe.
+        // 1. Read and compute. Nothing here writes.
         String header = read(location.headerPath());
         String body = read(location.bodyPath());
-        BookMetadata bookMetadata = parser.parse(location, header);   // incluye las rutas
-        Set<String> terms = tokenizer.uniqueTerms(body);               // sólo el body
+        BookMetadata bookMetadata = parser.parse(location, header);   // includes the paths
+        Set<String> terms = tokenizer.uniqueTerms(body);               // only the body
 
-        // 2. Metadatos primero: un libro con metadatos pero sin índice es invisible
-        //    para la búsqueda; lo contrario daría resultados sin título ni autor.
+        // 2. Metadata first: a book with metadata but no index is invisible
+        //    to search; the opposite would give results with no title or author.
         metadata.save(bookMetadata);
 
-        // 3. Índice después, y persistido antes de devolver.
+        // 3. Index afterwards, and persisted before returning.
         index.addDocument(bookId, terms);
         index.flush();
 

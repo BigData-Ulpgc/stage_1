@@ -14,11 +14,11 @@ import static java.nio.file.StandardCopyOption.ATOMIC_MOVE;
 import static java.nio.file.StandardCopyOption.REPLACE_EXISTING;
 
 /**
- * Ficheros de resultados: benchmarks/results/<language>_<experiment>.csv (SPEC, sección 9).
+ * Result files: benchmarks/results/<language>_<experiment>.csv (SPEC, section 9).
  *
- * Cada experimento se escribe ENTERO de una vez, con temporal + mover: el fichero
- * siempre contiene una ejecución completa. Si el benchmark falla a mitad, no se
- * escribe nada y los resultados anteriores siguen intactos.
+ * Each experiment is written WHOLE at once, with temp file + move: the file
+ * always contains a complete run. If the benchmark fails halfway, nothing is
+ * written and the previous results stay intact.
  */
 public final class CsvResults {
 
@@ -30,7 +30,7 @@ public final class CsvResults {
         return resultsDir.resolve(language + "_" + experiment + ".csv");
     }
 
-    /** Sustituye el fichero por la cabecera + estas filas. */
+    /** Replaces the file with the header + these rows. */
     public static void write(Path file, List<BenchmarkRow> rows) {
         Objects.requireNonNull(rows, "rows");
         StringBuilder csv = new StringBuilder(BenchmarkRow.HEADER).append('\n');
@@ -53,13 +53,13 @@ public final class CsvResults {
             try {
                 Files.deleteIfExists(tmp);
             } catch (IOException ignored) {
-                // lo importante es el error original
+                // what matters is the original error
             }
             throw new UncheckedIOException("No se pudo escribir " + file, e);
         }
     }
 
-    /** Lee un fichero escrito por write, comprobando la cabecera. */
+    /** Reads a file written by write, checking the header. */
     public static List<BenchmarkRow> read(Path file) {
         try {
             List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);

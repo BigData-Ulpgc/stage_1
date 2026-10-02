@@ -7,8 +7,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Separa el texto crudo descargado de Gutenberg en header y body,
- * descartando el footer. No hace I/O ni conoce el datalake.
+ * Splits the raw text downloaded from Gutenberg into header and body,
+ * discarding the footer. It does no I/O and knows nothing about the datalake.
  */
 public class BookSplitter {
 

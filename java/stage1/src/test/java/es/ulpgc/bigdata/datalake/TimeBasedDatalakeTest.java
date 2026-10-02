@@ -22,7 +22,7 @@ class TimeBasedDatalakeTest {
 
     @TempDir Path tmp;
 
-    /** Datalake cuyo "ahora" está fijado en la fecha y hora indicadas. */
+    /** Datalake whose "now" is fixed at the given date and time. */
     private Datalake at(int year, int month, int day, int hour, int minute) {
         LocalDateTime moment = LocalDateTime.of(year, month, day, hour, minute);
         Clock fixed = Clock.fixed(moment.atZone(ZONE).toInstant(), ZONE);
@@ -33,7 +33,7 @@ class TimeBasedDatalakeTest {
         return tmp.resolve("time").resolve(relative);
     }
 
-    // --- Estructura física -------------------------------------------------
+    // --- Physical structure ------------------------------------------------
 
     @Test
     void guardaEnYYYYMMDDBarraHH() throws IOException {
@@ -54,7 +54,7 @@ class TimeBasedDatalakeTest {
 
     @Test
     void finalDeDiciembreUsaElAnioDeCalendario() {
-        // Con el patrón "YYYY" (año de semana) esto saldría 20261229.
+        // With the "YYYY" pattern (week year) this would come out as 20261229.
         assertEquals(time("20251229/10/7.body.txt"),
                 at(2025, 12, 29, 10, 0).save(new RawBook(7, "H", "B")).bodyPath());
     }
@@ -84,7 +84,7 @@ class TimeBasedDatalakeTest {
         assertEquals(List.of(), d.listBookIds());
     }
 
-    // --- Duplicados --------------------------------------------------------
+    // --- Duplicates --------------------------------------------------------
 
     @Test
     void guardadoDosVecesGanaLaCopiaMasRecienteYNoSeRepite() {
@@ -126,7 +126,7 @@ class TimeBasedDatalakeTest {
         Files.writeString(hora.resolve("abc.body.txt"), "x");
         Files.writeString(hora.resolve("notas.txt"), "x");
 
-        // Libros completos en carpetas con nombre no válido: no deben contar.
+        // Complete books in folders with an invalid name: they must not count.
         for (String carpeta : List.of("hola/10", "20260923/25", "2026092/10")) {
             Path dir = Files.createDirectories(time(carpeta));
             Files.writeString(dir.resolve("99.body.txt"), "x");

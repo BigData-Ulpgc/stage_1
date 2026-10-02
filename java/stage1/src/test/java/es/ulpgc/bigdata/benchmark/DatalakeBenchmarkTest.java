@@ -22,7 +22,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class DatalakeBenchmarkTest {
 
-    /** 30 libros pequeños: rápido, pero con varios rangos de 1000 y varias horas simuladas. */
+    /** 30 small books: fast, but with several ranges of 1000 and several simulated hours. */
     private static final List<RawBook> BOOKS = BenchmarkBooks.synthetic(30, 2, 7);
 
     @TempDir Path tmp;
@@ -49,7 +49,7 @@ class DatalakeBenchmarkTest {
         return books.stream().map(RawBook::id).collect(Collectors.toSet());
     }
 
-    // --- Criterio: las tres estructuras usan exactamente los mismos libros ----------
+    // --- Criterion: the three structures use exactly the same books -----------------
 
     @Test
     void lasTresEstructurasGuardanExactamenteLosMismosLibros() {
@@ -71,7 +71,7 @@ class DatalakeBenchmarkTest {
     void laEstructuraTimeRepartenLosLibrosEnVariasHoras() throws Exception {
         benchmark.write(BOOKS);
 
-        // 30 libros a 10 por hora = 3 carpetas de hora (con el reloj real sería 1).
+        // 30 books at 10 per hour = 3 hour folders (with the real clock it would be 1).
         try (var days = Files.list(tmp.resolve("work/write/time"))) {
             long hours = 0;
             for (Path day : days.toList()) {
@@ -83,11 +83,11 @@ class DatalakeBenchmarkTest {
         }
     }
 
-    // --- Criterio: la preparación queda fuera del tiempo medido -----------------------
+    // --- Criterion: preparation stays out of the measured time ------------------------
 
     @Test
     void crearYVaciarElDatalakeNoSeMide() {
-        // Una estructura cuya creación tarda 300 ms: si el setup se midiera, se notaría.
+        // A structure whose creation takes 300 ms: if the setup were measured, it would show.
         Structure slow = new Structure("book", dir -> {
             try {
                 Thread.sleep(300);
@@ -103,7 +103,7 @@ class DatalakeBenchmarkTest {
         }
     }
 
-    // --- Los cinco experimentos ------------------------------------------------------------
+    // --- The five experiments --------------------------------------------------------------
 
     @Test
     void writeDaTiempoYThroughputPorRepeticion() {
@@ -115,7 +115,7 @@ class DatalakeBenchmarkTest {
             assertEquals(List.of(1, 2, 3), elapsed.stream().map(BenchmarkRow::repetition).toList());
             for (int i = 0; i < 3; i++) {
                 double expected = BOOKS.size() / (elapsed.get(i).value() / 1000.0);
-                assertEquals(expected, throughput.get(i).value(), expected * 0.01 + 1);     // mismo run
+                assertEquals(expected, throughput.get(i).value(), expected * 0.01 + 1);     // same run
                 assertEquals("books_per_s", throughput.get(i).unit());
             }
         }
@@ -123,7 +123,7 @@ class DatalakeBenchmarkTest {
 
     @Test
     void lookupEncuentraTodosLosLibros() {
-        List<BenchmarkRow> rows = benchmark.lookup(BOOKS);          // si faltara alguno, lanzaría excepción
+        List<BenchmarkRow> rows = benchmark.lookup(BOOKS);          // if any were missing, it would throw an exception
 
         for (String s : List.of("book", "range", "time")) {
             assertEquals(3, metric(rows, s, "elapsed").size());
@@ -136,7 +136,7 @@ class DatalakeBenchmarkTest {
         List<BenchmarkRow> rows = benchmark.incremental(BOOKS);
 
         for (String s : List.of("book", "range", "time")) {
-            assertEquals(3.0, metric(rows, s, "detected").get(0).value());     // 10 % de 30
+            assertEquals(3.0, metric(rows, s, "detected").get(0).value());     // 10 % of 30
         }
     }
 
@@ -145,7 +145,7 @@ class DatalakeBenchmarkTest {
         List<BenchmarkRow> rows = benchmark.recovery(BOOKS);
 
         for (String s : List.of("book", "range", "time")) {
-            assertEquals(3.0, single(rows, s, "recovered"), s);                 // libros 0, 10 y 20
+            assertEquals(3.0, single(rows, s, "recovered"), s);                 // books 0, 10 and 20
             assertEquals(0.0, single(rows, s, "lost"), s);
             assertEquals(0.0, single(rows, s, "duplicates"), s);
         }
@@ -153,7 +153,7 @@ class DatalakeBenchmarkTest {
 
     @Test
     void elFalloSimuladoEsReproducible() {
-        // Dos ejecuciones completas dañan y recuperan exactamente los mismos libros.
+        // Two complete runs damage and recover exactly the same books.
         assertEquals(single(benchmark.recovery(BOOKS), "time", "recovered"),
                 single(benchmark.recovery(BOOKS), "time", "recovered"));
     }
@@ -163,15 +163,15 @@ class DatalakeBenchmarkTest {
         List<BenchmarkRow> rows = benchmark.storage(BOOKS);
 
         for (String s : List.of("book", "range", "time")) {
-            assertEquals(60.0, single(rows, s, "files"), s);                    // header + body por libro
+            assertEquals(60.0, single(rows, s, "files"), s);                    // header + body per book
             assertTrue(single(rows, s, "allocated_bytes") >= single(rows, s, "bytes"), s);
         }
-        assertEquals(30.0, single(rows, "book", "directories"));                // una por libro
-        assertTrue(single(rows, "range", "directories") < 30);                  // una por rango
-        assertEquals(single(rows, "book", "bytes"), single(rows, "range", "bytes"));   // mismo contenido
+        assertEquals(30.0, single(rows, "book", "directories"));                // one per book
+        assertTrue(single(rows, "range", "directories") < 30);                  // one per range
+        assertEquals(single(rows, "book", "bytes"), single(rows, "range", "bytes"));   // same content
     }
 
-    // --- Resultados en disco ---------------------------------------------------------------
+    // --- Results on disk -------------------------------------------------------------------
 
     @Test
     void runAllEscribeLosCincoCsvDelSpec() {
@@ -185,7 +185,7 @@ class DatalakeBenchmarkTest {
             Path file = results.resolve("java_" + experiment + ".csv");
             assertTrue(Files.exists(file), experiment);
             List<BenchmarkRow> read = CsvResults.read(file);
-            // El CSV redondea a 3 decimales: se comparan las líneas tal como se escriben.
+            // The CSV rounds to 3 decimals: the lines are compared as they are written.
             assertEquals(all.get(experiment).stream().map(BenchmarkRow::toCsvLine).toList(),
                     read.stream().map(BenchmarkRow::toCsvLine).toList(), experiment);
             assertTrue(read.stream().allMatch(r -> r.datasetSize() == BOOKS.size()));

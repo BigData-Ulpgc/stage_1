@@ -11,28 +11,28 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Traduce un nombre de configuración ("book", "range", "time") a un Datalake.
+ * Turns a configuration name ("book", "range", "time") into a Datalake.
  *
- * Es el ÚNICO sitio con "new XxxDatalake" fuera de los tests: quien usa el datalake
- * (BookDownloader, Indexer...) sólo conoce la interfaz Datalake. Añadir una estructura
- * nueva = una clase + una línea en este switch + su nombre en NAMES.
+ * It is the ONLY place with "new XxxDatalake" outside the tests: whoever uses the datalake
+ * (BookDownloader, Indexer...) only knows the Datalake interface. Adding a new structure
+ * = one class + one line in this switch + its name in NAMES.
  */
 public final class DatalakeFactory {
 
-    /** Nombres válidos en datalake.structure (los del SPEC, sección 3). */
+    /** Valid names in datalake.structure (the SPEC ones, section 3). */
     public static final List<String> NAMES = List.of("book", "range", "time");
 
     private DatalakeFactory() {
     }
 
-    /** La estructura activa, en su carpeta <data>/datalake/<estructura>. */
+    /** The active structure, in its folder <data>/datalake/<structure>. */
     public static Datalake create(AppConfig config) {
         return create(config.datalakeStructure(), config.datalakeDir(), Clock.systemDefaultZone());
     }
 
     /**
-     * @param clock sólo lo usa "time" (los benchmarks pasan un reloj simulado)
-     * @throws IllegalArgumentException si el nombre no es una estructura conocida
+     * @param clock only used by "time" (the benchmarks pass a simulated clock)
+     * @throws IllegalArgumentException if the name is not a known structure
      */
     public static Datalake create(String name, Path root, Clock clock) {
         Objects.requireNonNull(root, "root");

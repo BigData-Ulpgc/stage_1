@@ -8,12 +8,12 @@ import java.time.ZoneId;
 import java.util.Objects;
 
 /**
- * Reloj que avanza un paso fijo cada vez que se le pregunta la hora.
+ * Clock that moves forward a fixed step every time it is asked for the time.
  *
- * Para el benchmark de la estructura "time": con el reloj real, los cientos de libros
- * se guardarían en segundos y acabarían todos en la misma carpeta YYYYMMDD/HH.
- * Con este reloj, cada save() cae "un rato después", como si la ingesta durara días,
- * y siempre de la misma forma: el benchmark es reproducible.
+ * For the benchmark of the "time" structure: with the real clock, the hundreds of books
+ * would be saved in seconds and would all end up in the same YYYYMMDD/HH folder.
+ * With this clock, each save() happens "a while later", as if the ingestion lasted days,
+ * and always in the same way: the benchmark is reproducible.
  */
 public final class SimulatedClock extends Clock {
 
@@ -27,7 +27,7 @@ public final class SimulatedClock extends Clock {
         this.current = start.atZone(zone).toInstant();
     }
 
-    /** 10 libros por hora a partir del 1 de enero de 2026: unos 240 libros por carpeta de día. */
+    /** 10 books per hour starting on 1 January 2026: about 240 books per day folder. */
     public static SimulatedClock tenBooksPerHour() {
         return new SimulatedClock(LocalDateTime.of(2026, 1, 1, 0, 0), Duration.ofMinutes(6), ZoneId.of("UTC"));
     }

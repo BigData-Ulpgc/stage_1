@@ -51,7 +51,7 @@ class FactoriesTest {
         assertInstanceOf(RangeBasedDatalake.class, DatalakeFactory.create(config("range", "memory")));
         assertInstanceOf(TimeBasedDatalake.class, DatalakeFactory.create(config("time", "memory")));
         for (String name : DatalakeFactory.NAMES) {
-            assertEquals(name, DatalakeFactory.create(name, tmp, Clock.systemUTC()).name());   // nombre = el del SPEC
+            assertEquals(name, DatalakeFactory.create(name, tmp, Clock.systemUTC()).name());   // name = the one in the SPEC
         }
     }
 
@@ -86,7 +86,7 @@ class FactoriesTest {
         assertThrows(IllegalArgumentException.class, () -> InvertedIndexFactory.create("sqlite", AppConfig.defaults()));
     }
 
-    // --- Criterio: cambiar time->book o monolithic->hierarchical sin tocar la lógica -----------
+    // --- Criterion: switch time->book or monolithic->hierarchical without touching the logic ---
 
     private static String gutenberg(String title, String body) {
         return "Title: " + title + "\nAuthor: Someone\nLanguage: English\n"
@@ -99,7 +99,7 @@ class FactoriesTest {
             20, gutenberg("Island", "A ship reached the island"),
             30, gutenberg("Love", "A love letter"));
 
-    /** EXACTAMENTE el mismo código para cualquier configuración: sólo cambia el AppConfig. */
+    /** EXACTLY the same code for any configuration: only the AppConfig changes. */
     private List<Integer> downloadIndexAndSearch(AppConfig c, String query) {
         BookSource fakeGutenberg = id -> Optional.ofNullable(BOOKS.get(id));
         Tokenizer tokenizer = new Tokenizer(Set.of("the", "and", "a"));
@@ -124,7 +124,7 @@ class FactoriesTest {
         assertEquals(List.of(10, 20), downloadIndexAndSearch(timeMono, "ship"));
         assertEquals(List.of(10, 20), downloadIndexAndSearch(bookHier, "ship"));
 
-        assertTrue(Files.isDirectory(timeMono.datalakeDir()));                   // cada estructura en su carpeta
+        assertTrue(Files.isDirectory(timeMono.datalakeDir()));                   // each structure in its own folder
         assertTrue(Files.exists(bookHier.datalakeDir().resolve("10/body.txt")));
         assertTrue(Files.exists(timeMono.monolithicIndexFile()));
         assertTrue(Files.isDirectory(bookHier.hierarchicalIndexDir()));

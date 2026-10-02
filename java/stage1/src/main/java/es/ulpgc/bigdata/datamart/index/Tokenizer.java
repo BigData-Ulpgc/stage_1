@@ -14,16 +14,16 @@ import java.util.Set;
 import java.util.function.Consumer;
 
 /**
- * Tokenizador del contrato común (shared/SPEC.md, sección 5), idéntico en Java, Python y C:
+ * Tokenizer of the common contract (shared/SPEC.md, section 5), identical in Java, Python and C:
  *
- *  1. Se recorre el texto carácter a carácter.
- *  2. A-Z pasa a a-z; a-z y 0-9 forman parte del token.
- *  3. Cualquier otro carácter (espacio, puntuación, apóstrofe, no ASCII) es separador.
- *  4. Se descartan los tokens de longitud < 2.
- *  5. Se descartan las stopwords.
+ *  1. The text is traversed character by character.
+ *  2. A-Z becomes a-z; a-z and 0-9 are part of the token.
+ *  3. Any other character (space, punctuation, apostrophe, non-ASCII) is a separator.
+ *  4. Tokens of length < 2 are discarded.
+ *  5. Stopwords are discarded.
  *
- * No usa toLowerCase() ni Character.isLetter(): ambos siguen reglas Unicode
- * que C no puede reproducir byte a byte.
+ * It does not use toLowerCase() or Character.isLetter(): both follow Unicode rules
+ * that C cannot reproduce byte by byte.
  */
 public class Tokenizer {
 
@@ -36,8 +36,8 @@ public class Tokenizer {
     }
 
     /**
-     * Carga shared/stopwords.txt: una por línea; se ignoran las líneas vacías
-     * y las que empiezan por '#'.
+     * Loads shared/stopwords.txt: one per line; empty lines and those
+     * starting with '#' are ignored.
      */
     public static Tokenizer fromStopwordsFile(Path file) {
         try {
@@ -54,7 +54,7 @@ public class Tokenizer {
         }
     }
 
-    /** Todos los tokens, en orden y con repeticiones: "Boat, BOAT!" -> [boat, boat]. */
+    /** All the tokens, in order and with repetitions: "Boat, BOAT!" -> [boat, boat]. */
     public List<String> tokenize(String text) {
         List<String> tokens = new ArrayList<>();
         forEachToken(text, tokens::add);
@@ -62,33 +62,33 @@ public class Tokenizer {
     }
 
     /**
-     * Cada término una sola vez, en el orden en que aparece por primera vez:
-     * "Boat, BOAT!" -> [boat]. Es lo que cada libro aporta al índice.
+     * Each term only once, in the order in which it first appears:
+     * "Boat, BOAT!" -> [boat]. It is what each book contributes to the index.
      */
     public Set<String> uniqueTerms(String text) {
         Set<String> terms = new LinkedHashSet<>();
         forEachToken(text, terms::add);
-        return Collections.unmodifiableSet(terms);   // Set.copyOf perdería el orden
+        return Collections.unmodifiableSet(terms);   // Set.copyOf would lose the order
     }
 
-    /** El único bucle del tokenizador; tokenize y uniqueTerms sólo cambian dónde se guarda. */
+    /** The tokenizer's only loop; tokenize and uniqueTerms only change where it is stored. */
     private void forEachToken(String text, Consumer<String> sink) {
         Objects.requireNonNull(text, "text");
         StringBuilder current = new StringBuilder();
         for (int i = 0; i < text.length(); i++) {
             char c = text.charAt(i);
             if (c >= 'A' && c <= 'Z') {
-                current.append((char) (c + ('a' - 'A')));     // mayúscula ASCII -> minúscula
+                current.append((char) (c + ('a' - 'A')));     // ASCII uppercase -> lowercase
             } else if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
                 current.append(c);
             } else {
-                emit(current, sink);                          // separador: cierra el token
+                emit(current, sink);                          // separator: closes the token
             }
         }
-        emit(current, sink);                                  // el texto puede acabar en mitad de un token
+        emit(current, sink);                                  // the text may end in the middle of a token
     }
 
-    /** Entrega el token acumulado si pasa los filtros, y vacía el acumulador. */
+    /** Emits the accumulated token if it passes the filters, and empties the accumulator. */
     private void emit(StringBuilder current, Consumer<String> sink) {
         if (current.length() >= MIN_LENGTH) {
             String token = current.toString();

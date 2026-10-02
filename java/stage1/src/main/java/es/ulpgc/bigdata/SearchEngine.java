@@ -22,18 +22,18 @@ import es.ulpgc.bigdata.query.SearchService;
 import java.util.Objects;
 
 /**
- * El sistema completo montado a partir de un AppConfig: el ÚNICO sitio donde se conectan
- * las piezas. Main lo usa con Gutenberg de verdad; la prueba end-to-end, con una BookSource
- * falsa (sin red). Así la prueba ejercita exactamente el mismo montaje que el programa.
+ * The complete system assembled from an AppConfig: the ONLY place where the pieces
+ * are connected. Main uses it with the real Gutenberg; the end-to-end test, with a fake
+ * BookSource (no network). This way the test exercises exactly the same assembly as the program.
  *
- * Dónde queda cada parte del estado (todo bajo data.dir, ver AppConfig):
- *   datalake   <data>/datalake/<estructura>/...        header y body de cada libro
- *   metadatos  <data>/datamarts/metadata.db             SQLite, tabla books
- *   índice     <data>/datamarts/inverted_index.json | inverted_index/ | colección de Mongo
+ * Where each part of the state ends up (all under data.dir, see AppConfig):
+ *   datalake   <data>/datalake/<structure>/...         header and body of each book
+ *   metadata   <data>/datamarts/metadata.db             SQLite, books table
+ *   index      <data>/datamarts/inverted_index.json | inverted_index/ | Mongo collection
  *   control    <data>/control/downloaded_books.txt, indexed_books.txt
  *
- * close() libera conexiones; NO es lo que hace persistente el estado: Indexer ya hace
- * flush de cada libro y ControlFiles escribe cada marca al momento.
+ * close() releases connections; it is NOT what makes the state persistent: Indexer already
+ * flushes each book and ControlFiles writes each mark immediately.
  */
 public final class SearchEngine implements AutoCloseable {
 
@@ -54,12 +54,12 @@ public final class SearchEngine implements AutoCloseable {
         this.search = search;
     }
 
-    /** Con Project Gutenberg de verdad (lo que usa Main). */
+    /** With the real Project Gutenberg (what Main uses). */
     public static SearchEngine open(AppConfig config) {
         return open(config, new GutenbergClient(config.connectTimeout(), config.requestTimeout()));
     }
 
-    /** Con cualquier fuente de libros (los tests pasan una sin red). */
+    /** With any book source (the tests pass one without network). */
     public static SearchEngine open(AppConfig config, BookSource source) {
         Objects.requireNonNull(config, "config");
         Objects.requireNonNull(source, "source");
@@ -70,7 +70,7 @@ public final class SearchEngine implements AutoCloseable {
         try {
             index = InvertedIndexFactory.create(config);
         } catch (RuntimeException e) {
-            metadata.close();                                  // no dejar SQLite abierto si falla el índice
+            metadata.close();                                  // do not leave SQLite open if the index fails
             throw e;
         }
         ControlFiles control = new ControlFiles(config.controlDir());
@@ -106,7 +106,7 @@ public final class SearchEngine implements AutoCloseable {
         return control;
     }
 
-    /** Cierra índice y SQLite; si el primero falla, el segundo se cierra igualmente. */
+    /** Closes index and SQLite; if the first one fails, the second is closed anyway. */
     @Override
     public void close() {
         try {

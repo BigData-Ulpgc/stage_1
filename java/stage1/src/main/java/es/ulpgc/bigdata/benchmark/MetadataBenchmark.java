@@ -25,28 +25,28 @@ import java.util.function.Function;
 import java.util.function.ToIntFunction;
 
 /**
- * Benchmark del almacén de metadatos (SPEC, sección 9):
+ * Benchmark of the metadata store (SPEC, section 9):
  *
- *   metadata_insert   saveAll por lotes de un dataset de N libros    elapsed (ms) + throughput (rows/s)
- *   metadata_query    Q consultas de cada tipo                        find_by_id / find_by_author /
+ *   metadata_insert   batched saveAll of a dataset of N books        elapsed (ms) + throughput (rows/s)
+ *   metadata_query    Q queries of each type                          find_by_id / find_by_author /
  *                                                                     find_by_title (ms) + *_avg (µs)
  *
- * Se repite para varios N crecientes, siempre prefijos del MISMO dataset.
- * Los metadatos ya vienen construidos: el parseo del header NO está en el tiempo.
+ * It is repeated for several increasing N, always prefixes of the SAME dataset.
+ * The metadata comes already built: parsing the header is NOT in the time.
  *
- * Dos variantes: "sqlite" (con los índices del SPEC sobre author y title) y
- * "sqlite_no_index" (sin ellos), para ver qué aportan esos índices.
+ * Two variants: "sqlite" (with the SPEC indexes on author and title) and
+ * "sqlite_no_index" (without them), to see what those indexes contribute.
  */
 public class MetadataBenchmark {
 
     public static final String LANGUAGE = "java";
 
-    /** Libros por lote en metadata_insert (cada lote es una transacción). */
+    /** Books per batch in metadata_insert (each batch is one transaction). */
     public static final int DEFAULT_BATCH_SIZE = 1000;
-    /** Consultas de cada tipo en metadata_query. */
+    /** Queries of each type in metadata_query. */
     public static final int DEFAULT_QUERIES = 1000;
 
-    /** Una variante a comparar: su nombre en el CSV y cómo abrir un repositorio vacío. */
+    /** A variant to compare: its name in the CSV and how to open an empty repository. */
     public record Backend(String name, Function<Path, MetadataRepository> open) {
     }
 
@@ -79,8 +79,8 @@ public class MetadataBenchmark {
     }
 
     /**
-     * Los dos experimentos para cada tamaño. Cada tamaño N usa los N primeros libros
-     * de 'dataset', así todos los tamaños son partes del mismo dataset.
+     * The two experiments for each size. Each size N uses the first N books
+     * of 'dataset', so all sizes are parts of the same dataset.
      */
     public Map<String, List<BenchmarkRow>> runAll(List<BookMetadata> dataset, List<Integer> sizes) {
         List<BenchmarkRow> insert = new ArrayList<>();
@@ -105,17 +105,17 @@ public class MetadataBenchmark {
     }
 
     // ------------------------------------------------------------------
-    // metadata_insert: saveAll por lotes en una base vacía
+    // metadata_insert: batched saveAll into an empty database
     // ------------------------------------------------------------------
 
     public List<BenchmarkRow> insert(List<BookMetadata> books) {
-        List<List<BookMetadata>> batches = batches(books, batchSize);    // se trocea ANTES de medir
+        List<List<BookMetadata>> batches = batches(books, batchSize);    // split BEFORE measuring
         List<BenchmarkRow> rows = new ArrayList<>();
         for (Backend backend : backends) {
             Path db = dbFile("insert", backend, books.size());
             MetadataRepository[] repo = new MetadataRepository[1];
             List<BenchmarkRow> elapsed = runner.run(scenario("metadata_insert", backend, books.size()),
-                    () -> repo[0] = freshRepository(backend, db, repo[0]),    // setup: base vacía
+                    () -> repo[0] = freshRepository(backend, db, repo[0]),    // setup: empty database
                     () -> {
                         for (List<BookMetadata> batch : batches) {
                             repo[0].saveAll(batch);
@@ -132,12 +132,12 @@ public class MetadataBenchmark {
     }
 
     // ------------------------------------------------------------------
-    // metadata_query: carga de consultas definida, un tipo cada vez
+    // metadata_query: defined query workload, one type at a time
     // ------------------------------------------------------------------
 
     /**
-     * Carga: 'queries' consultas de cada tipo, elegidas con semilla fija entre los valores
-     * que EXISTEN en la base (siempre encuentran algo). La misma carga para todas las variantes.
+     * Workload: 'queries' queries of each type, chosen with a fixed seed among the values
+     * that EXIST in the database (they always find something). The same workload for every variant.
      */
     public List<BenchmarkRow> query(List<BookMetadata> books) {
         Random random = new Random(42);
@@ -155,7 +155,7 @@ public class MetadataBenchmark {
         for (Backend backend : backends) {
             Path db = dbFile("query", backend, books.size());
             MetadataRepository repo = freshRepository(backend, db, null);
-            repo.saveAll(books);                                          // preparación única, sin medir
+            repo.saveAll(books);                                          // one-off preparation, not measured
             int n = books.size();
 
             rows.addAll(queryType(backend, n, "find_by_id", ids,
@@ -169,7 +169,7 @@ public class MetadataBenchmark {
         return rows;
     }
 
-    /** Un tipo de consulta: el nombre del tipo va en la columna metric. */
+    /** A query type: the type name goes in the metric column. */
     private <T> List<BenchmarkRow> queryType(Backend backend, int n, String metric, List<T> workload,
                                              ToIntFunction<T> query) {
         long[] found = {0};
@@ -177,27 +177,27 @@ public class MetadataBenchmark {
                 () -> found[0] = 0,
                 () -> {
                     for (T value : workload) {
-                        found[0] += query.applyAsInt(value);              // usar el resultado
+                        found[0] += query.applyAsInt(value);              // use the result
                     }
                 });
         require(found[0] >= workload.size(), backend.name() + " " + metric + ": alguna consulta no encontró nada");
 
         List<BenchmarkRow> rows = new ArrayList<>();
         for (BenchmarkRow e : measured) {
-            rows.add(derived(e, metric, "ms", e.value()));                                 // total de la carga
+            rows.add(derived(e, metric, "ms", e.value()));                                 // total of the workload
             rows.add(derived(e, metric + "_avg", "us", e.value() * 1000.0 / workload.size()));
         }
         return rows;
     }
 
     // ------------------------------------------------------------------
-    // Dataset sintético compartido
+    // Shared synthetic dataset
     // ------------------------------------------------------------------
 
     /**
-     * Metadatos sintéticos: libro i -> autor i/10 y título i/2. Así CADA autor tiene 10 libros
-     * y cada título 2, sea cual sea N, y los N primeros son siempre los mismos: al crecer N sólo
-     * crece la tabla, no el número de resultados de cada consulta.
+     * Synthetic metadata: book i -> author i/10 and title i/2. This way EACH author has 10 books
+     * and each title 2, whatever N is, and the first N are always the same: as N grows only
+     * the table grows, not the number of results of each query.
      */
     public static List<BookMetadata> syntheticDataset(int size) {
         List<BookMetadata> books = new ArrayList<>(size);
@@ -212,10 +212,10 @@ public class MetadataBenchmark {
     }
 
     // ------------------------------------------------------------------
-    // Auxiliares
+    // Helpers
     // ------------------------------------------------------------------
 
-    /** Quita idx_books_author e idx_books_title (variante sqlite_no_index). */
+    /** Removes idx_books_author and idx_books_title (sqlite_no_index variant). */
     static void dropAuthorAndTitleIndexes(Path db) {
         try (Connection c = DriverManager.getConnection(SqliteSchema.jdbcUrl(db));
              Statement st = c.createStatement()) {
@@ -230,7 +230,7 @@ public class MetadataBenchmark {
         return workDir.resolve(experiment).resolve(backend.name() + "_" + n + ".db");
     }
 
-    /** Cierra el repositorio anterior, borra el fichero y abre uno vacío (siempre en setup). */
+    /** Closes the previous repository, deletes the file and opens an empty one (always in setup). */
     private static MetadataRepository freshRepository(Backend backend, Path db, MetadataRepository previous) {
         if (previous != null) {
             previous.close();
@@ -268,10 +268,10 @@ public class MetadataBenchmark {
     }
 
     // ------------------------------------------------------------------
-    // Ejecutable
+    // Executable
     // ------------------------------------------------------------------
 
-    /** Uso: MetadataBenchmark [tamaños separados por comas]   (por defecto 1000,10000,100000) */
+    /** Usage: MetadataBenchmark [sizes separated by commas]   (default 1000,10000,100000) */
     public static void main(String[] args) {
         List<Integer> sizes = new ArrayList<>();
         for (String s : (args.length > 0 ? args[0] : "1000,10000,100000").split(",")) {

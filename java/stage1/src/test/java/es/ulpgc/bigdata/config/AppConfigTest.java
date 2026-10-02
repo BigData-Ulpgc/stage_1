@@ -32,7 +32,7 @@ class AppConfigTest {
         return p;
     }
 
-    // --- Valores y rutas ----------------------------------------------------------------
+    // --- Values and paths ---------------------------------------------------------------
 
     @Test
     void losValoresPorDefectoSiguenElSpec() {
@@ -61,7 +61,7 @@ class AppConfigTest {
         assertEquals(c.withDataDir(Path.of("x")).metadataDb(), Path.of("x/datamarts/metadata.db"));
     }
 
-    // --- Orden de prioridad: defecto < fichero < -D -------------------------------------------
+    // --- Priority order: default < file < -D --------------------------------------------------
 
     @Test
     void elFicheroSobrescribeLosValoresPorDefectoYMenosDLoSobrescribeAEl() throws IOException {
@@ -77,13 +77,13 @@ class AppConfigTest {
         assertEquals("range", fromFile.datalakeStructure());
         assertEquals("hierarchical", fromFile.indexStructure());
         assertEquals(Duration.ofSeconds(30), fromFile.requestTimeout());
-        assertEquals(Duration.ofSeconds(10), fromFile.connectTimeout());       // no está en el fichero
+        assertEquals(Duration.ofSeconds(10), fromFile.connectTimeout());       // not in the file
 
         System.setProperty("index.structure", "memory");
         assertEquals("memory", AppConfig.load(file).indexStructure());
     }
 
-    // --- Errores al arrancar, no a mitad ---------------------------------------------------------
+    // --- Errors at startup, not halfway ----------------------------------------------------------
 
     @Test
     void unaEstructuraDesconocidaFallaAlCargarYDiceLasOpciones() {
@@ -108,7 +108,7 @@ class AppConfigTest {
                 () -> AppConfig.fromProperties(props("http.request.timeout.seconds", "0")));
     }
 
-    // --- Criterio: las rutas de datos no están repetidas en varias clases -----------------------
+    // --- Criterion: the data paths are not repeated across several classes ----------------------
 
     @Test
     void ningunaClaseFueraDeAppConfigEscribeRutasDeDatos() throws IOException {
