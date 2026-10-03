@@ -2912,3 +2912,26 @@ WiredTiger compresses and fills its pages differently in each case.
   code measures, and they could have been mistaken for the final ones.
 - The datalake and metadata CSVs are kept for now: steps C and D of the parity plan will replace
   them.
+
+---
+
+## Entry 60 – Only results with the agreed sizes stay in the repo (2026-10-03)
+
+### What was done
+- Removed the last seven committed CSVs: the five `datalake_*` and the two `metadata_*`
+  experiments. Every one had `dataset_size` 15, the original 15 real books.
+- `benchmarks/results/` is now empty in git. The CSV writer creates the folder again when a
+  benchmark runs (`WriteBenchmarkResults.CreatesMissingParentDirectories` covers it).
+- `cpp/README.md`, section 7: the old note said results were tracked and told the reader to restore
+  them with `git checkout`. It now says no results are committed yet, and that a trial run's CSV
+  should be deleted instead of committed.
+
+### Why
+- The rule the user set is that the repo only keeps results that are comparable with Java's: the
+  sizes agreed in SPEC section 10. That means N=200 real books for the datalake (10.1), and
+  N=1,000/10,000/100,000 synthetic rows, as `sqlite` and `sqlite_no_index`, for the metadata (10.2).
+- None of the seven CSVs met that rule. Their metrics were also behind Java's: no `throughput`,
+  `per_lookup`, `detected`, `lost` or `allocated_bytes` for the datalake, and no `sqlite_no_index`
+  rows for the metadata.
+- This supersedes the last point of Entry 59, which kept these files until steps C and D. Their
+  replacements will come from those steps, written under SPEC 10.4's `real/` and `synthetic/`.

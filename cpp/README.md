@@ -170,8 +170,9 @@ $B status x ; echo $?
 
 ## 7. Good to know
 
-- **Benchmarks overwrite committed results.** `benchmarks/results/*.csv` are tracked by git. If you
-  only ran a benchmark to try it, restore them with `git checkout -- benchmarks/results/`.
+- **Benchmark results and git.** No results are committed yet: only runs with SPEC section 10's
+  sizes will be. A benchmark writes `benchmarks/results/cpp_<experiment>.csv`, which git shows as a
+  new file. If you only ran it to try it, delete that file instead of committing it.
 - **Quoting in zsh.** Use single quotes for multi-word queries with punctuation, for example
   `$B search 'The Whale, and the Island!'`. Inside double quotes, zsh treats `!"` specially and
   leaves the quote open (a `dquote>` prompt; Ctrl+C gets you out).
