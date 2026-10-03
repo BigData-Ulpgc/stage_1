@@ -2614,3 +2614,55 @@ cost"), but their numbers cannot be put side by side. SPEC section 9 fixes the C
 each experiment's metrics mean. Fixing the metric of each experiment is the open point already raised
 with the group, and it has to be settled before the official run. Nothing was changed unilaterally
 here.
+
+## Entry 54 – Benchmark adaptation, step 3b: `index_memory` per size, measured with allocator in-use bytes instead of peak RSS (2026-10-03)
+
+### What was done
+- `index_memory` now runs at N=50, 100 and 200 like the other index experiments (`run_index_experiment`
+  in `cli_commands.cpp`), all in one process.
+- Its measure changed. It used to be getrusage's `ru_maxrss` (Entry 41), the peak resident memory of
+  the whole process. It is now **the bytes the allocator reports as in use**, read right before and
+  right after each step while what it built is still alive:
+  - macOS: `malloc_zone_statistics(nullptr, ...)`, all zones;
+  - Linux: glibc's `mallinfo2()`, `uordblks + hblkhd`.
+
+  Metric `heap_delta`, unit bytes, structures `in_memory_index` and `monolithic` as before. This is
+  the C++ counterpart of the heap usage the Java module reads from its JVM.
+- Test updated: the metric is `heap_delta`, and both values must now be strictly positive, which the
+  old peak measure could not guarantee. Suite total: 178.
+
+### How the measure was chosen
+1. **Peak RSS cannot compare sizes within one process.** A peak never goes down, so after N=50, the
+   N=100 measurement would only show how far it exceeds N=50's peak.
+2. **First attempt, abandoned: one child process per measurement** (`fork`). A small probe showed
+   that on macOS a forked child's `ru_maxrss` starts at 0 MB, so isolation does work. The monolithic
+   load then grew with N (14.8 / 26.1 / 38.6 MB). But the in-memory index gave 38.6 / 48.6 / 89.3 MB in
+   one run and **43.0 / 29.2 / 22.8 MB** in the next, with the same code. RSS also moves with page
+   reuse and with macOS memory compression of idle pages, such as the 200 loaded books. A peak of
+   resident pages is not a stable measure of what a data structure holds.
+3. **In-use bytes, verified before adopting them.** A probe program linked against `stage1_core` built
+   the index at N = 50, 100, 200, 200, 100, 50, 200, all in one process. It gave 16.2 / 30.1 / 60.5 MB
+   every time, whatever the order. The fork code (and a CSV reader written for it) was uncommitted,
+   so it was discarded rather than kept as unused code.
+
+### Results (200 real books; two runs identical to 0.1 MB)
+| N | in-memory index (C++) | monolithic loaded (C++) | Java monolithic `heap_after_open` |
+|---|---|---|---|
+| 50 | 16.2 MB | 14.4 MB | 18.5 MB |
+| 100 | 30.2 MB | 25.6 MB | 48.3 MB |
+| 200 | 60.5 MB | 50.0 MB | 100.3 MB |
+
+Both C++ structures grow almost linearly with N. The C++ figures are about half of Java's at N=200,
+which is plausible: every Java object carries a header, and Java's posting lists box their integers.
+The metrics are not identical, though. Java reports the whole heap after opening; this module
+reports what the structure itself adds. That belongs to the open "metrics per experiment" discussion
+with the group (Entry 53).
+
+### Caveats
+- **The Linux branch (`mallinfo2`, glibc 2.33 or later) compiles only on Linux and was not run on
+  this machine.** `mallinfo2` reports the main arena, which is all this single-threaded benchmark
+  uses. Other platforms fail to compile with an explicit `#error`, instead of silently measuring
+  nothing.
+- The figure counts what the allocator handed out, including its own per-allocation overhead. It
+  does not count pages the operating system keeps around afterwards. That is exactly "what this
+  structure costs in memory", but it is not the whole process's footprint.

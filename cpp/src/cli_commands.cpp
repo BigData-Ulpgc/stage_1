@@ -81,6 +81,9 @@ std::vector<BenchmarkResult> run_index_experiment(const std::string& experiment,
     if (experiment == "index_update") {
         return benchmark_index_update("cpp", books, stopwords, work_dir);
     }
+    if (experiment == "index_memory") {
+        return benchmark_index_memory("cpp", books, stopwords, work_dir);
+    }
     return benchmark_index_disk("cpp", books, stopwords, work_dir);
 }
 
@@ -269,7 +272,7 @@ int run_benchmark_command(const std::string& experiment) {
     } else if (experiment == "metadata_query") {
         results = benchmark_metadata_query("cpp", books, work_dir);
     } else if (experiment == "index_build" || experiment == "index_query" || experiment == "index_update" ||
-               experiment == "index_disk") {
+               experiment == "index_memory" || experiment == "index_disk") {
         for (std::size_t n : kIndexSizes) {
             if (books.size() < n) {
                 std::cerr << "[benchmark] skipping N=" << n << ": only " << books.size() << " book(s) downloaded\n";
@@ -285,10 +288,6 @@ int run_benchmark_command(const std::string& experiment) {
                       << " downloaded books (SPEC section 10.1) -- run `pipeline 400` first.\n";
             return 1;
         }
-    } else if (experiment == "index_memory") {
-        // Still a single size (every downloaded book): its peak-RSS measure
-        // needs one process per size, which is the next step.
-        results = benchmark_index_memory("cpp", books, stopwords, work_dir);
     } else {
         std::cerr << "[benchmark] unknown experiment: " << experiment << "\n";
         return 1;

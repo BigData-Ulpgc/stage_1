@@ -13,17 +13,19 @@ namespace stage1 {
 // SPEC section 9's "index_memory" experiment (the course PDF's own "Memory
 // and disk usage: Amount of RAM... required by each implementation").
 //
-// C++ has no garbage collector or heap-size introspection API (what the Java
-// module uses: Runtime.totalMemory()/freeMemory() after forcing a GC). The
-// closest honest equivalent is the operating system's own peak resident set
-// size (RSS, via POSIX getrusage -- available on macOS and Linux, this
-// project's only targets), measured before and after the step being
-// costed. RSS is a *monotonic peak* for the whole process, not a per-object
-// counter: the delta reported is "how much higher the process's memory peak
-// grew doing this step", which undercounts a step that happens not to
-// exceed a peak an earlier, larger step already set. Single-shot (no
-// repetitions: RSS is a point-in-time OS counter, not something warmup/
-// averaging applies to).
+// Measure: the bytes the memory allocator reports as in use (allocated and
+// not yet freed) right before and right after the step, while what it built
+// is still alive. The difference is the memory that structure holds: the
+// C++ counterpart of the heap usage the Java module reads from its JVM.
+// macOS: malloc_zone_statistics (all zones); Linux: glibc's mallinfo2.
+//
+// Until DEVLOG Entry 54 this used getrusage's ru_maxrss, the *peak* resident
+// memory of the whole process. That proved unusable for comparing sizes: a
+// peak never goes down, a step that reuses freed memory does not move it,
+// and macOS compresses idle pages. The same N=200 build measured 89.3 MB in
+// one run and 22.8 MB in another, while in-use bytes give 60.5 MB every
+// time, in any order, in one process. Single-shot (no repetitions: the
+// figure is a byte count, not a timing).
 //
 // Two things are measured:
 //   in_memory_index   building the shared InvertedIndex from `books` (what

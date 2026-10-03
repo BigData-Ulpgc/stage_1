@@ -28,9 +28,9 @@ TEST(BenchmarkIndexMemory, ProducesOneRowForInMemoryIndexAndOneForMonolithic) {
         EXPECT_EQ(result.language, "cpp");
         EXPECT_EQ(result.experiment, "index_memory");
         EXPECT_EQ(result.dataset_size, 2);
-        EXPECT_EQ(result.metric, "rss_delta");
+        EXPECT_EQ(result.metric, "heap_delta");
         EXPECT_EQ(result.unit, "bytes");
-        EXPECT_GE(result.value, 0.0);
+        EXPECT_GT(result.value, 0.0);  // both structures hold real allocations, even for 2 tiny books
         if (result.structure == "in_memory_index") saw_in_memory_index = true;
         if (result.structure == "monolithic") saw_monolithic = true;
     }
