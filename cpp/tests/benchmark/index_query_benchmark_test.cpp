@@ -4,11 +4,14 @@
 
 #include "stage1/benchmark/index_build_benchmark.hpp"
 #include "stage1/benchmark/index_query_benchmark.hpp"
+#include "stage1/datamart/index/index_readers.hpp"
 #include "stage1/datamart/index/mongo_index_writer.hpp"
 #include "support/temp_dir.hpp"
 
 using stage1::benchmark_index_build;
 using stage1::benchmark_index_query;
+using stage1::monolithic_postings_fetcher;
+using stage1::prepare_index_query;
 using stage1::SampleBook;
 using stage1::testing::TempDir;
 
@@ -42,6 +45,21 @@ TEST(BenchmarkIndexQuery, ProducesFiveMeasuredRowsPerAvailableStructure) {
     }
     EXPECT_EQ(monolithic_rows, 5);
     EXPECT_EQ(hierarchical_rows, 5);
+}
+
+TEST(BenchmarkIndexQuery, PrepareWritesExactlyWhatTheQueriesRead) {
+    TempDir root("stage1_index_query_benchmark_test_prepare");
+    prepare_index_query(kCorpus, kStopwords, root.path());  // no benchmark_index_build needed
+
+    auto results = benchmark_index_query("cpp", 2, kQueries, kStopwords, root.path());
+
+    const auto rows = [&](const char* structure) {
+        return std::count_if(results.begin(), results.end(), [&](const auto& r) { return r.structure == structure; });
+    };
+    EXPECT_EQ(rows("monolithic"), 5);
+    EXPECT_EQ(rows("hierarchical"), 5);
+    EXPECT_EQ(monolithic_postings_fetcher(root.path() / "monolithic" / "inverted_index.json")("whale"),
+              std::vector<int>{1});
 }
 
 TEST(BenchmarkIndexQuery, IncludesMongoOnlyWhenReachable) {

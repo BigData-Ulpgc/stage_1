@@ -6,6 +6,7 @@
 #include "stage1/cli_commands.hpp"
 
 #include <algorithm>
+#include <array>
 #include <filesystem>
 #include <iostream>
 #include <iterator>
@@ -59,6 +60,29 @@ const std::filesystem::path kBenchmarksDir = STAGE1_BENCHMARKS_DIR;
 // (monolithic_postings_fetcher): one constant so the two can never drift
 // apart. Swapping pipeline's index format means swapping search's reader too.
 const std::filesystem::path kIndexPath = kDataDir / "datamarts" / "inverted_index.json";
+
+// SPEC section 10.1: the index experiments run once per size N, on the N
+// books with the lowest ids (load_sample_books already returns them sorted).
+constexpr std::array<std::size_t, 3> kIndexSizes = {50, 100, 200};
+
+// One index experiment on exactly `books` (one size). index_query first
+// writes the structures it reads, once and untimed.
+std::vector<BenchmarkResult> run_index_experiment(const std::string& experiment, const std::vector<SampleBook>& books,
+                                                  const std::unordered_set<std::string>& stopwords,
+                                                  const std::filesystem::path& work_dir) {
+    if (experiment == "index_build") {
+        return benchmark_index_build("cpp", books, stopwords, work_dir);
+    }
+    if (experiment == "index_query") {
+        prepare_index_query(books, stopwords, work_dir);
+        const auto queries = load_queries(kSharedDir / "queries.txt");
+        return benchmark_index_query("cpp", static_cast<int>(books.size()), queries, stopwords, work_dir);
+    }
+    if (experiment == "index_update") {
+        return benchmark_index_update("cpp", books, stopwords, work_dir);
+    }
+    return benchmark_index_disk("cpp", books, stopwords, work_dir);
+}
 
 // Reports what a step actually did, not just what it decided to do: a failed
 // download used to be printed as "downloaded book X" (DEVLOG Entry 49).
@@ -244,21 +268,27 @@ int run_benchmark_command(const std::string& experiment) {
         results = benchmark_metadata_insert("cpp", books, work_dir);
     } else if (experiment == "metadata_query") {
         results = benchmark_metadata_query("cpp", books, work_dir);
-    } else if (experiment == "index_build") {
-        results = benchmark_index_build("cpp", books, stopwords, work_dir);
-    } else if (experiment == "index_query") {
-        // (Re)builds the structures first, untimed, so index_query always
-        // measures against whatever `books` currently holds, regardless of
-        // whether `index_build` happened to run earlier in this process.
-        benchmark_index_build("cpp", books, stopwords, work_dir);
-        const auto queries = load_queries(kSharedDir / "queries.txt");
-        results = benchmark_index_query("cpp", static_cast<int>(books.size()), queries, stopwords, work_dir);
-    } else if (experiment == "index_update") {
-        results = benchmark_index_update("cpp", books, stopwords, work_dir);
+    } else if (experiment == "index_build" || experiment == "index_query" || experiment == "index_update" ||
+               experiment == "index_disk") {
+        for (std::size_t n : kIndexSizes) {
+            if (books.size() < n) {
+                std::cerr << "[benchmark] skipping N=" << n << ": only " << books.size() << " book(s) downloaded\n";
+                continue;
+            }
+            std::cout << "[benchmark] " << experiment << ", N=" << n << "\n";
+            const std::vector<SampleBook> first_n(books.begin(), books.begin() + static_cast<std::ptrdiff_t>(n));
+            const auto rows = run_index_experiment(experiment, first_n, stopwords, work_dir);
+            results.insert(results.end(), rows.begin(), rows.end());
+        }
+        if (results.empty()) {
+            std::cerr << "[benchmark] " << experiment << " needs at least " << kIndexSizes.front()
+                      << " downloaded books (SPEC section 10.1) -- run `pipeline 400` first.\n";
+            return 1;
+        }
     } else if (experiment == "index_memory") {
+        // Still a single size (every downloaded book): its peak-RSS measure
+        // needs one process per size, which is the next step.
         results = benchmark_index_memory("cpp", books, stopwords, work_dir);
-    } else if (experiment == "index_disk") {
-        results = benchmark_index_disk("cpp", books, stopwords, work_dir);
     } else {
         std::cerr << "[benchmark] unknown experiment: " << experiment << "\n";
         return 1;

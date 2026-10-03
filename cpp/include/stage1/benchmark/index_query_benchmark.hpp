@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "stage1/benchmark/benchmark.hpp"
+#include "stage1/benchmark/sample_books.hpp"
 
 namespace stage1 {
 
@@ -27,5 +28,13 @@ std::vector<BenchmarkResult> benchmark_index_query(const std::string& language, 
                                                      const std::vector<std::string>& queries,
                                                      const std::unordered_set<std::string>& stopwords,
                                                      const std::filesystem::path& index_dir);
+
+// Builds the index of `books` once and writes it, untimed, to exactly the
+// places benchmark_index_query reads under `index_dir`: monolithic,
+// hierarchical, and mongo if reachable. This lets index_query run on its
+// own, without a whole benchmark_index_build, whose 7 timed repetitions
+// would only write the same files over and over.
+void prepare_index_query(const std::vector<SampleBook>& books, const std::unordered_set<std::string>& stopwords,
+                         const std::filesystem::path& index_dir);
 
 }  // namespace stage1

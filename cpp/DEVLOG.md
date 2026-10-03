@@ -2563,3 +2563,54 @@ N=50 and N=100, which is the risk the agreement was written to prevent.
   next step can simply take the first N books.
 - **Sorting at load time, not in each benchmark.** All 12 benchmarks receive their books from this one
   function. Sorting here is one change instead of twelve, and no benchmark can forget it.
+
+## Entry 53 – Benchmark adaptation, step 3a: index experiments at N=50, 100 and 200 (2026-10-03)
+
+### What was done
+- `src/cli_commands.cpp`:
+  - `index_build`, `index_query`, `index_update` and `index_disk` now run once per size in
+    `kIndexSizes = {50, 100, 200}` (SPEC section 10.1). Each run uses the first N books of
+    `load_sample_books`, which are the N lowest ids since Entry 52.
+  - All sizes go into the same CSV, distinguished by `dataset_size`.
+  - A size larger than the number of downloaded books is skipped with a message. If none fits, the
+    command fails and asks for `pipeline 400`.
+  - The per-size dispatch lives in `run_index_experiment`.
+- `index_query` no longer runs a whole `benchmark_index_build` just to create its files. That meant 7
+  timed repetitions of writing (and, since Entry 50, deleting) up to 129,356 files, all for nothing.
+  The new `prepare_index_query(books, stopwords, index_dir)` builds the index once and writes it,
+  untimed, to the paths `benchmark_index_query` reads, plus Mongo if reachable. Both functions take
+  those paths from one place (`monolithic_file`, `hierarchical_root`).
+- `index_memory` keeps a single size for now, because its peak-RSS measure needs one process per size
+  (step 3b).
+- 1 new test, `PrepareWritesExactlyWhatTheQueriesRead`. Suite total: 178.
+
+### Verification (real data, 200 books)
+- `index_disk` gives exactly the SPEC 10.1 reference values at every size:
+  - N=50: 58,834 terms and 360,970 postings;
+  - N=100: 78,820 and 759,087;
+  - N=200: 129,356 and 1,581,064.
+- The hierarchical file count equals the term count at every size. N=50 was written over the 129,356
+  files left by an earlier N=200 run, which is exactly the case Entry 50 fixed. Before that fix,
+  N=50 would have counted 129,356 files.
+- `index_query` at all three sizes took 78 s of wall time. Mean of 5 runs, loading the structure plus
+  answering the 10 queries:
+
+| N | monolithic | hierarchical |
+|---|---|---|
+| 50 | 71.1 ms | 1.3 ms |
+| 100 | 86.6 ms | 0.4 ms |
+| 200 | 205.3 ms | 0.9 ms |
+
+### A comparability problem found, to settle with the group
+These `index_query` numbers rank the structures the opposite way from Java's: monolithic 4.5 µs and
+hierarchical 48.3 µs `per_query` at N=200. The two modules measure different things:
+- **This module** times opening the structure *and* answering the 10 queries, cold, in every
+  repetition (Entry 28's design). Monolithic must parse its whole 8.9 MB JSON each time, while
+  hierarchical opens only the ~16 files the query terms need.
+- **Java** opens the index outside the measurement and times only the queries.
+
+Both are legitimate questions ("first query on a cold structure" against "steady-state query
+cost"), but their numbers cannot be put side by side. SPEC section 9 fixes the CSV columns, not what
+each experiment's metrics mean. Fixing the metric of each experiment is the open point already raised
+with the group, and it has to be settled before the official run. Nothing was changed unilaterally
+here.

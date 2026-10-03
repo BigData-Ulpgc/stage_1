@@ -1,5 +1,9 @@
 #include "stage1/benchmark/index_query_benchmark.hpp"
 
+#include "stage1/datamart/index/hierarchical_index_writer.hpp"
+#include "stage1/datamart/index/inverted_index.hpp"
+#include "stage1/datamart/index/monolithic_index_writer.hpp"
+
 #include "stage1/datamart/index/index_readers.hpp"
 #include "stage1/datamart/index/mongo_index_writer.hpp"
 #include "stage1/query/query_engine.hpp"
@@ -10,6 +14,15 @@ namespace stage1 {
 namespace {
 
 using Postings = std::function<std::vector<int>(const std::string&)>;
+
+// Where each file-based structure lives under `index_dir`: the same paths
+// benchmark_index_build writes, used by both functions below.
+std::filesystem::path monolithic_file(const std::filesystem::path& index_dir) {
+    return index_dir / "monolithic" / "inverted_index.json";
+}
+std::filesystem::path hierarchical_root(const std::filesystem::path& index_dir) {
+    return index_dir / "hierarchical" / "inverted_index";
+}
 
 void run_and_record(const std::string& language, const std::string& structure, int dataset_size,
                      const std::vector<std::string>& queries, const std::unordered_set<std::string>& stopwords,
@@ -38,11 +51,11 @@ std::vector<BenchmarkResult> benchmark_index_query(const std::string& language, 
 
     run_and_record(
         language, "monolithic", dataset_size, queries, stopwords,
-        [&] { return monolithic_postings_fetcher(index_dir / "monolithic" / "inverted_index.json"); }, results);
+        [&] { return monolithic_postings_fetcher(monolithic_file(index_dir)); }, results);
 
     run_and_record(
         language, "hierarchical", dataset_size, queries, stopwords,
-        [&] { return hierarchical_postings_fetcher(index_dir / "hierarchical" / "inverted_index"); }, results);
+        [&] { return hierarchical_postings_fetcher(hierarchical_root(index_dir)); }, results);
 
     if (mongo_is_reachable()) {
         run_and_record(
@@ -50,6 +63,19 @@ std::vector<BenchmarkResult> benchmark_index_query(const std::string& language, 
     }
 
     return results;
+}
+
+void prepare_index_query(const std::vector<SampleBook>& books, const std::unordered_set<std::string>& stopwords,
+                         const std::filesystem::path& index_dir) {
+    InvertedIndex index;
+    for (const auto& book : books) {
+        index.add_book(book.book_id, tokenize(book.body, stopwords));
+    }
+    MonolithicIndexWriter(monolithic_file(index_dir)).write(index);
+    HierarchicalIndexWriter(hierarchical_root(index_dir)).write(index);
+    if (mongo_is_reachable()) {
+        MongoIndexWriter().write(index);
+    }
 }
 
 }  // namespace stage1
