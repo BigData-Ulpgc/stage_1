@@ -2317,3 +2317,53 @@ contract:
   `sqlite_no_index`.
 - Write the results into `results/real/` and `results/synthetic/`.
 - The current `results/*.csv` (15 books) predate the agreement.
+
+## Entry 48 – `sample_dataset/`: the group's 15 original books, raw and split (2026-10-03)
+
+### What was done
+Created the repository-level `sample_dataset/` that the assignment requires ("Provide a sample
+dataset so instructors can quickly test the pipeline"). The group's root README already promised it,
+and SPEC section 9 referenced it, but it did not exist.
+- `raw/pg<ID>.txt`: the 15 original books (the first 15 lines of `shared/book_ids.txt`),
+  downloaded unmodified from the SPEC section 2 URL. 7.7 MB, CRLF line endings.
+- `book/<ID>/header.txt` and `body.txt`: the same books after the SPEC section 2 split, in the
+  SPEC section 3 `book` layout. 6.3 MB.
+- `book_ids.txt` (the 15 ids), `SHA256SUMS` (45 files), and `.gitattributes`
+  (`raw/** -text`, `book/** -text`).
+- `README.md`: contents, the three ways to use it, reference values, how to check a copy and how
+  to rebuild `raw/`, and the license.
+
+### Verification
+- An independent Python script split every raw file following SPEC section 2. All 15
+  headers and bodies were byte-identical to what this module's pipeline had stored when it
+  downloaded the same books (Entry 44 and the 200-book run). That stored output is what `book/`
+  contains.
+- The sample's counts are 30,396 distinct terms and 89,727 postings, the same as the C++ pipeline
+  and its `index_disk` benchmark give for these 15 books.
+- `shasum -a 256 -c SHA256SUMS`: 45/45 OK. `git check-attr`: the `text` attribute is unset for
+  `raw/` and `book/`.
+
+### Why
+- **The 15 original books.** They are small enough to live in git (14 MB with both forms, against
+  129 MB for the 200), and their counts were already known and checked. The pipeline processes them
+  in about 18 seconds.
+- **Raw files, unmodified.** An offline run that reads them instead of the URL exercises the whole
+  pipeline, including the header/body split. That split is the step most likely to break on a new
+  book, and a pre-split sample would never test it. Keeping the files intact also keeps the Project
+  Gutenberg License they carry.
+- **Also the split books, in `book` layout.**
+  - Java's benchmarks already accept "sample_dataset/ in book structure" as input, so `book/` is
+    usable today without new code.
+  - It is the *expected output* of SPEC section 2: any implementation can check its own split
+    byte for byte, a reference as strong as the term/posting counts.
+  - It matches the root README's description ("libros procesados").
+- **Checksums and `-text`.** Gutenberg revises files over time, and git may convert line endings on
+  some platforms (Windows with `core.autocrlf`). Either would silently change the dataset. The
+  checksums detect it, and `-text` prevents the conversion.
+
+### Not done yet
+- No implementation has an offline mode reading `raw/` yet. In this module it would be a new
+  `BookSource` implementation next to `GutenbergSource`, the same seam the tests already use for
+  their fake source.
+- SPEC section 10.1 still says `sample_dataset/` "does not exist yet". That sentence belongs to the
+  shared contract, so it is left for an explicit decision.
