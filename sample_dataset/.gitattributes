@@ -1,0 +1,4 @@
+# Keep every sample file byte for byte. The raw Gutenberg files use CRLF line endings,
+# and an end-of-line conversion on checkout would change their bytes and checksums.
+raw/** -text
+book/** -text

@@ -1,0 +1,16 @@
+# Sample dataset: the first 15 books of shared/book_ids.txt (the group's original set), same order.
+1342
+84
+11
+1661
+2701
+98
+74
+5
+1080
+345
+2542
+1952
+46
+174
+76
