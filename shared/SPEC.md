@@ -135,7 +135,8 @@ described here.
   was checked to download with both START/END markers.
 - **No network inside a measurement:** each implementation downloads the books once with its own
   `pipeline` into a `book` datalake (section 3), and the benchmarks read them from there. This takes
-  the place of the `sample_dataset/` folder mentioned in section 9, which does not exist yet.
+  the place of the `sample_dataset/` folder mentioned in section 9 for the benchmarks.
+  `sample_dataset/` holds only the 15 original books, for quick tests (see its `README.md`).
 - **Order of the books:** `book_ids.txt` order is the *download* order (section 1). Benchmarks
   instead take the books in **ascending book id order**, and a size N means **the N books with the
   lowest ids**, the same as Java's `BenchmarkBooks.fromDatalake`. Every N is then a prefix of the
