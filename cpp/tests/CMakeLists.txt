@@ -8,6 +8,7 @@ add_executable(stage1_tests
   crawler/book_splitter_test.cpp
   crawler/download_result_test.cpp
   crawler/gutenberg_client_test.cpp
+  crawler/local_file_source_test.cpp
   datamart/metadata/metadata_test.cpp
   datamart/metadata/metadata_store_test.cpp
   datalake/book_based_datalake_test.cpp
@@ -23,20 +24,25 @@ add_executable(stage1_tests
   control/book_id_list_test.cpp
   control/pipeline_test.cpp
   benchmark/benchmark_test.cpp
+  benchmark/java_random_test.cpp
   benchmark/sample_books_test.cpp
-  benchmark/index_build_benchmark_test.cpp
-  benchmark/query_list_test.cpp
-  benchmark/index_query_benchmark_test.cpp
-  benchmark/datalake_write_benchmark_test.cpp
-  benchmark/datalake_lookup_benchmark_test.cpp
-  benchmark/datalake_incremental_benchmark_test.cpp
-  benchmark/datalake_recovery_benchmark_test.cpp
-  benchmark/datalake_storage_benchmark_test.cpp
-  benchmark/metadata_insert_benchmark_test.cpp
-  benchmark/metadata_query_benchmark_test.cpp
-  benchmark/index_update_benchmark_test.cpp
-  benchmark/index_memory_benchmark_test.cpp
-  benchmark/index_disk_benchmark_test.cpp)
+  benchmark/datalake/datalake_benchmark_support_test.cpp
+  benchmark/datalake/datalake_incremental_benchmark_test.cpp
+  benchmark/datalake/datalake_lookup_benchmark_test.cpp
+  benchmark/datalake/datalake_recovery_benchmark_test.cpp
+  benchmark/datalake/datalake_storage_benchmark_test.cpp
+  benchmark/datalake/datalake_write_benchmark_test.cpp
+  benchmark/datalake/simulated_clock_test.cpp
+  benchmark/index/index_benchmark_support_test.cpp
+  benchmark/index/index_build_benchmark_test.cpp
+  benchmark/index/index_disk_benchmark_test.cpp
+  benchmark/index/index_memory_benchmark_test.cpp
+  benchmark/index/index_query_benchmark_test.cpp
+  benchmark/index/index_update_benchmark_test.cpp
+  benchmark/index/query_list_test.cpp
+  benchmark/metadata/metadata_benchmark_support_test.cpp
+  benchmark/metadata/metadata_insert_benchmark_test.cpp
+  benchmark/metadata/metadata_query_benchmark_test.cpp)
 target_link_libraries(stage1_tests PRIVATE stage1_core GTest::gtest_main)
 # Lets tests in any subfolder (crawler/, datalake/, ...) include the shared
 # helpers as "fakes/..." and "support/...", not only those sitting in tests/.

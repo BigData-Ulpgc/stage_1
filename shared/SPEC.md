@@ -123,3 +123,67 @@ java,index_build,monolithic,100,1,elapsed,1234.5,ms
 - Metodología común: **N_WARMUP = 2** repeticiones descartadas y **N_RUNS = 5** medidas.
 - Las descargas de red se miden aparte: para los benchmarks de escritura/índice se parte de los
   libros ya descargados en `sample_dataset/` para que la red no contamine los tiempos.
+
+## 10. Benchmark datasets and sizes (agreed 2026-10-02)
+
+Agreed by the group after the first Java runs. Comparisons between languages use only the data
+described here.
+
+### 10.1 Real books (datalake and index experiments)
+
+- **Dataset:** the 200 ids in `shared/book_ids.txt` (the first 15 are the original ones). Every one
+  was checked to download with both START/END markers.
+- **No network inside a measurement:** each implementation downloads the books once with its own
+  `pipeline` into a `book` datalake (section 3), and the benchmarks read them from there. This takes
+  the place of the `sample_dataset/` folder mentioned in section 9 for the benchmarks.
+  `sample_dataset/` holds only the 15 original books, for quick tests (see its `README.md`).
+- **Order of the books:** `book_ids.txt` order is the *download* order (section 1). Benchmarks
+  instead take the books in **ascending book id order**, and a size N means **the N books with the
+  lowest ids**, the same as Java's `BenchmarkBooks.fromDatalake`. Every N is then a prefix of the
+  next one, and all languages measure exactly the same books.
+
+| Experiments | Structures | Sizes (N) |
+|---|---|---|
+| `datalake_write`, `datalake_lookup`, `datalake_incremental`, `datalake_recovery`, `datalake_storage` | `book`, `range`, `time` | 200 |
+| `index_build`, `index_query`, `index_update`, `index_memory`, `index_disk` | `monolithic`, `hierarchical`, `mongo` (when a server is available) | 50, 100, 200 |
+
+**Reference values** (from the Java run, `index_disk`). Every implementation must get exactly these
+numbers for the same N. Any difference means a different set of books, or a tokenizer that does not
+follow section 5, and must be fixed before comparing any times.
+
+| N | Distinct terms | Postings |
+|---|---|---|
+| 50 | 58,834 | 360,970 |
+| 100 | 78,820 | 759,087 |
+| 200 | 129,356 | 1,581,064 |
+
+### 10.2 Synthetic metadata (metadata experiments)
+
+200 rows are too few to see SQLite scale, so `metadata_insert` and `metadata_query` use generated
+rows. The generator uses no random numbers, so every language produces identical data:
+
+- For `i = 0 … N-1`:
+  - `book_id = i + 1`
+  - `title = "Title " + (i / 2)` and `author = "Author " + (i / 10)`, with integer division
+  - `language = "English"` and `release_date = "January 1, 2000"`
+  - `body_path = "datalake/book/<book_id>/body.txt"` and
+    `header_path = "datalake/book/<book_id>/header.txt"`
+- Every author has 10 books and every title 2, whatever N is. As N grows, only the table grows, not
+  the size of each query's answer.
+- **Sizes:** N = 1,000, 10,000 and 100,000.
+- **Structures:** `sqlite` (the schema of section 4) and `sqlite_no_index` (the same schema without
+  `idx_books_author` and `idx_books_title`).
+
+### 10.3 Other synthetic data
+
+Synthetic *books* for the datalake and index experiments depend on each language's random number
+generator, and those generators differ even with the same seed. Such results may be kept as a
+per-language reference, but they are **not** compared across languages.
+
+### 10.4 Where results go
+
+- `benchmarks/results/real/<language>_<experiment>.csv`: experiments on the real books (10.1).
+- `benchmarks/results/synthetic/<language>_<experiment>.csv`: experiments on synthetic data (10.2,
+  10.3).
+- The CSV format is the one in section 9. Each implementation may write there directly, or archive
+  its runs into these folders by hand.

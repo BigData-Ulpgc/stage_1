@@ -16,6 +16,11 @@ std::string hierarchical_folder_name(const std::string& term);
 
 // Hierarchical datamart layout for the index (shared/SPEC.md section 6):
 //   <root>/<FIRST-LETTER>/<term>.txt, one book id per line.
+//
+// The `root` folder belongs to this writer: write() deletes whatever is in it
+// before writing, so the folder ends up holding exactly the given index (a
+// term that is no longer in the index loses its file). update_terms() only
+// ever adds or rewrites the files of the terms it is given.
 class HierarchicalIndexWriter : public IndexWriter {
 public:
     explicit HierarchicalIndexWriter(std::filesystem::path root) : root_(std::move(root)) {}

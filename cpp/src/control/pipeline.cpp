@@ -1,5 +1,7 @@
 #include "stage1/control/pipeline.hpp"
 
+#include <string>
+
 #include "stage1/crawler/book_splitter.hpp"
 #include "stage1/util/file_io.hpp"
 #include "stage1/datamart/metadata/metadata.hpp"
@@ -9,16 +11,17 @@ namespace stage1 {
 
 namespace {
 
-void perform_download(int book_id, ControlLog& downloaded, BookSource& source, Datalake& datalake,
-                       MetadataStore& metadata) {
+// Returns why the download could not complete, or an empty string if it did.
+std::string perform_download(int book_id, ControlLog& downloaded, BookSource& source, Datalake& datalake,
+                              MetadataStore& metadata) {
     const DownloadResult download = source.fetch(book_id);
     if (!download.ok()) {
-        return;  // network/HTTP failure: leave unmarked, a future run retries it
+        return download.error();  // network/HTTP failure: leave unmarked, a future run retries it
     }
 
     const auto split = split_book(download.text());
     if (!split) {
-        return;  // missing START/END markers (SPEC section 2): book discarded
+        return "no START/END markers, book discarded (SPEC section 2)";
     }
 
     const BookLocation location = datalake.write(book_id, split->header, split->body);
@@ -26,13 +29,15 @@ void perform_download(int book_id, ControlLog& downloaded, BookSource& source, D
     metadata.insert_book(book_id, book_metadata, location.body_path, location.header_path);
 
     downloaded.mark(book_id);  // only now: the write above fully succeeded
+    return {};
 }
 
-void perform_indexing(int book_id, ControlLog& indexed, MetadataStore& metadata, InvertedIndex& index,
-                       IndexWriter& index_writer, const std::unordered_set<std::string>& stopwords) {
+// Returns why the indexing could not complete, or an empty string if it did.
+std::string perform_indexing(int book_id, ControlLog& indexed, MetadataStore& metadata, InvertedIndex& index,
+                              IndexWriter& index_writer, const std::unordered_set<std::string>& stopwords) {
     const auto stored = metadata.find_by_id(book_id);
     if (!stored) {
-        return;  // no metadata row: nothing to index yet (should not normally happen)
+        return "no metadata row for it";  // should not normally happen: download stores it before marking
     }
 
     const std::string body = read_text_file(stored->body_path);
@@ -40,28 +45,29 @@ void perform_indexing(int book_id, ControlLog& indexed, MetadataStore& metadata,
     index_writer.write(index);  // rewrites the whole structure, see DEVLOG
 
     indexed.mark(book_id);  // only now: the index has actually been persisted
+    return {};
 }
 
 }  // namespace
 
-ControlDecision run_pipeline_step(const std::vector<int>& candidate_ids, ControlLog& downloaded, ControlLog& indexed,
-                                   BookSource& source, Datalake& datalake, MetadataStore& metadata,
-                                   InvertedIndex& index, IndexWriter& index_writer,
-                                   const std::unordered_set<std::string>& stopwords) {
+StepResult run_pipeline_step(const std::vector<int>& candidate_ids, ControlLog& downloaded, ControlLog& indexed,
+                              BookSource& source, Datalake& datalake, MetadataStore& metadata, InvertedIndex& index,
+                              IndexWriter& index_writer, const std::unordered_set<std::string>& stopwords) {
     const ControlDecision decision = next_control_action(candidate_ids, downloaded, indexed);
 
+    std::string failure;
     switch (decision.action) {
         case ControlAction::DownloadBook:
-            perform_download(decision.book_id, downloaded, source, datalake, metadata);
+            failure = perform_download(decision.book_id, downloaded, source, datalake, metadata);
             break;
         case ControlAction::IndexBook:
-            perform_indexing(decision.book_id, indexed, metadata, index, index_writer, stopwords);
+            failure = perform_indexing(decision.book_id, indexed, metadata, index, index_writer, stopwords);
             break;
         case ControlAction::Nothing:
             break;
     }
 
-    return decision;
+    return StepResult{decision, failure.empty(), failure};
 }
 
 }  // namespace stage1

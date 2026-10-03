@@ -1,5 +1,7 @@
 #include "stage1/benchmark/sample_books.hpp"
 
+#include <algorithm>
+
 #include "stage1/util/file_io.hpp"
 
 namespace stage1 {
@@ -19,6 +21,10 @@ std::vector<SampleBook> load_sample_books(const std::vector<int>& candidate_ids,
         // happen (the pipeline always stores metadata before marking), so
         // silently skipping it here mirrors main.cpp's own index rebuild.
     }
+    // SPEC section 10.1: benchmarks take the books in ascending id order, so
+    // that a size N means "the N lowest ids" in every language.
+    std::sort(books.begin(), books.end(),
+              [](const SampleBook& a, const SampleBook& b) { return a.book_id < b.book_id; });
     return books;
 }
 

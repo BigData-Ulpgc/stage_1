@@ -3,11 +3,15 @@
 #include <bsoncxx/builder/basic/array.hpp>
 #include <bsoncxx/builder/basic/document.hpp>
 #include <bsoncxx/builder/basic/kvp.hpp>
+#include <bsoncxx/types.hpp>
+#include <mongocxx/bulk_write.hpp>
 #include <mongocxx/client.hpp>
 #include <mongocxx/exception/exception.hpp>
 #include <mongocxx/instance.hpp>
+#include <mongocxx/model/update_one.hpp>
+#include <mongocxx/options/bulk_write.hpp>
 #include <mongocxx/options/index.hpp>
-#include <mongocxx/options/update.hpp>
+#include <mongocxx/pipeline.hpp>
 #include <mongocxx/uri.hpp>
 
 #include <memory>
@@ -41,12 +45,15 @@ bool mongo_is_reachable(const std::string& uri) {
     }
 }
 
-MongoIndexWriter::MongoIndexWriter(std::string uri) : uri_(std::move(uri)) { ensure_mongo_driver_initialized(); }
+MongoIndexWriter::MongoIndexWriter(std::string uri, std::string database, std::string collection)
+    : uri_(std::move(uri)), database_(std::move(database)), collection_(std::move(collection)) {
+    ensure_mongo_driver_initialized();
+}
 
 void MongoIndexWriter::write(const InvertedIndex& index) {
     try {
         mongocxx::client client{mongocxx::uri{uri_}};
-        mongocxx::collection collection = client["search_engine"]["inverted_index"];
+        mongocxx::collection collection = client[database_][collection_];
 
         // write() replaces the collection's contents wholesale, the same way
         // MonolithicIndexWriter overwrites its file and HierarchicalIndexWriter
@@ -77,39 +84,62 @@ void MongoIndexWriter::write(const InvertedIndex& index) {
 }
 
 void MongoIndexWriter::update_terms(const InvertedIndex& index, const std::vector<std::string>& changed_terms) {
+    if (changed_terms.empty()) {
+        return;  // the driver refuses a bulk write with no operations
+    }
     try {
         mongocxx::client client{mongocxx::uri{uri_}};
-        mongocxx::collection collection = client["search_engine"]["inverted_index"];
+        mongocxx::collection collection = client[database_][collection_];
 
-        mongocxx::options::update upsert;
-        upsert.upsert(true);
+        // Every term goes in ONE unordered bulk write, as the Java module's
+        // flush() does: the driver sends them in a few large messages instead
+        // of one round trip per term (about 7,900 for a real book). Unordered
+        // lets the server apply them in any order; they touch different
+        // documents, so the result is the same.
+        mongocxx::options::bulk_write unordered;
+        unordered.ordered(false);
+        mongocxx::bulk_write bulk = collection.create_bulk_write(unordered);
         for (const auto& term : changed_terms) {
             bsoncxx::builder::basic::array postings_array;
             for (int book_id : index.postings(term)) {
                 postings_array.append(book_id);
             }
-            // $set, not a full document replace: touches only this one
-            // document (term)'s "postings" field, same spirit as
-            // HierarchicalIndexWriter::update_terms touching only that
-            // term's file. upsert(true) covers a term that is brand new.
-            collection.update_one(make_document(kvp("term", term)),
-                                   make_document(kvp("$set", make_document(kvp("postings", postings_array.extract())))),
-                                   upsert);
+            // $set of the term's current postings, not a full document
+            // replace: touches only this term's document, as
+            // HierarchicalIndexWriter::update_terms touches only its file.
+            // upsert covers a term that is brand new.
+            mongocxx::model::update_one update{
+                make_document(kvp("term", term)),
+                make_document(kvp("$set", make_document(kvp("postings", postings_array.extract()))))};
+            update.upsert(true);
+            bulk.append(update);
         }
+        bulk.execute();
     } catch (const mongocxx::exception& error) {
         throw std::runtime_error(std::string("failed to update index in MongoDB: ") + error.what());
     }
 }
 
-std::function<std::vector<int>(const std::string&)> mongo_postings_fetcher(const std::string& uri) {
+void MongoIndexWriter::clear() {
+    try {
+        mongocxx::client client{mongocxx::uri{uri_}};
+        client[database_][collection_].drop();
+    } catch (const mongocxx::exception& error) {
+        throw std::runtime_error(std::string("failed to clear the MongoDB index: ") + error.what());
+    }
+}
+
+std::function<std::vector<int>(const std::string&)> mongo_postings_fetcher(const std::string& uri,
+                                                                           const std::string& database,
+                                                                           const std::string& collection) {
     ensure_mongo_driver_initialized();
     // Held by shared_ptr, not by value: mongocxx::client is move-only, and a
     // std::function's target must be copyable.
     auto client = std::make_shared<mongocxx::client>(mongocxx::uri{uri});
 
-    return [client](const std::string& term) -> std::vector<int> {
-        auto collection = (*client)["search_engine"]["inverted_index"];
-        const auto doc = collection.find_one(make_document(kvp("term", term)));
+    return [client, database, collection](const std::string& term) -> std::vector<int> {
+        auto documents = (*client)[database][collection];
+        const auto doc = documents.find_one(make_document(kvp("term", term)));
         if (!doc) {
             return {};
         }
@@ -119,6 +149,52 @@ std::function<std::vector<int>(const std::string&)> mongo_postings_fetcher(const
         }
         return postings;
     };
+}
+
+namespace {
+
+// A numeric BSON field as a plain integer, whatever numeric type the server
+// chose for it (int32, int64 or double); 0 if absent or not a number.
+long long as_number(const bsoncxx::document::view& document, const char* field) {
+    const auto element = document[field];
+    switch (element.type()) {
+        case bsoncxx::type::k_int32:
+            return element.get_int32().value;
+        case bsoncxx::type::k_int64:
+            return element.get_int64().value;
+        case bsoncxx::type::k_double:
+            return static_cast<long long>(element.get_double().value);
+        default:
+            return 0;
+    }
+}
+
+}  // namespace
+
+long long mongo_disk_usage_bytes(const std::string& uri, const std::string& database, const std::string& collection) {
+    ensure_mongo_driver_initialized();
+    try {
+        mongocxx::client client{mongocxx::uri{uri}};
+        auto db = client[database];
+        if (!db.has_collection(collection)) {
+            return 0;
+        }
+        try {
+            client["admin"].run_command(make_document(kvp("fsync", 1)));
+        } catch (const mongocxx::exception&) {
+            // No permission for fsync (e.g. a managed server): the figure may lag behind.
+        }
+        mongocxx::pipeline stats;
+        stats.append_stage(make_document(kvp("$collStats", make_document(kvp("storageStats", make_document())))));
+        auto cursor = db[collection].aggregate(stats);
+        for (const auto& result : cursor) {
+            const auto storage = result["storageStats"].get_document().value;
+            return as_number(storage, "storageSize") + as_number(storage, "totalIndexSize");
+        }
+        return 0;
+    } catch (const mongocxx::exception& error) {
+        throw std::runtime_error(std::string("failed to read MongoDB disk usage: ") + error.what());
+    }
 }
 
 }  // namespace stage1

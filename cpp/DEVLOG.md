@@ -2268,3 +2268,988 @@ guide shows. The resume scenario was already verified for real in Entry 44.
 - **Commands safe to paste into zsh.** No inline `#` comments (interactive zsh may pass them on as
   arguments), and single quotes for literal queries (`!"` inside double quotes leaves zsh at a
   `dquote>` prompt). Both pitfalls actually happened while testing the CLI by hand.
+
+## Entry 47 – The group's benchmark dataset agreement, written into the SPEC (2026-10-03)
+
+### What was done
+The group agreed on how every language runs the benchmarks: 200 real books, plus synthetic metadata.
+Until now this was only implemented in Java and described in Java's report. It is now the shared
+contract:
+- `shared/SPEC.md`: new section 10, appended without changing any existing line.
+  - **10.1, real books.** Datalake experiments run at N=200 and index experiments at N=50, 100 and
+    200, on the 200 ids of `shared/book_ids.txt`, read from a `book` datalake the pipeline already
+    filled. **A size N means the N books with the lowest ids** (ascending id order, as in Java's
+    `BenchmarkBooks.fromDatalake`), not the first N lines of `book_ids.txt`. The section also gives
+    reference counts every implementation must reproduce exactly: 58,834 terms / 360,970 postings at
+    N=50, 78,820 / 759,087 at N=100, and 129,356 / 1,581,064 at N=200, taken from Java's
+    `index_disk`.
+  - **10.2, synthetic metadata.** Java's deterministic generator (`"Title " + i/2`,
+    `"Author " + i/10`, ...) at N=1,000, 10,000 and 100,000, as `sqlite` and `sqlite_no_index`.
+  - **10.3, other synthetic data.** Synthetic books are not compared across languages.
+  - **10.4, results folders.** `benchmarks/results/real/` and `benchmarks/results/synthetic/`.
+- Root `.gitignore`: the CSV exceptions became `!cpp/benchmarks/results/**/*.csv` and
+  `!java/stage1/benchmarks/results/**/*.csv`. Every `*.csv` is ignored globally, and the old
+  `results/*.csv` exceptions did not reach the new `real/` and `synthetic/` subfolders. Checked with
+  `git check-ignore` before and after: those subfolders are now trackable, while `benchmarks/work/`,
+  `data/` and any other CSV stay ignored.
+
+### Why
+- **The agreement has to live in the contract, not in one module's report.** Python and C++ must
+  follow it the same way, and before this nobody could check their implementation against a written
+  rule.
+- **Prefixes by ascending id, as Java already does.** With N=50 or N=100, "lowest ids" and "first
+  lines of `book_ids.txt`" select different books, so the two rules cannot be mixed. Following
+  Java's rule keeps its existing `results/real/` comparable instead of forcing a re-run, and it
+  makes every N a prefix of the next.
+- **Reference counts as a contract test.** The tokenizer is identical by contract (section 5), so
+  the same books must give the same term and posting counts in every language. Comparing two
+  integers catches a wrong book set or a tokenizer drift before any time is compared.
+- **Deterministic metadata generator; synthetic books excluded from comparisons.** Generating the
+  same rows with integer division needs no random numbers. Random generators differ across languages
+  even with the same seed (C++ `mt19937`, Python and Java all gave different sequences for seed 42),
+  so cross-language synthetic *books* would silently be different datasets.
+
+### Consequences for this module (not done yet)
+- `load_sample_books` returns books in `book_ids.txt` order. The index benchmarks must sort by id
+  and take prefixes of 50, 100 and 200.
+- Download the 200 books (`pipeline 400`) and check the reference counts above.
+- `metadata_insert`/`metadata_query`: switch from real books to the 10.2 generator, and add
+  `sqlite_no_index`.
+- Write the results into `results/real/` and `results/synthetic/`.
+- The current `results/*.csv` (15 books) predate the agreement.
+
+## Entry 48 – `sample_dataset/`: the group's 15 original books, raw and split (2026-10-03)
+
+### What was done
+Created the repository-level `sample_dataset/` that the assignment requires ("Provide a sample
+dataset so instructors can quickly test the pipeline"). The group's root README already promised it,
+and SPEC section 9 referenced it, but it did not exist.
+- `raw/pg<ID>.txt`: the 15 original books (the first 15 lines of `shared/book_ids.txt`),
+  downloaded unmodified from the SPEC section 2 URL. 7.7 MB, CRLF line endings.
+- `book/<ID>/header.txt` and `body.txt`: the same books after the SPEC section 2 split, in the
+  SPEC section 3 `book` layout. 6.3 MB.
+- `book_ids.txt` (the 15 ids), `SHA256SUMS` (45 files), and `.gitattributes`
+  (`raw/** -text`, `book/** -text`).
+- `README.md`: contents, the three ways to use it, reference values, how to check a copy and how
+  to rebuild `raw/`, and the license.
+
+### Verification
+- An independent Python script split every raw file following SPEC section 2. All 15
+  headers and bodies were byte-identical to what this module's pipeline had stored when it
+  downloaded the same books (Entry 44 and the 200-book run). That stored output is what `book/`
+  contains.
+- The sample's counts are 30,396 distinct terms and 89,727 postings, the same as the C++ pipeline
+  and its `index_disk` benchmark give for these 15 books.
+- `shasum -a 256 -c SHA256SUMS`: 45/45 OK. `git check-attr`: the `text` attribute is unset for
+  `raw/` and `book/`.
+
+### Why
+- **The 15 original books.** They are small enough to live in git (14 MB with both forms, against
+  129 MB for the 200), and their counts were already known and checked. The pipeline processes them
+  in about 18 seconds.
+- **Raw files, unmodified.** An offline run that reads them instead of the URL exercises the whole
+  pipeline, including the header/body split. That split is the step most likely to break on a new
+  book, and a pre-split sample would never test it. Keeping the files intact also keeps the Project
+  Gutenberg License they carry.
+- **Also the split books, in `book` layout.**
+  - Java's benchmarks already accept "sample_dataset/ in book structure" as input, so `book/` is
+    usable today without new code.
+  - It is the *expected output* of SPEC section 2: any implementation can check its own split
+    byte for byte, a reference as strong as the term/posting counts.
+  - It matches the root README's description ("libros procesados").
+- **Checksums and `-text`.** Gutenberg revises files over time, and git may convert line endings on
+  some platforms (Windows with `core.autocrlf`). Either would silently change the dataset. The
+  checksums detect it, and `-text` prevents the conversion.
+
+### Not done yet
+- No implementation has an offline mode reading `raw/` yet. In this module it would be a new
+  `BookSource` implementation next to `GutenbergSource`, the same seam the tests already use for
+  their fake source.
+- SPEC section 10.1 still says `sample_dataset/` "does not exist yet". That sentence belongs to the
+  shared contract, so it is left for an explicit decision.
+
+## Entry 49 – Offline pipeline mode: `pipeline <N> --offline` reads `sample_dataset/raw/` (2026-10-03)
+
+### What was done
+- `include/stage1/crawler/local_file_source.hpp` + `src/crawler/local_file_source.cpp`:
+  `LocalFileSource`, a second `BookSource` next to `GutenbergSource`. `fetch(id)` reads
+  `<dir>/pg<ID>.txt` in binary mode and returns its bytes untouched: the `\r\n` normalization stays
+  in `split_book` (SPEC section 2), exactly as for a download. A missing file is a failed fetch, not
+  an exception, so the pipeline leaves the book unmarked as it does after a failed download.
+- `pipeline <N> --offline`:
+  - `main.cpp` accepts an optional `--offline`; any other fourth argument prints usage and exits 1.
+  - `run_pipeline_command(steps, offline)` takes the ids from `sample_dataset/book_ids.txt` instead
+    of `shared/book_ids.txt`, and uses `LocalFileSource(sample_dataset/raw)` instead of
+    `GutenbergSource`.
+  - New compile definition `STAGE1_SAMPLE_DIR`, the same pattern as the other directory macros.
+  - Everything after the source is selected is untouched. Both sources are built, and a
+    `BookSource&` refers to the chosen one, so nothing downstream knows which mode it runs in.
+- 3 tests:
+  - the bytes come back unmodified (CRLF and UTF-8 included);
+  - a missing file is a failure that names the file;
+  - for all 15 real sample books, `LocalFileSource` + `split_book` reproduce `sample_dataset/book/`
+    byte for byte. That test ties the sample and the splitter together on every test run.
+  
+  Suite total: 175.
+- `cpp/README.md`:
+  - the new mode is documented;
+  - the quick start and the resume test now run offline (seconds, no network);
+  - the full online dataset is described as `pipeline 400`, about 10 minutes;
+  - figures left stale by the move to 200 books are fixed (the quick start still showed
+    `dataset: 15`, and `pipeline 40` no longer reaches the end).
+- `sample_dataset/README.md`: it no longer says that no implementation has an offline mode.
+
+### Verification (real run, network blocked)
+The real data was moved aside, and every HTTP(S) request was sent to a closed local port
+(`https_proxy=http://127.0.0.1:9`).
+- **Control:** the normal mode fetched nothing (`downloaded: 0`), so the network really was blocked.
+- **Offline:** 15 books fetched and indexed in under a second (about 18 s when downloading).
+  - `data/datalake/book/` was byte-identical to `sample_dataset/book/` (`diff -r` empty).
+  - The index gave 30,396 terms and 89,727 postings, and `search whale island` returned the usual 3
+    books.
+- Every command the updated README shows was run, and its output matches.
+- The real 200-book `data/` was restored afterwards.
+
+### Why
+- **A sample nobody can feed to the program is not a sample.** The assignment wants instructors to
+  "quickly test the pipeline". Without a way to read `sample_dataset/`, the program could only
+  download from the internet. The offline mode is what makes the sample usable, it gives the same
+  result on every machine, and it removes the dependency on Gutenberg being reachable.
+- **A new `BookSource`, not a new pipeline.** `BookSource` was introduced so the transport could be
+  swapped, and the tests already relied on that. Adding one class and choosing it in the CLI keeps
+  the split, datalake, metadata, index and control code identical in both modes. That is why the
+  offline output can serve as evidence for the online one.
+- **Sample ids, not the 200.** Offline, only the 15 sample books exist. Using `shared/book_ids.txt`
+  would leave 185 ids failing on every step.
+- **Same `data/` folder in both modes.** The sample files are byte-identical to what Gutenberg served
+  when the sample was made. An offline run followed by an online one therefore gives the same
+  `data/` as an online run alone: the online run just skips the 15 books already done.
+
+### Two existing bugs found along the way (not fixed yet)
+- **Misleading `downloaded book X` message.** `run_pipeline_step` returns the *decision* it took, not
+  its outcome, and the CLI prints the decision. With the network blocked, `pipeline 3` printed
+  `downloaded book 1342` three times while `status` reported 0 downloaded. No data is affected, since
+  the book is correctly left unmarked and retried, but the message is false.
+- **`HierarchicalIndexWriter::write()` never removes term files that are no longer in the index.** It
+  only writes the current index's terms, which breaks its own contract (Entry 18: "make the structure
+  match this index, not append"); the monolithic and Mongo writers do follow it. The pipeline's index
+  only grows, so nothing is wrong there. But `benchmarks/work/` is reused between runs, and the
+  benchmarks do not clear it first. Writing the N=50 index over the N=200 one would leave 129,356 stale
+  files: `index_disk` would count files and bytes that are not in the index, and hierarchical
+  `index_query` would return books outside the 50. It must be fixed before the id-ordered prefixes
+  (step 3 of the benchmark adaptation).
+- Seen while looking into it: the N=200 hierarchical index holds **7,251,967 bytes of data**, exactly
+  Java's `bytes` value, but occupies **~530 MB of disk blocks** (Java: 530,001,920 bytes allocated).
+  Each of its 129,356 small files takes at least one 4,096-byte block, about 73 times the data size.
+
+## Entry 50 – `HierarchicalIndexWriter::write()` now replaces its folder, and `index_build` empties it untimed (2026-10-03)
+
+### What was done
+- **Test first.** `HierarchicalIndexWriter.WritingAgainReplacesThePreviousContents` (the same name as
+  the existing Mongo test, since it checks the same contract) writes an index with `car` and `boat`,
+  then one with only `car`. Before the fix it failed: `B/boat.txt` was still there (Entry 49's
+  finding).
+- **The fix.** `write()` calls `std::filesystem::remove_all(root_)` before writing, so the folder ends
+  up holding exactly the given index. The header now states that the root folder belongs to the
+  writer. `update_terms()` is unchanged: it only adds or rewrites the given terms, which is all an
+  update with new books ever needs.
+- **`index_build`.** `run_and_record` takes a `reset` that `measure_elapsed_ms` runs before each
+  repetition, untimed. For the hierarchical structure it empties the folder; for the other two it does
+  nothing. No other benchmark needed a change: `index_update` already writes its base index in its
+  untimed setup, and `index_disk`, `index_memory` and `index_query` time no `write()`.
+- Suite total: 176.
+
+### Measured on the 200 real books
+- Deleting the 129,356 files of the N=200 hierarchical index takes **22.5 s** on this machine (macOS,
+  APFS).
+- `index_build` at N=200, mean of 5 runs: monolithic **2,567 ms**, hierarchical **23,566 ms**, with
+  the deletion outside the measurement. Had it been timed, every hierarchical repetition would have
+  measured about twice the building cost.
+- Java's report gives 1.69 s and 11.34 s for the same experiment, on Linux with an NVMe SSD. The ratio
+  between structures is similar (hierarchical about 7-9 times monolithic), but the absolute values are
+  not comparable across machines. Creating and deleting small files is a filesystem cost, which is one
+  more argument for running every language on the same machine (still an open point with the group).
+
+### Why
+- **Correctness of the contract, not just of the benchmarks.** `write()` means "make the structure
+  match this index" (Entry 18). Monolithic follows it by rewriting its file, and Mongo by
+  `delete_many` before inserting. Hierarchical silently appended instead. In the pipeline this was
+  harmless, because the index only grows. In the benchmarks, the N=50 index written over the N=200
+  one would have kept 129,356 files: `index_disk` would have counted files that are not in the index,
+  and hierarchical `index_query` would have returned books outside the 50.
+- **Fix it in the writer, and keep the cleanup out of the timing.** Clearing only in the benchmarks
+  would have hidden the bug instead of fixing it. Clearing only in the writer would have pushed 22 s of
+  deletion into every timed repetition. Doing both keeps the contract correct and the measurement
+  honest. "Setup outside the measurement" is the rule the Java module follows too.
+- **A known risk.** The local `backup/cpp-completo` branch (an earlier C++ attempt, never merged)
+  records `std::filesystem::remove_all` failing with "Directory not empty" on a ~460k-file
+  hierarchical index during a 500-book run. Nothing like it happened here at 129k files. If it ever
+  does, `write()` throws with that message, and that branch's mitigation (retrying the removal) is
+  the fix to bring in.
+
+## Entry 51 – The pipeline reports what a step actually did, and stops at the first failure (2026-10-03)
+
+### What was done
+- `include/stage1/control/pipeline.hpp`: `run_pipeline_step` now returns a `StepResult`, made of the
+  `ControlDecision` it acted on, `completed`, and `failure` (why it did not complete). Java's
+  `StepResult` plays the same role. It used to return the bare decision.
+- `src/control/pipeline.cpp`: `perform_download` and `perform_indexing` return the reason they could
+  not finish, or an empty string when they did. The possible reasons are the fetch's own error (for
+  example "Couldn't connect to server" or "HTTP 404"), "no START/END markers, book discarded (SPEC
+  section 2)", and "no metadata row for it". The marking rules are unchanged: a book is marked only
+  after its work fully succeeded.
+- `src/cli_commands.cpp`: `describe` prints `could not download/index book X: <reason>` (to stderr) for
+  an incomplete step, instead of `downloaded book X`. The loop **stops at the first failed step** with
+  exit code 1, after printing `stopping; run pipeline again to retry`.
+- `tests/control/pipeline_test.cpp`: the 5 existing tests now also check `completed` and `failure`,
+  and a new test covers indexing a book that has no metadata row. Suite total: 177.
+- `cpp/README.md`: one row in the edge-case table for an unreachable Project Gutenberg.
+
+### Verification (real run)
+The 200-book `data/` was moved aside and HTTP(S) was sent to a closed local port, the same scenario as
+Entry 49.
+- Before this change, `pipeline 3` printed `downloaded book 1342` three times while nothing was
+  downloaded.
+- It now prints `could not download book 1342: Couldn't connect to server`, then `stopping; run
+  pipeline again to retry`, and exits 1. `status` still says 0 downloaded.
+- `pipeline 30 --offline` is unaffected (15/15, exit 0). The real data was restored afterwards.
+
+### Why
+- **The message must describe the outcome, not the intention.** A pipeline log is what someone reads
+  to know what happened. "downloaded book 1342" for a download that failed is worse than no message.
+  The control layer itself was always right, since the book was never marked; only the report was
+  wrong.
+- **Stopping instead of looping.** A failed book stays unmarked, and `next_control_action` always
+  picks the first unmarked candidate (indexing first). The very next step would therefore choose the
+  same book and, with the network still down, fail the same way: `pipeline 400` would print 400
+  identical failures. Stopping prints the failure once, and the non-zero exit code lets a script tell
+  a run that made no progress from one that finished.
+
+### Known limitation, not addressed here
+A book that can **never** succeed, such as one served without START/END markers, is discarded without
+being marked, exactly as SPEC section 2 requires. It is then chosen again on every run, so every run
+now stops at it, and the books after it in `book_ids.txt` are never reached. The old loop had the same
+problem, only hidden behind misleading messages. None of the 200 current books is affected, since all
+were checked to have both markers. If one ever is, the fix belongs in the shared contract (for example
+a "discarded" control file), not in one implementation.
+
+## Entry 52 – Benchmark adaptation, step 2: `load_sample_books` returns books in ascending id order (2026-10-03)
+
+### What was done
+- `src/benchmark/sample_books.cpp`: after loading, the books are sorted by `book_id`. The header now
+  states the order and points to SPEC section 10.1.
+- `tests/benchmark/sample_books_test.cpp`: `PreservesCandidateOrder` asserted the old behaviour
+  (84, 5, 1342 kept in candidate order). It was replaced on purpose by
+  `ReturnsBooksInAscendingIdOrderWhateverTheCandidateOrder` (5, 84, 1342, each body still matching its
+  id), which failed before the change. Suite total: 177.
+
+### Verification
+An independent script computed the term and posting counts of the real books two ways: the N lowest
+ids, and the first N lines of `book_ids.txt`.
+
+| N | Lowest ids | First N lines of `book_ids.txt` | Java (SPEC 10.1) |
+|---|---|---|---|
+| 50 | 58,834 / 360,970 | 57,780 / 362,160 | 58,834 / 360,970 |
+| 100 | 78,820 / 759,087 | 98,858 / 803,819 | 78,820 / 759,087 |
+| 200 | 129,356 / 1,581,064 | 129,356 / 1,581,064 | 129,356 / 1,581,064 |
+
+"Lowest ids" reproduces Java exactly at every size. File order would have measured different books at
+N=50 and N=100, which is the risk the agreement was written to prevent.
+
+### Why
+- **The order is part of the dataset definition.** With the same 200 books, "the first 50" is only
+  well defined once the order is fixed, and the group fixed it as ascending id (SPEC 10.1). Sorting
+  inside `load_sample_books` means every benchmark receives the same order, so the prefixes of the
+  next step can simply take the first N books.
+- **Sorting at load time, not in each benchmark.** All 12 benchmarks receive their books from this one
+  function. Sorting here is one change instead of twelve, and no benchmark can forget it.
+
+## Entry 53 – Benchmark adaptation, step 3a: index experiments at N=50, 100 and 200 (2026-10-03)
+
+### What was done
+- `src/cli_commands.cpp`:
+  - `index_build`, `index_query`, `index_update` and `index_disk` now run once per size in
+    `kIndexSizes = {50, 100, 200}` (SPEC section 10.1). Each run uses the first N books of
+    `load_sample_books`, which are the N lowest ids since Entry 52.
+  - All sizes go into the same CSV, distinguished by `dataset_size`.
+  - A size larger than the number of downloaded books is skipped with a message. If none fits, the
+    command fails and asks for `pipeline 400`.
+  - The per-size dispatch lives in `run_index_experiment`.
+- `index_query` no longer runs a whole `benchmark_index_build` just to create its files. That meant 7
+  timed repetitions of writing (and, since Entry 50, deleting) up to 129,356 files, all for nothing.
+  The new `prepare_index_query(books, stopwords, index_dir)` builds the index once and writes it,
+  untimed, to the paths `benchmark_index_query` reads, plus Mongo if reachable. Both functions take
+  those paths from one place (`monolithic_file`, `hierarchical_root`).
+- `index_memory` keeps a single size for now, because its peak-RSS measure needs one process per size
+  (step 3b).
+- 1 new test, `PrepareWritesExactlyWhatTheQueriesRead`. Suite total: 178.
+
+### Verification (real data, 200 books)
+- `index_disk` gives exactly the SPEC 10.1 reference values at every size:
+  - N=50: 58,834 terms and 360,970 postings;
+  - N=100: 78,820 and 759,087;
+  - N=200: 129,356 and 1,581,064.
+- The hierarchical file count equals the term count at every size. N=50 was written over the 129,356
+  files left by an earlier N=200 run, which is exactly the case Entry 50 fixed. Before that fix,
+  N=50 would have counted 129,356 files.
+- `index_query` at all three sizes took 78 s of wall time. Mean of 5 runs, loading the structure plus
+  answering the 10 queries:
+
+| N | monolithic | hierarchical |
+|---|---|---|
+| 50 | 71.1 ms | 1.3 ms |
+| 100 | 86.6 ms | 0.4 ms |
+| 200 | 205.3 ms | 0.9 ms |
+
+### A comparability problem found, to settle with the group
+These `index_query` numbers rank the structures the opposite way from Java's: monolithic 4.5 µs and
+hierarchical 48.3 µs `per_query` at N=200. The two modules measure different things:
+- **This module** times opening the structure *and* answering the 10 queries, cold, in every
+  repetition (Entry 28's design). Monolithic must parse its whole 8.9 MB JSON each time, while
+  hierarchical opens only the ~16 files the query terms need.
+- **Java** opens the index outside the measurement and times only the queries.
+
+Both are legitimate questions ("first query on a cold structure" against "steady-state query
+cost"), but their numbers cannot be put side by side. SPEC section 9 fixes the CSV columns, not what
+each experiment's metrics mean. Fixing the metric of each experiment is the open point already raised
+with the group, and it has to be settled before the official run. Nothing was changed unilaterally
+here.
+
+## Entry 54 – Benchmark adaptation, step 3b: `index_memory` per size, measured with allocator in-use bytes instead of peak RSS (2026-10-03)
+
+### What was done
+- `index_memory` now runs at N=50, 100 and 200 like the other index experiments (`run_index_experiment`
+  in `cli_commands.cpp`), all in one process.
+- Its measure changed. It used to be getrusage's `ru_maxrss` (Entry 41), the peak resident memory of
+  the whole process. It is now **the bytes the allocator reports as in use**, read right before and
+  right after each step while what it built is still alive:
+  - macOS: `malloc_zone_statistics(nullptr, ...)`, all zones;
+  - Linux: glibc's `mallinfo2()`, `uordblks + hblkhd`.
+
+  Metric `heap_delta`, unit bytes, structures `in_memory_index` and `monolithic` as before. This is
+  the C++ counterpart of the heap usage the Java module reads from its JVM.
+- Test updated: the metric is `heap_delta`, and both values must now be strictly positive, which the
+  old peak measure could not guarantee. Suite total: 178.
+
+### How the measure was chosen
+1. **Peak RSS cannot compare sizes within one process.** A peak never goes down, so after N=50, the
+   N=100 measurement would only show how far it exceeds N=50's peak.
+2. **First attempt, abandoned: one child process per measurement** (`fork`). A small probe showed
+   that on macOS a forked child's `ru_maxrss` starts at 0 MB, so isolation does work. The monolithic
+   load then grew with N (14.8 / 26.1 / 38.6 MB). But the in-memory index gave 38.6 / 48.6 / 89.3 MB in
+   one run and **43.0 / 29.2 / 22.8 MB** in the next, with the same code. RSS also moves with page
+   reuse and with macOS memory compression of idle pages, such as the 200 loaded books. A peak of
+   resident pages is not a stable measure of what a data structure holds.
+3. **In-use bytes, verified before adopting them.** A probe program linked against `stage1_core` built
+   the index at N = 50, 100, 200, 200, 100, 50, 200, all in one process. It gave 16.2 / 30.1 / 60.5 MB
+   every time, whatever the order. The fork code (and a CSV reader written for it) was uncommitted,
+   so it was discarded rather than kept as unused code.
+
+### Results (200 real books; two runs identical to 0.1 MB)
+| N | in-memory index (C++) | monolithic loaded (C++) | Java monolithic `heap_after_open` |
+|---|---|---|---|
+| 50 | 16.2 MB | 14.4 MB | 18.5 MB |
+| 100 | 30.2 MB | 25.6 MB | 48.3 MB |
+| 200 | 60.5 MB | 50.0 MB | 100.3 MB |
+
+Both C++ structures grow almost linearly with N. The C++ figures are about half of Java's at N=200,
+which is plausible: every Java object carries a header, and Java's posting lists box their integers.
+The metrics are not identical, though. Java reports the whole heap after opening; this module
+reports what the structure itself adds. That belongs to the open "metrics per experiment" discussion
+with the group (Entry 53).
+
+### Caveats
+- **The Linux branch (`mallinfo2`, glibc 2.33 or later) compiles only on Linux and was not run on
+  this machine.** `mallinfo2` reports the main arena, which is all this single-threaded benchmark
+  uses. Other platforms fail to compile with an explicit `#error`, instead of silently measuring
+  nothing.
+- The figure counts what the allocator handed out, including its own per-allocation overhead. It
+  does not count pages the operating system keeps around afterwards. That is exactly "what this
+  structure costs in memory", but it is not the whole process's footprint.
+
+## Entry 55 – `index_query` and `index_memory` now measure exactly what the Java module measures (2026-10-03)
+
+### What was decided
+Entry 53 found that this module's `index_query` and Java's measured different things, and gave
+opposite rankings. The user decided that both experiments must measure what Java measures, so that
+the comparison between languages is as fair as possible. Java's `IndexBenchmark` was read and its
+definitions were ported as they are.
+
+### What was done
+**`index_query`**, following Java's `IndexBenchmark.query`:
+- **Untimed:**
+  - build the index of the N books once, and write monolithic, hierarchical, and Mongo if
+    reachable;
+  - **open each structure once**, the way a running search service would (monolithic parses its
+    JSON here, outside the timing);
+  - **verify** that every query gets the same answer as from the in-memory index, and throw
+    otherwise (Java's `verify`).
+- **Timed** (2 warmups + 5 runs): `kDefaultQueryRounds = 100` passes over the 10 queries of
+  `shared/queries.txt`, each one tokenized and answered with `query_and`, as Java's `SearchService`
+  does.
+- **Rows:** 5 `elapsed` (ms, the whole batch of 1,000 queries), then 5 `per_query`
+  (µs = elapsed × 1000 / 1000). Same metrics, units and order as Java.
+- **Sanity check:** every repetition's answers are added up. If repetitions disagree, it throws,
+  and the total also keeps any query from being optimized away.
+- `prepare_index_query` (Entry 53) is gone: writing the structures is now part of the experiment's own
+  untimed setup.
+
+**`index_memory`**, following Java's `IndexBenchmark.memory`. For each structure (monolithic,
+hierarchical, and Mongo if reachable), it reports Java's two metrics:
+- `heap_after_build`: memory in use after building the index of the N books and writing it through
+  that structure's writer, with the index still alive.
+- `heap_after_open`: memory in use after opening the written structure for reading. The reader is a
+  postings fetcher (`index_readers.hpp`): monolithic parses the whole JSON, hierarchical keeps only
+  its folder path, and Mongo keeps only its client.
+- The books are tokenized to their distinct terms **before** anything is measured (Java's
+  `tokenizeAll`). The measure is still the allocator's in-use bytes (Entry 54), the counterpart of
+  Java's heap used after GC.
+
+Tests rewritten for both experiments: row shape, the `per_query` formula, Mongo rows only when
+reachable, the files that `index_query` writes, and the relation between the four memory figures.
+Suite total: 178.
+
+### Results on the 200 real books, side by side with Java's `results/real/`
+`index_query`, `per_query` in µs (median of 5):
+
+| | N=50 | N=100 | N=200 |
+|---|---|---|---|
+| monolithic | C++ 2.3 · Java 3.7 | C++ 1.4 · Java 2.0 | C++ 2.6 · Java 4.5 |
+| hierarchical | C++ 41.4 · Java 26.0 | C++ 41.2 · Java 31.7 | C++ 61.8 · Java 48.3 |
+
+`index_memory`, in MB:
+
+| | N=50 | N=100 | N=200 |
+|---|---|---|---|
+| `heap_after_build` monolithic | C++ 16.2 · Java 21.5 | C++ 30.2 · Java 45.0 | C++ 60.5 · Java 97.2 |
+| `heap_after_build` hierarchical | C++ 16.2 · Java 0.5 | C++ 30.2 · Java 0.5 | C++ 60.5 · Java 2.1 |
+| `heap_after_open` monolithic | C++ 14.4 · Java 18.5 | C++ 25.6 · Java 48.3 | C++ 49.9 · Java 100.3 |
+| `heap_after_open` hierarchical | 0 · 0 | 0 · 0 | 0 · 0 |
+
+### Reading the results
+- **The ranking now agrees.** Once the structure is open, a monolithic query costs a few µs in both
+  languages: a lookup in a parsed map. A hierarchical query costs tens of µs, because every query
+  term opens and reads a file. Entry 53's inverted ranking came entirely from timing the JSON parse,
+  not from querying.
+- **C++ holds roughly half of Java's memory** for the same monolithic index. That is plausible: every
+  Java object carries a header, and Java's posting lists box their integers.
+- **One real architectural difference, measured rather than hidden.** Java's hierarchical and Mongo
+  backends write postings through as books are added and keep almost nothing resident (0.5 to
+  2.1 MB). This module builds every structure from one complete in-memory `InvertedIndex`
+  (Entries 17-18), so building the hierarchical structure costs as much memory as building the
+  monolithic one (60.5 MB at N=200). Once written, opening it costs nothing in either language. This
+  belongs in the report's design discussion: the C++ pipeline trades memory during building for a
+  single, simple index type shared by every writer.
+- **Still not identical:** the machines differ (this Mac with APFS against Java's Linux run with
+  NVMe). That may explain why hierarchical queries, dominated by file opens, are somewhat slower
+  here. It is the still-open point about running every language on one machine.
+
+## Entry 56 – Parity with Java, step A: `index_build`, `index_update` and `index_disk` under Java's conditions (2026-10-03)
+
+### What was done
+The user's goal is that every C++ benchmark runs under the same conditions as the Java module, at the
+code level (what is timed, the data, the sizes, the repetitions, the verification, the metrics). The
+machine is out of scope. Java's `IndexBenchmark` was read and its rules were ported.
+- **New `benchmark/index_benchmark_support`** (shared by all five index experiments), ported from
+  Java:
+  - `TokenizedBook` and `tokenize_all`: every book is tokenized once, to its distinct terms, before
+    anything is timed (Java's `tokenizeAll`);
+  - `build_index`;
+  - `verify_index`. A written structure must match the in-memory index built from the same books, on
+    the postings of every query term and of the first 20 sorted terms of the first and last book, and
+    on the answer of every query. A mismatch throws (Java's `verify`).
+- **`index_build`**:
+  - the tokenizer was **inside** the timed part, and no longer is;
+  - the structure's storage is emptied in the untimed reset;
+  - the written structure is verified after measuring;
+  - new `throughput` rows (books_per_s, with Java's 0.001 ms floor);
+  - rows are in Java's order: 5 `elapsed`, then 5 `throughput`.
+- **`index_update`**:
+  - the tokenizer is no longer timed;
+  - the *written* structure is now verified against all N books (before, only the in-memory index
+    was checked);
+  - rows are in Java's order (5 `elapsed`, then 5 `per_book`);
+  - its header comment, stale since Entry 40 ("a full write() per book"), now describes
+    `update_terms`.
+- **`index_disk`**:
+  - new `allocated_bytes`, with Java's own estimate: `allocated_bytes(root)` in `benchmark.hpp` rounds
+    every file up to whole filesystem blocks (`statvfs`) and counts one block per directory, root
+    included;
+  - rows in Java's order (`bytes`, `files`, `allocated_bytes`, `terms`, `postings`);
+  - each structure is verified before it is measured.
+- **`index_query` and `index_memory`** now use the shared module. `index_memory` also verifies every
+  opened structure.
+- All five index benchmarks take the query workload (`shared/queries.txt`) for the verification, as
+  Java's `IndexBenchmark` does. Suite total: 184.
+
+### Verification on the 200 real books
+- **`index_disk` matches Java's `results/real/` exactly** at N=50, 100 and 200 for `bytes` (the
+  monolithic JSON included, byte for byte), `files`, `terms` and `postings`. `allocated_bytes`
+  differs by exactly 1 block (monolithic) and 2 blocks (hierarchical). Java's structures sit one or
+  two folders deeper (`<dir>/datamarts/inverted_index...`), and its estimate counts one block per
+  folder. That is an artefact of the path, about 0.0015%.
+- **`index_build`** (median of 5 runs; Java from its report):
+
+| | N=50 | N=100 | N=200 | N=200 before this entry |
+|---|---|---|---|---|
+| monolithic | 158 ms | 579 ms | **936 ms** (Java 1,686) | 2,567 ms |
+| hierarchical | 11,052 ms | 16,343 ms | **21,608 ms** (Java 11,339) | 23,566 ms |
+
+  Taking the tokenizer out of the timing, as Java does, cut the monolithic build at N=200 from
+  2.6 s to 0.9 s. Most of that cost was tokenizing, not indexing.
+- `index_update` was stopped half-way at the user's request, in order to add MongoDB first. It runs
+  in the official run.
+
+### An implementation observation (not a condition, so not changed here)
+The hierarchical build remains about twice Java's time. Besides the different filesystem, one likely
+cause is in this module's own code: `write_text_file` calls `create_directories` for **every** file,
+129,356 times for the N=200 index, although there are only ~36 letter folders. It is noted as a
+possible optimisation of the implementation. That is exactly what the comparison measures, so it is
+not something to hide or adjust in the benchmark.
+
+## Entry 57 – Parity with Java, step B: `JavaRandom`, Java's random generator reproduced number for number (2026-10-03)
+
+### What was done
+- `include/stage1/benchmark/java_random.hpp` + `src/benchmark/java_random.cpp`:
+  - `JavaRandom(seed)` and `next_int(bound)` reproduce `java.util.Random`, a 48-bit linear
+    congruential generator whose algorithm is part of the Java API specification;
+  - `java_shuffle(items, random)` reproduces `Collections.shuffle(list, random)` for a random-access
+    list.
+- Java's rejection loop in `nextInt(bound)` detects biased values through 32-bit `int` overflow
+  (`u - r + m < 0`). Signed overflow is undefined behaviour in C++, so the sum is computed in 64 bits
+  and compared with `INT_MAX`. The state uses unsigned 64-bit arithmetic masked to 48 bits, which
+  wraps exactly like Java's `long`.
+- `tests/benchmark/java_random_test.cpp`, 6 tests. **Every expected value was printed by a real JVM**
+  (OpenJDK 23, a throwaway `JavaRandomReference.java` outside the repo):
+  - `nextInt(100)` and `nextInt(16)` (the power-of-two branch);
+  - `nextInt(2^30 + 1)`, where about half of all draws are rejected, which exercises the overflow
+    path;
+  - a negative seed;
+  - `Collections.shuffle` of 1..10;
+  - a non-positive bound throws.
+
+  All 6 passed on the first run. Suite total: 190.
+
+### Why
+The Java module makes two "random" choices with `new Random(42)`: the order in which
+`datalake_lookup` looks books up, and the 1,000 queries of `metadata_query`. C++'s `std::mt19937`,
+Python's `random` and Java's generator give three different sequences for the same seed. Each
+language would then measure different lookups and queries, which would break the "same data"
+condition. Reproducing Java's published algorithm makes the choices identical without sharing any
+data file. A short message with an equivalent Python version was prepared for the Python teammate.
+It is not used yet: the datalake (step C) and metadata (step D) benchmarks will use it.
+
+## Entry 58 – MongoDB measured for the first time, under Java's conditions (2026-10-03)
+
+### What was done
+- **A real MongoDB server on this machine.** The group's `docker-compose.yml` (MongoDB 8.2.12, the
+  image Java's results used) was started unchanged. This Mac had no Docker, so the engine comes from
+  **Colima** (`brew install colima docker docker-compose`; `colima start --cpu 2 --memory 4`, a
+  small Ubuntu VM), then `docker-compose up -d`. The container passes its own healthcheck and answers
+  on `localhost:27017`. A Homebrew `mongod` 8.3.11 was also installed but stopped. It was not used,
+  so that the server version matches Java's.
+- **The Mongo tests ran against a real server for the first time.** Until now they had always been
+  skipped. All 4 writer tests and the 2 benchmark ones passed as written.
+- **Same conditions as Java's `IndexBenchmark` for the mongo structure:**
+  - *Separate databases.* `MongoIndexWriter`, `mongo_postings_fetcher` and the new
+    `mongo_disk_usage_bytes` take a database and a collection. They default to SPEC section 6's real
+    `search_engine/inverted_index`, but the benchmarks use `search_engine_bench` (Java's
+    `BENCH_DATABASE`), and the tests use `search_engine_test`. Before this, the database name was
+    hardcoded, so every benchmark and test run overwrote the real index's collection.
+  - *Untimed emptying.* The new `MongoIndexWriter::clear()` drops the collection (Java's `clear`),
+    and `index_build` calls it in its untimed reset. `write()` still starts with `delete_many`, which
+    is now cheap on an empty collection, so the timed part measures building, not clearing.
+  - *Disk usage.* `index_disk` now covers mongo with Java's own definition. It requests an `fsync`
+    (WiredTiger only moves data into the collection file at each checkpoint), then reports
+    `storageSize + totalIndexSize` from `$collStats`, as `bytes`, followed by `terms` and `postings`.
+    There are no `files`/`allocated_bytes` rows, since Mongo has no folder of its own, as in Java.
+    This closes the gap Entry 42 left open for want of a server to verify against. The BSON numbers
+    are read whatever their type (int32, int64 or double).
+- 4 new tests: `clear`, the fetcher with a given database, disk usage (positive after writing, 0 for a
+  missing collection), and mongo's `index_disk` rows. Suite total: 194, none skipped.
+- `cpp/README.md` explains how to start the group's MongoDB, including on a Mac without Docker
+  Desktop.
+
+### Verification on the 200 real books
+`index_disk` for mongo against Java's `results/real/`:
+
+| N | C++ | Java |
+|---|---|---|
+| 50 | 3.93 MB | 3.98 MB |
+| 100 | 7.34 MB | 7.27 MB |
+| 200 | 13.91 MB | 14.13 MB |
+
+`terms` and `postings` are identical to Java's. The bytes differ by under 2%, which is plausible: this
+module inserts every document at once (`insert_many`), while Java upserts them with `$addToSet`, and
+WiredTiger compresses and fills its pages differently in each case.
+
+### Implementation differences left as they are (they are what is being compared)
+- `MongoIndexWriter::update_terms` issues one `update_one` per term, about 7,900 round trips for a
+  real book. Java sends a book's terms in a single `bulkWrite`. Expect this module's Mongo
+  `index_update` to be slower for that reason; a `bulk_write` would be the natural optimisation.
+- Each `write()`/`update_terms()` call opens a new client connection, while Java keeps one per index
+  object. That cost is small next to the round trips, but it is inside the timing.
+
+---
+
+## Entry 59 – Index benchmark results will come from a teammate's machine with native Docker (2026-10-03)
+
+### What was done
+- Removed the five committed `benchmarks/results/cpp_index_*.csv` files (`index_build`,
+  `index_update`, `index_query`, `index_memory`, `index_disk`). They were the old 15-book results,
+  in the format from before Entries 53-58: no N=50/100/200 sizes, no `throughput`, `per_query` or
+  `allocated_bytes`, and no mongo rows.
+- Emptied the git-ignored scratch folder `benchmarks/work/` (about 1 GB of monolithic and
+  hierarchical index copies from the last local runs).
+- The index benchmark **code** is unchanged; only its outputs were removed.
+
+### Why
+- The final index results will be produced by a teammate on a machine with **native Docker**, so
+  the mongo structure runs against the group's `docker-compose.yml` without a VM in between. Here,
+  MongoDB ran inside Colima (Entry 58), which adds a virtualisation layer to every round trip and
+  does not survive a restart of the Mac.
+- Keeping the stale 15-book CSVs would have left results in the repo that no longer match what the
+  code measures, and they could have been mistaken for the final ones.
+- The datalake and metadata CSVs are kept for now: steps C and D of the parity plan will replace
+  them.
+
+---
+
+## Entry 60 – Only results with the agreed sizes stay in the repo (2026-10-03)
+
+### What was done
+- Removed the last seven committed CSVs: the five `datalake_*` and the two `metadata_*`
+  experiments. Every one had `dataset_size` 15, the original 15 real books.
+- `benchmarks/results/` is now empty in git. The CSV writer creates the folder again when a
+  benchmark runs (`WriteBenchmarkResults.CreatesMissingParentDirectories` covers it).
+- `cpp/README.md`, section 7: the old note said results were tracked and told the reader to restore
+  them with `git checkout`. It now says no results are committed yet, and that a trial run's CSV
+  should be deleted instead of committed.
+
+### Why
+- The rule the user set is that the repo only keeps results that are comparable with Java's: the
+  sizes agreed in SPEC section 10. That means N=200 real books for the datalake (10.1), and
+  N=1,000/10,000/100,000 synthetic rows, as `sqlite` and `sqlite_no_index`, for the metadata (10.2).
+- None of the seven CSVs met that rule. Their metrics were also behind Java's: no `throughput`,
+  `per_lookup`, `detected`, `lost` or `allocated_bytes` for the datalake, and no `sqlite_no_index`
+  rows for the metadata.
+- This supersedes the last point of Entry 59, which kept these files until steps C and D. Their
+  replacements will come from those steps, written under SPEC 10.4's `real/` and `synthetic/`.
+
+---
+
+## Entry 61 – Parity with Java, step C: the five datalake experiments under Java's conditions (2026-10-03)
+
+### What was done
+The five datalake benchmarks were rewritten after reading the Java module's `DatalakeBenchmark`, so
+that both languages time the same operations on the same data and report the same metrics in the
+same order.
+
+- **`SimulatedClock`** (new, `benchmark/simulated_clock.hpp`), a port of Java's
+  `SimulatedClock.tenBooksPerHour()`. It starts on 1 January 2026 at 00:00 and moves 6 minutes each
+  time it is read, so each hour folder of the `time` layout gets 10 books. With the real clock the
+  200 books were all written in under a second, into a single hour folder. The start is *local*
+  midnight (built with `mktime`), because `time_folder_name` uses local time (SPEC section 3). The
+  folders are therefore `20260101/00` to `20260101/19` on any machine, the same names Java gets
+  with its UTC clock. `now()` is `const` in the `Clock` contract, so the moving time point is
+  `mutable`.
+- **`datalake_benchmark_support`** (new), the counterpart of Entry 56's `index_benchmark_support`:
+  - `kDatalakeStructures` holds `book`, `range`, `time`, in the order of Java's
+    `DatalakeFactory.NAMES`.
+  - `fresh_datalake(structure, dir)` is Java's `freshDatalake`: it deletes the folder and creates an
+    empty datalake, with a new simulated clock for `time`, so every repetition builds the same tree.
+    The `time` datalake owns its clock. A private base class holds the clock and is listed first,
+    so it is constructed before `TimeBasedDatalake` stores a reference to it, and destroyed after.
+    Callers just get a `std::unique_ptr<Datalake>`.
+  - `elapsed_rows` and `derived_rows` are Java's `derived()`: one derived row per measured
+    repetition, with times under 0.001 ms counted as 0.001 ms.
+- **Per experiment**, everything taken from Java:
+
+| Experiment | Untimed setup | Timed | New rows |
+|---|---|---|---|
+| `datalake_write` | empty datalake **every repetition** (before: none, it overwrote) | write every book | `throughput` (books_per_s) |
+| `datalake_lookup` | write every book once | `locate()` of every id, **in Java's order**: sorted ids shuffled with `JavaRandom(42)` (Entry 57's first use); found books counted and checked | `per_lookup` (us) |
+| `datalake_incremental` | empty datalake, known then fresh books, **every repetition** (before: once) | `list_book_ids()` minus the known ids, into an ordered set (Java's `TreeSet`) | `detected` (books) |
+| `datalake_recovery` | save all, then the crash on positions **0, 10, 20…** (before: 9, 19, 29…), by **renaming the body to `body.txt.tmp`** (before: deleting the header), as Java's `interruptBeforeBodyMove` | list, save the missing books again, **count** them (before: the count was hardcoded) | `lost` (books) |
+| `datalake_storage` | empty datalake first (before: none, so leftovers from earlier runs were counted) | nothing, it measures size | `allocated_bytes` with Entry 56's `allocated_bytes()` |
+
+- Rows now come in Java's order: per structure, the 5 `elapsed` rows, then the derived rows.
+- The old "at least 10 books" guard of `recovery` is gone. Since damage starts at position 0, any
+  non-empty list damages at least one book, as in Java.
+- 11 new tests and 6 rewritten ones (205 in total, 7 Mongo ones skipped without a server). They cover the
+  clock (10 writes per hour folder), `fresh_datalake` (empties the folder, a new `time` datalake
+  starts again at hour 00, unknown structure), the derived rows, and each experiment's rows and order.
+  `storage` also gets a test for the simulated hour folders, one for leftovers from an earlier run,
+  and one for `allocated_bytes` (whole blocks, at least `bytes`).
+
+### Verification on the 200 real books (against Java's `results/real/`)
+`datalake_storage` matches Java **exactly, every metric of every structure**:
+
+| Structure | files | directories | max_entries_per_dir | bytes | allocated_bytes |
+|---|---|---|---|---|---|
+| book | 400 | 200 | 200 | 128,980,349 | 130,883,584 |
+| range | 400 | 47 | 220 | 128,980,349 | 130,256,896 |
+| time | 400 | 21 | 20 | 128,980,349 | 130,150,400 |
+
+This shows that both languages store byte-identical books. It also shows that the simulated clock
+builds the same tree: 1 day folder with 20 hour folders.
+
+Times (median of the 5 runs; Java's figures come from its own machine):
+
+| Experiment | book (C++ / Java) | range (C++ / Java) | time (C++ / Java) |
+|---|---|---|---|
+| write, ms | 228.4 / 194.0 | 191.6 / 198.8 | 186.8 / 210.9 |
+| lookup, us per lookup | 2.5 / 3.3 | 2.9 / 8.3 | 0.07 / 94.5 |
+| incremental, ms | 0.98 / 1.24 | 1.66 / 2.58 | 1.16 / 2.08 |
+| recovery, ms | 19.1 / 23.8 | 22.3 / 25.2 | 20.0 / 19.8 |
+
+`detected` is 20 everywhere, and `recovered`/`lost`/`duplicates` are 20/0/0 everywhere, in both
+languages. All five CSVs have exactly Java's row order.
+
+### Design differences left as they are (they are what is being compared)
+- **`time` lookup** (Entries 31 and 32): this module's `locate()` is a hash map of what the same
+  instance wrote, while Java scans the day and hour folders on disk. Hence 0.07 us against 94.5 us.
+  The C++ figure does not measure the layout, and it would not work from a new process. This is
+  the main caveat for the report's lookup comparison.
+- **Writes are not atomic here.** Java writes each file to `.tmp` and renames it, header first;
+  this module writes body then header in place, and relies on the control layer's "write first,
+  mark after" (SPEC section 8). That rename is why Java's recovery leaves no `.tmp` behind in `book`
+  and `range`: saving the book again overwrites the leftover `body.txt.tmp` and renames it. Here the
+  20 leftovers stay; they were counted after the run. They don't change any reported metric
+  (`duplicates` counts only complete `body.txt` files), but the folder holds 20 more files than
+  Java's after a recovery.
+
+### Supersedes
+Entry 35's `time` figures (everything in one hour folder, the worst `max_entries_per_dir`) came
+from the real clock and a burst of writes. Under Java's simulated clock, `time` has the *smallest*
+`max_entries_per_dir` of the three (20, against 200 and 220). Entry 35's observation still holds
+for real pipeline bursts.
+
+### Also found
+- `SystemClock` no longer has a production caller. The five datalake benchmarks were its only
+  users, and they now use `SimulatedClock`; the `pipeline` command uses the book layout. Only
+  `time_based_datalake_test.cpp` uses it now. It was kept: it is the clock SPEC section 3 asks for
+  in a real `time` datalake. Whether to remove it is the user's decision.
+- `ctest -j 8` makes 5 `Pipeline` tests fail: they share temporary folder names and are not safe to
+  run in parallel. Run sequentially (as `make test` does), all 205 pass. Not fixed here.
+
+---
+
+## Entry 62 – Parity with Java, step D: the metadata experiments on Java's synthetic rows, with `sqlite_no_index` (2026-10-03)
+
+### What was done
+`metadata_insert` and `metadata_query` were rewritten after reading the Java module's
+`MetadataBenchmark` and `SqliteMetadataRepository`, and SPEC section 10.2.
+
+- **Data.** They no longer use the downloaded books. `synthetic_metadata(N)` (new,
+  `benchmark/metadata_benchmark_support`) is Java's `syntheticDataset`: row *i* has `book_id` *i*+1,
+  `"Title " + i/2`, `"Author " + i/10`, `English`, `January 1, 2000` and the `datalake/book/<id>/`
+  paths. The CLI generates 100,000 rows once and runs each experiment at N = 1,000, 10,000 and
+  100,000, each N a prefix of the next.
+- **Two variants**, as in Java: `sqlite` (SPEC section 4's schema) and `sqlite_no_index` (the same
+  without `idx_books_author` and `idx_books_title`). `fresh_metadata_store` is Java's
+  `freshRepository`: it deletes the file and its `-journal`, then opens an empty store. For the
+  second variant it then calls `drop_author_and_title_indexes`, which, as in Java, uses a
+  connection of its own. Each database is `work/metadata/<insert|query>/<variant>_<N>.db`.
+- **`MetadataStore::insert_books(rows)`** (new) is Java's `saveAll`: one transaction and **one
+  prepared statement** per batch, and all or nothing (rollback and rethrow if a row fails).
+  `count()` is new as well, for Java's post-insert check.
+- **`find_by_author` / `find_by_title`** now end in `ORDER BY book_id`, Java's SQL. Results come in
+  a fixed order. It costs nothing measurable: equal keys in an index, and a full table scan, both
+  already come in rowid order.
+- **`metadata_insert`:** the rows are split into batches of 1,000 before anything is timed. The setup
+  of every repetition closes the previous store and opens an empty one; the timed part is one
+  `insert_books` per batch. Afterwards `count()` must equal N. Rows: 5 `elapsed`, then 5
+  `throughput` (`rows_per_s`); before, the two were interleaved.
+- **`metadata_query`:** the workload is now Java's own: 1,000 picks with `JavaRandom(42).next_int(N)`
+  (its second use, Entry 57). Before, it used `std::mt19937`, so it was a different set of queries.
+  For each variant, every row is inserted once (untimed). Then each of `find_by_id`,
+  `find_by_author` and `find_by_title` is timed over the whole workload, and each query must find
+  something. Rows per repetition: `<type>` (ms) and `<type>_avg` (us), as in Java.
+- **Fixed by the way:** the old `metadata_insert` timed `extract_metadata` (the header regexes) as
+  part of the insert, and prepared the INSERT statement again for every row. Java times neither.
+- **Moved:** `elapsed_rows`/`derived_rows` (Entry 61) moved from `datalake_benchmark_support` to
+  `benchmark.hpp`, since both experiment families now use them.
+- **`begin/commit/rollback_transaction` are now private.** Their only outside caller was the old
+  benchmark; `insert_books` is the public way to batch. Their two direct tests were replaced by
+  `insert_books` ones: a whole batch is stored, and a batch that fails on its third row leaves
+  nothing behind and the store usable. The failure comes from a test-only trigger.
+- Tests: 214 in total (205 + 11 new − 2 replaced). The new ones cover `insert_books`, `count`, the
+  `ORDER BY`, the generator (values and prefix property), `fresh_metadata_store` (empty, and which
+  indexes each variant has, read from `sqlite_master`), and both experiments' rows and order.
+
+### Verification (against Java's `results/synthetic/`)
+Both CSVs have **exactly Java's rows in Java's order** (60 and 180 rows).
+
+Medians of the 5 runs (Java's figures come from its own machine):
+
+| Variant | N | insert, rows/s (C++ / Java) | find_by_id, us | find_by_author, us | find_by_title, us |
+|---|---|---|---|---|---|
+| sqlite | 1,000 | 462,330 / 38,761 | 8.1 / 28.5 | 12.3 / 77.2 | 9.5 / 39.3 |
+| sqlite_no_index | 1,000 | 932,219 / 48,929 | 7.9 / 27.9 | 44.3 / 115.1 | 41.3 / 94.4 |
+| sqlite | 10,000 | 507,759 / 47,009 | 8.8 / 22.9 | 13.1 / 48.8 | 10.5 / 31.9 |
+| sqlite_no_index | 10,000 | 1,005,172 / 51,934 | 8.8 / 22.7 | 349.8 / 633.4 | 327.5 / 608.3 |
+| sqlite | 100,000 | 454,570 / 50,036 | 9.0 / 24.0 | 15.4 / 52.0 | 12.7 / 33.5 |
+| sqlite_no_index | 100,000 | 915,179 / 58,103 | 9.3 / 24.4 | 5,869 / 8,460 | 5,726 / 8,609 |
+
+Both languages show the same shape, which is what the experiment is about:
+- `find_by_id` does not depend on the indexes (it uses the primary key) and stays flat as N grows.
+- With the indexes, author and title lookups stay flat too.
+- Without them, author and title lookups grow linearly with N. At 100,000 rows they are 380 times
+  slower than indexed in C++, and 160 times slower in Java.
+- Dropping the indexes makes inserting faster, since there is less to maintain: about 2x here,
+  about 1.2x in Java.
+
+Inserting is about 10 times faster here. This module calls the SQLite C API directly, while Java
+goes through JDBC (JNI, binding and batching every row). The runs were also on different machines,
+and the cost of each of the 100 commits (an `fsync` with SQLite's default `synchronous=FULL`)
+depends on the disk and the OS. These data do not separate the two causes. Java's small 1.2x
+index effect suggests its time is mostly spent outside SQLite's own B-tree work.
+
+### Design differences left as they are
+- The insert is `INSERT OR REPLACE` here and `INSERT ... ON CONFLICT DO UPDATE` in Java. On the
+  empty tables of this experiment, both just insert.
+- Each `find_*` prepares its statement on every call, in both languages, and reads every column of
+  every row.
+
+### Supersedes
+Entries 36 and 37 benchmarked only `sqlite`, on the 15 real books. This experiment now follows SPEC
+section 10.2: synthetic rows and both variants. `sqlite_no_index` is the same backend with a
+different schema, not a second `MetadataStore`, so Entry 13's reasoning against generalising the
+store still holds.
+
+---
+
+## Entry 63 – Benchmark results committed, in `real/` and `synthetic/`, one folder per category (2026-10-03)
+
+### What was done
+- With steps C and D done, the seven datalake and metadata CSVs have the sizes SPEC section 10 asks
+  for. They were moved into SPEC section 10.4's folders and, at the user's request, split into one
+  subfolder per category:
+
+  ```
+  cpp/benchmarks/results/
+  ├── real/datalake/        cpp_datalake_{write,lookup,incremental,recovery,storage}.csv   (N=200)
+  ├── real/index/           cpp_index_*.csv, to come from the teammate's run (Entry 59)
+  └── synthetic/metadata/   cpp_metadata_{insert,query}.csv                                 (N=1k/10k/100k)
+  ```
+
+- `run_benchmark_command` now writes there directly. The new `results_path()` takes the category
+  from the experiment's name (`datalake`, `index` or `metadata`) and picks `synthetic/` for metadata,
+  `real/` for the rest. A rerun overwrites its CSV in place, and the teammate's index run will land
+  in `real/index/` with no manual step.
+- Verified: rerunning `datalake_storage`, which is deterministic, rewrote
+  `real/datalake/cpp_datalake_storage.csv` byte-identical to the moved file. An unknown experiment
+  still exits with code 1 and writes nothing.
+- `cpp/README.md`, sections 3 and 7, describe the layout. The CSVs are tracked again, so the note
+  explains how to undo a trial run.
+
+### Why
+- `real/` against `synthetic/` is SPEC section 10.4's agreed split. The category subfolders keep each
+  folder small and match how the experiments are grouped everywhere else: SPEC section 9, Java's
+  three benchmark classes, and this module's `benchmark/` sources.
+- The root `.gitignore` exception `!cpp/benchmarks/results/**/*.csv` already covers subfolders, so it
+  needed no change.
+
+### Open point for the group
+SPEC section 10.4 names the files directly inside `real/` and `synthetic/`, and the Java module keeps
+them that way. The category subfolders are this module's choice. If the group wants every language
+to share one layout, either the SPEC gains the subfolders or this module flattens them. That is a
+one-line change in `results_path()`. The SPEC was not edited, since it is a shared file.
+
+---
+
+## Entry 64 – `MongoIndexWriter::update_terms` sends one bulk write, as Java's `flush` does (2026-10-03)
+
+### What was done
+Entry 58 left one difference open: `update_terms` issued one `update_one` per term, about 7,900 round
+trips for a real book, while Java's `MongoInvertedIndex.flush` sends all of a book's terms in one
+`bulkWrite`. The user asked for it to be aligned before the teammate runs `index_update`, since that
+experiment is where it shows.
+
+- `update_terms` now builds **one unordered `bulk_write`** with one `update_one` model per term
+  (filter `term`, `$set` of its postings, `upsert: true`) and executes it once. The driver sends the
+  operations in a few large messages, not one round trip each. As in Java, it is unordered: the terms
+  are different documents, so the order does not matter.
+- An empty term list returns at once, because the driver refuses a bulk write with no operations.
+- **Kept on purpose:** `$set` of the term's whole current postings, where Java does `$addToSet` of the
+  new ids only. This module's `IndexWriter` contract is "persist these terms' current postings from
+  the index" (Entry 40), and the writer does not know which ids are new. The result in the database
+  is the same. The messages are larger, because a common word sends its whole list instead of one id.
+- Three new tests, run against the real server (MongoDB 8.2.12, the group's `docker-compose` on
+  Colima):
+  - each given term ends up with its current postings: an existing term updated, a new one
+    upserted, and a term not given left unchanged;
+  - a batch of 10,000 terms is written whole;
+  - an empty list changes nothing.
+
+  Suite: **217 tests, none skipped** with the server up (10 of them need MongoDB; `cpp/README.md` updated).
+
+### Measurement on real books
+This was not the official benchmark, but a scratch program outside the repository. It used the same
+writer and the same steps as `index_update` for mongo: an index of the 45 lowest-id books was
+written, then the next 5 books were added one at a time, each persisted with `update_terms` for its
+own terms (5,716 to 11,228 terms per book). The old version was compiled from the previous commit's
+source.
+
+| Version | Mean per book |
+|---|---|
+| Before: one `update_one` per term | 3,421 ms |
+| After: one unordered bulk write | 285–315 ms over four runs (one outlier run at 579 ms) |
+
+That is **about 11 times faster**. For scale, Java's `index_update` `per_book` for mongo at N=50 was
+637–814 ms on its own machine. So the two languages now do the same operation, and Entry 58's
+expectation ("this module's Mongo `index_update` will be slower for that reason") no longer applies.
+
+### Still different
+Each `write()`/`update_terms()` call still opens a new client connection, while Java keeps one per
+index object (Entry 58). With the round trips gone, that connection is a larger share of each call,
+but it was not measured separately.
+
+---
+
+## Entry 65 – The benchmark module split into one subfolder per category (2026-10-03)
+
+### What was done
+At the user's request, `benchmark/` was split into subfolders. It had grown to 20 headers, 20
+sources and 20 test files side by side. The split is the same in `include/stage1/benchmark/`,
+`src/benchmark/` and `tests/benchmark/`:
+
+```
+benchmark/
+├── benchmark, java_random, sample_books          shared by more than one category
+├── datalake/   datalake_{write,lookup,incremental,recovery,storage}_benchmark,
+│               datalake_benchmark_support, simulated_clock
+├── index/      index_{build,query,update,memory,disk}_benchmark,
+│               index_benchmark_support, query_list
+└── metadata/   metadata_{insert,query}_benchmark, metadata_benchmark_support
+```
+
+- **What stays at the root:**
+  - `benchmark` is the runner, the CSV writer, `allocated_bytes` and the row helpers;
+  - `java_random` is used by the datalake and metadata experiments;
+  - `sample_books` is used by the datalake and index experiments.
+- **Which category the helpers went to:**
+  - `simulated_clock` is only used by the datalake experiments, so it went to `datalake/`;
+  - `query_list` loads the query workload of the index experiments, so it went to `index/`.
+- **File names were kept**, prefix included, for three reasons:
+  - every basename stays unique, so there is no `index/query_benchmark` next to a
+    `metadata/query_benchmark`;
+  - `grep` and the editor still find each file by its old name;
+  - it follows the `datamart/index/inverted_index.hpp` style already used in this module.
+- The 51 files were moved with `git mv`, so git records them as renames and keeps their history.
+- 37 files had their `#include "stage1/benchmark/..."` lines updated. Both `CMakeLists.txt` lists
+  are now grouped by folder.
+- The namespace stays the flat `stage1`, as decided in Entry 45.
+
+### Why
+These are the categories the experiments already have everywhere else: SPEC section 9, Java's three
+benchmark classes, and the `results/real|synthetic/<category>/` layout of Entry 63. Each of the
+categories now fits on one screen. The Java module keeps its `benchmark` package flat, but it has a
+single class per category, against six or seven files per category here.
+
+### Verification
+- A clean configure and build in an empty folder had no warnings outside GoogleTest. All 217 tests
+  pass; the 10 Mongo ones were skipped because no server was running.
+- The rebuilt CLI reran the deterministic `datalake_storage`, and its CSV came out identical to the
+  committed one: the moved code produces exactly the same results.

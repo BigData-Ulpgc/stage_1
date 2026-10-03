@@ -6,6 +6,7 @@
 #include "stage1/cli_commands.hpp"
 
 #include <algorithm>
+#include <array>
 #include <filesystem>
 #include <iostream>
 #include <iterator>
@@ -17,27 +18,28 @@
 #include "stage1/control/book_id_list.hpp"
 #include "stage1/control/control_log.hpp"
 #include "stage1/crawler/curl_http_client.hpp"
-#include "stage1/benchmark/datalake_incremental_benchmark.hpp"
-#include "stage1/benchmark/datalake_lookup_benchmark.hpp"
-#include "stage1/benchmark/datalake_recovery_benchmark.hpp"
-#include "stage1/benchmark/datalake_storage_benchmark.hpp"
-#include "stage1/benchmark/datalake_write_benchmark.hpp"
+#include "stage1/benchmark/datalake/datalake_incremental_benchmark.hpp"
+#include "stage1/benchmark/datalake/datalake_lookup_benchmark.hpp"
+#include "stage1/benchmark/datalake/datalake_recovery_benchmark.hpp"
+#include "stage1/benchmark/datalake/datalake_storage_benchmark.hpp"
+#include "stage1/benchmark/datalake/datalake_write_benchmark.hpp"
 #include "stage1/util/file_io.hpp"
 #include "stage1/crawler/gutenberg_client.hpp"
-#include "stage1/benchmark/index_build_benchmark.hpp"
-#include "stage1/benchmark/index_disk_benchmark.hpp"
-#include "stage1/benchmark/index_memory_benchmark.hpp"
-#include "stage1/benchmark/index_query_benchmark.hpp"
+#include "stage1/crawler/local_file_source.hpp"
+#include "stage1/benchmark/index/index_build_benchmark.hpp"
+#include "stage1/benchmark/index/index_disk_benchmark.hpp"
+#include "stage1/benchmark/index/index_memory_benchmark.hpp"
+#include "stage1/benchmark/index/index_query_benchmark.hpp"
 #include "stage1/datamart/index/index_readers.hpp"
-#include "stage1/benchmark/index_update_benchmark.hpp"
+#include "stage1/benchmark/index/index_update_benchmark.hpp"
 #include "stage1/datamart/index/inverted_index.hpp"
-#include "stage1/benchmark/metadata_insert_benchmark.hpp"
-#include "stage1/benchmark/metadata_query_benchmark.hpp"
+#include "stage1/benchmark/metadata/metadata_insert_benchmark.hpp"
+#include "stage1/benchmark/metadata/metadata_query_benchmark.hpp"
 #include "stage1/datamart/metadata/metadata_store.hpp"
 #include "stage1/datamart/index/monolithic_index_writer.hpp"
 #include "stage1/control/pipeline.hpp"
 #include "stage1/query/query_engine.hpp"
-#include "stage1/benchmark/query_list.hpp"
+#include "stage1/benchmark/index/query_list.hpp"
 #include "stage1/benchmark/sample_books.hpp"
 #include "stage1/datamart/index/stopwords.hpp"
 #include "stage1/datamart/index/tokenizer.hpp"
@@ -50,6 +52,7 @@ namespace {
 // its own data/ and benchmarks/ directories regardless of the current working
 // directory it is launched from.
 const std::filesystem::path kSharedDir = STAGE1_SHARED_DIR;
+const std::filesystem::path kSampleDir = STAGE1_SAMPLE_DIR;
 const std::filesystem::path kDataDir = STAGE1_DATA_DIR;
 const std::filesystem::path kBenchmarksDir = STAGE1_BENCHMARKS_DIR;
 
@@ -58,7 +61,51 @@ const std::filesystem::path kBenchmarksDir = STAGE1_BENCHMARKS_DIR;
 // apart. Swapping pipeline's index format means swapping search's reader too.
 const std::filesystem::path kIndexPath = kDataDir / "datamarts" / "inverted_index.json";
 
-void describe(const ControlDecision& decision) {
+// Where an experiment's CSV goes: SPEC section 10.4's real/ (the downloaded
+// books: datalake and index experiments) or synthetic/ (the generated rows of
+// section 10.2: metadata experiments), then one folder per category, e.g.
+// benchmarks/results/real/datalake/cpp_datalake_write.csv.
+std::filesystem::path results_path(const std::string& experiment) {
+    const std::string category = experiment.substr(0, experiment.find('_'));  // datalake, index or metadata
+    const std::string data = category == "metadata" ? "synthetic" : "real";
+    return kBenchmarksDir / "results" / data / category / ("cpp_" + experiment + ".csv");
+}
+
+// SPEC section 10.1: the index experiments run once per size N, on the N
+// books with the lowest ids (load_sample_books already returns them sorted).
+constexpr std::array<std::size_t, 3> kIndexSizes = {50, 100, 200};
+
+// One index experiment on exactly `books` (one size).
+std::vector<BenchmarkResult> run_index_experiment(const std::string& experiment, const std::vector<SampleBook>& books,
+                                                  const std::unordered_set<std::string>& stopwords,
+                                                  const std::filesystem::path& work_dir) {
+    // Every index experiment verifies the structures it measured against the
+    // shared query workload, as the Java module does.
+    const auto queries = load_queries(kSharedDir / "queries.txt");
+    if (experiment == "index_build") {
+        return benchmark_index_build("cpp", books, queries, stopwords, work_dir);
+    }
+    if (experiment == "index_query") {
+        return benchmark_index_query("cpp", books, queries, stopwords, work_dir);
+    }
+    if (experiment == "index_update") {
+        return benchmark_index_update("cpp", books, queries, stopwords, work_dir);
+    }
+    if (experiment == "index_memory") {
+        return benchmark_index_memory("cpp", books, queries, stopwords, work_dir);
+    }
+    return benchmark_index_disk("cpp", books, queries, stopwords, work_dir);
+}
+
+// Reports what a step actually did, not just what it decided to do: a failed
+// download used to be printed as "downloaded book X" (DEVLOG Entry 49).
+void describe(const StepResult& step) {
+    const ControlDecision& decision = step.decision;
+    if (!step.completed) {
+        const char* verb = decision.action == ControlAction::DownloadBook ? "download" : "index";
+        std::cerr << "[pipeline] could not " << verb << " book " << decision.book_id << ": " << step.failure << "\n";
+        return;
+    }
     switch (decision.action) {
         case ControlAction::DownloadBook:
             std::cout << "[pipeline] downloaded book " << decision.book_id << "\n";
@@ -79,15 +126,24 @@ void describe(const ControlDecision& decision) {
 // behind their own interface (Datalake, IndexWriter), so swapping either for
 // a benchmark run means changing these two lines, not anything in
 // stage1_core.
-int run_pipeline_command(int steps) {
+int run_pipeline_command(int steps, bool offline) {
     const auto stopwords = load_stopwords(kSharedDir / "stopwords.txt");
-    const auto candidate_ids = load_book_ids(kSharedDir / "book_ids.txt");
+    const auto candidate_ids = load_book_ids(offline ? kSampleDir / "book_ids.txt" : kSharedDir / "book_ids.txt");
 
     ControlLog downloaded(kDataDir / "control" / "downloaded_books.txt");
     ControlLog indexed(kDataDir / "control" / "indexed_books.txt");
 
+    // Where the books come from is the only difference between the two modes:
+    // both sources are BookSources, and nothing below this point knows which
+    // one it was given.
     CurlHttpClient http_client;
-    GutenbergSource source(http_client);
+    GutenbergSource gutenberg(http_client);
+    LocalFileSource sample(kSampleDir / "raw");
+    BookSource& source = offline ? static_cast<BookSource&>(sample) : gutenberg;
+    if (offline) {
+        std::cout << "[pipeline] offline: reading books from " << (kSampleDir / "raw").lexically_normal() << "\n";
+    }
+
     BookBasedDatalake datalake(kDataDir / "datalake" / "book");
     MetadataStore metadata(kDataDir / "datamarts" / "metadata.db");
     MonolithicIndexWriter index_writer(kIndexPath);
@@ -108,10 +164,17 @@ int run_pipeline_command(int steps) {
     }
 
     for (int step = 0; step < steps; ++step) {
-        const auto decision = run_pipeline_step(candidate_ids, downloaded, indexed, source, datalake, metadata,
-                                                 index, index_writer, stopwords);
-        describe(decision);
-        if (decision.action == ControlAction::Nothing) {
+        const auto step_result = run_pipeline_step(candidate_ids, downloaded, indexed, source, datalake, metadata,
+                                                    index, index_writer, stopwords);
+        describe(step_result);
+        if (!step_result.completed) {
+            // The book stays unmarked, so the control layer would choose it
+            // again on the very next step: looping on would only repeat the
+            // same failure. Stop, and let a later run retry it.
+            std::cerr << "[pipeline] stopping; run `pipeline` again to retry\n";
+            return 1;
+        }
+        if (step_result.decision.action == ControlAction::Nothing) {
             break;  // dataset fully processed: no point looping further
         }
     }
@@ -182,11 +245,34 @@ int run_status_command() {
     return 0;
 }
 
-// Runs one SPEC section 9 experiment against books a previous `pipeline <N>`
-// run already downloaded (never the network: see load_sample_books), and
-// writes the result CSV to benchmarks/results/cpp_<experiment>.csv, the same
+// Runs one SPEC section 9 experiment -- the datalake and index ones against
+// books a previous `pipeline <N>` run already downloaded (never the network:
+// see load_sample_books), the metadata ones on synthetic rows (SPEC section
+// 10.2) -- and writes the result CSV where results_path() says, the same
 // "results get committed, work is scratch" convention the Java module uses.
 int run_benchmark_command(const std::string& experiment) {
+    const auto work_dir = kBenchmarksDir / "work";
+    const auto csv_path = results_path(experiment);
+
+    // SPEC section 10.2: the metadata experiments run on synthetic rows, not
+    // on the downloaded books, once per size N (each a prefix of the largest).
+    if (experiment == "metadata_insert" || experiment == "metadata_query") {
+        const auto dataset =
+            synthetic_metadata(*std::max_element(std::begin(kMetadataSizes), std::end(kMetadataSizes)));
+        std::vector<BenchmarkResult> results;
+        for (std::size_t n : kMetadataSizes) {
+            std::cout << "[benchmark] " << experiment << ", N=" << n << "\n";
+            const std::vector<StoredBook> rows(dataset.begin(), dataset.begin() + static_cast<std::ptrdiff_t>(n));
+            const auto part = experiment == "metadata_insert"
+                                  ? benchmark_metadata_insert("cpp", rows, work_dir / "metadata")
+                                  : benchmark_metadata_query("cpp", rows, work_dir / "metadata");
+            results.insert(results.end(), part.begin(), part.end());
+        }
+        write_benchmark_results(csv_path, results);
+        std::cout << "[benchmark] wrote " << results.size() << " rows to " << csv_path << "\n";
+        return 0;
+    }
+
     const auto stopwords = load_stopwords(kSharedDir / "stopwords.txt");
     const auto candidate_ids = load_book_ids(kSharedDir / "book_ids.txt");
 
@@ -201,7 +287,6 @@ int run_benchmark_command(const std::string& experiment) {
     }
     std::cout << "[benchmark] using " << books.size() << " already-downloaded book(s)\n";
 
-    const auto work_dir = kBenchmarksDir / "work";
     std::vector<BenchmarkResult> results;
 
     if (experiment == "datalake_write") {
@@ -214,31 +299,28 @@ int run_benchmark_command(const std::string& experiment) {
         results = benchmark_datalake_recovery("cpp", books, work_dir);
     } else if (experiment == "datalake_storage") {
         results = benchmark_datalake_storage("cpp", books, work_dir);
-    } else if (experiment == "metadata_insert") {
-        results = benchmark_metadata_insert("cpp", books, work_dir);
-    } else if (experiment == "metadata_query") {
-        results = benchmark_metadata_query("cpp", books, work_dir);
-    } else if (experiment == "index_build") {
-        results = benchmark_index_build("cpp", books, stopwords, work_dir);
-    } else if (experiment == "index_query") {
-        // (Re)builds the structures first, untimed, so index_query always
-        // measures against whatever `books` currently holds, regardless of
-        // whether `index_build` happened to run earlier in this process.
-        benchmark_index_build("cpp", books, stopwords, work_dir);
-        const auto queries = load_queries(kSharedDir / "queries.txt");
-        results = benchmark_index_query("cpp", static_cast<int>(books.size()), queries, stopwords, work_dir);
-    } else if (experiment == "index_update") {
-        results = benchmark_index_update("cpp", books, stopwords, work_dir);
-    } else if (experiment == "index_memory") {
-        results = benchmark_index_memory("cpp", books, stopwords, work_dir);
-    } else if (experiment == "index_disk") {
-        results = benchmark_index_disk("cpp", books, stopwords, work_dir);
+    } else if (experiment == "index_build" || experiment == "index_query" || experiment == "index_update" ||
+               experiment == "index_memory" || experiment == "index_disk") {
+        for (std::size_t n : kIndexSizes) {
+            if (books.size() < n) {
+                std::cerr << "[benchmark] skipping N=" << n << ": only " << books.size() << " book(s) downloaded\n";
+                continue;
+            }
+            std::cout << "[benchmark] " << experiment << ", N=" << n << "\n";
+            const std::vector<SampleBook> first_n(books.begin(), books.begin() + static_cast<std::ptrdiff_t>(n));
+            const auto rows = run_index_experiment(experiment, first_n, stopwords, work_dir);
+            results.insert(results.end(), rows.begin(), rows.end());
+        }
+        if (results.empty()) {
+            std::cerr << "[benchmark] " << experiment << " needs at least " << kIndexSizes.front()
+                      << " downloaded books (SPEC section 10.1) -- run `pipeline 400` first.\n";
+            return 1;
+        }
     } else {
         std::cerr << "[benchmark] unknown experiment: " << experiment << "\n";
         return 1;
     }
 
-    const auto csv_path = kBenchmarksDir / "results" / ("cpp_" + experiment + ".csv");
     write_benchmark_results(csv_path, results);
     std::cout << "[benchmark] wrote " << results.size() << " rows to " << csv_path << "\n";
     return 0;

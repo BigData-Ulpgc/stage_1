@@ -1,6 +1,7 @@
 #include "stage1/datamart/index/hierarchical_index_writer.hpp"
 
 #include <cctype>
+#include <filesystem>
 #include <sstream>
 
 #include "stage1/util/file_io.hpp"
@@ -30,6 +31,10 @@ std::string postings_file_content(const std::vector<int>& postings) {
 }  // namespace
 
 void HierarchicalIndexWriter::write(const InvertedIndex& index) {
+    // Start from an empty folder: overwriting the current terms' files alone
+    // would leave the files of terms no longer in `index` behind, and the
+    // folder would no longer match the index (see the header).
+    std::filesystem::remove_all(root_);
     for (const auto& entry : index.entries()) {
         const std::filesystem::path term_path = root_ / hierarchical_folder_name(entry.term) / (entry.term + ".txt");
         write_text_file(term_path, postings_file_content(entry.postings));

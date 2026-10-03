@@ -75,6 +75,21 @@ constexpr const char* kCreateTableSql =
 constexpr const char* kCreateAuthorIndexSql = "CREATE INDEX IF NOT EXISTS idx_books_author ON books(author);";
 constexpr const char* kCreateTitleIndexSql = "CREATE INDEX IF NOT EXISTS idx_books_title ON books(title);";
 
+constexpr const char* kInsertBookSql =
+    "INSERT OR REPLACE INTO books (book_id, title, author, language, release_date, body_path, header_path) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?);";
+
+// Binds `row` to the 7 parameters of kInsertBookSql, in its column order.
+void bind_row(sqlite3_stmt* stmt, const StoredBook& row) {
+    sqlite3_bind_int(stmt, 1, row.book_id);
+    bind_optional_text(stmt, 2, row.title);
+    bind_optional_text(stmt, 3, row.author);
+    bind_optional_text(stmt, 4, row.language);
+    bind_optional_text(stmt, 5, row.release_date);
+    sqlite3_bind_text(stmt, 6, row.body_path.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 7, row.header_path.c_str(), -1, SQLITE_TRANSIENT);
+}
+
 }  // namespace
 
 MetadataStore::MetadataStore(const std::filesystem::path& db_path) {
@@ -103,22 +118,42 @@ MetadataStore::~MetadataStore() { sqlite3_close(db_); }
 
 void MetadataStore::insert_book(int book_id, const BookMetadata& metadata, const std::string& body_path,
                                  const std::string& header_path) {
-    static constexpr const char* kSql =
-        "INSERT OR REPLACE INTO books (book_id, title, author, language, release_date, body_path, header_path) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?);";
-    Statement statement(db_, kSql);
-
-    sqlite3_bind_int(statement.get(), 1, book_id);
-    bind_optional_text(statement.get(), 2, metadata.title);
-    bind_optional_text(statement.get(), 3, metadata.author);
-    bind_optional_text(statement.get(), 4, metadata.language);
-    bind_optional_text(statement.get(), 5, metadata.release_date);
-    sqlite3_bind_text(statement.get(), 6, body_path.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(statement.get(), 7, header_path.c_str(), -1, SQLITE_TRANSIENT);
-
+    Statement statement(db_, kInsertBookSql);
+    bind_row(statement.get(), StoredBook{book_id, metadata.title, metadata.author, metadata.language,
+                                         metadata.release_date, body_path, header_path});
     if (sqlite3_step(statement.get()) != SQLITE_DONE) {
         throw std::runtime_error(std::string("failed to insert book: ") + sqlite3_errmsg(db_));
     }
+}
+
+void MetadataStore::insert_books(const std::vector<StoredBook>& rows) {
+    if (rows.empty()) {
+        return;
+    }
+    begin_transaction();
+    try {
+        Statement statement(db_, kInsertBookSql);  // prepared once for the whole batch
+        for (const auto& row : rows) {
+            bind_row(statement.get(), row);
+            if (sqlite3_step(statement.get()) != SQLITE_DONE) {
+                throw std::runtime_error("failed to insert book " + std::to_string(row.book_id) + ": " +
+                                         sqlite3_errmsg(db_));
+            }
+            sqlite3_reset(statement.get());  // ready to run again with the next row's values
+        }
+    } catch (...) {
+        rollback_transaction();  // all or nothing
+        throw;
+    }
+    commit_transaction();
+}
+
+long long MetadataStore::count() const {
+    Statement statement(db_, "SELECT COUNT(*) FROM books;");
+    if (sqlite3_step(statement.get()) != SQLITE_ROW) {
+        throw std::runtime_error(std::string("failed to count books: ") + sqlite3_errmsg(db_));
+    }
+    return sqlite3_column_int64(statement.get(), 0);
 }
 
 namespace {
@@ -183,14 +218,14 @@ std::optional<StoredBook> MetadataStore::find_by_id(int book_id) const {
 std::vector<StoredBook> MetadataStore::find_by_author(const std::string& author) const {
     static constexpr const char* kSql =
         "SELECT book_id, title, author, language, release_date, body_path, header_path "
-        "FROM books WHERE author = ?;";
+        "FROM books WHERE author = ? ORDER BY book_id;";
     return find_all(db_, kSql, author);
 }
 
 std::vector<StoredBook> MetadataStore::find_by_title(const std::string& title) const {
     static constexpr const char* kSql =
         "SELECT book_id, title, author, language, release_date, body_path, header_path "
-        "FROM books WHERE title = ?;";
+        "FROM books WHERE title = ? ORDER BY book_id;";
     return find_all(db_, kSql, title);
 }
 

@@ -63,7 +63,7 @@ struct PipelineFixture {
     MonolithicIndexWriter index_writer{root.path() / "inverted_index.json"};
     const std::unordered_set<std::string> stopwords{"the"};
 
-    stage1::ControlDecision step(const std::vector<int>& candidate_ids) {
+    stage1::StepResult step(const std::vector<int>& candidate_ids) {
         return run_pipeline_step(candidate_ids, downloaded, indexed, source, datalake, metadata, index, index_writer,
                                   stopwords);
     }
@@ -74,10 +74,12 @@ struct PipelineFixture {
 TEST(Pipeline, FirstStepDownloadsTheFirstCandidate) {
     PipelineFixture fixture;
 
-    auto decision = fixture.step({1342});
+    auto result = fixture.step({1342});
 
-    EXPECT_EQ(decision.action, ControlAction::DownloadBook);
-    EXPECT_EQ(decision.book_id, 1342);
+    EXPECT_EQ(result.decision.action, ControlAction::DownloadBook);
+    EXPECT_EQ(result.decision.book_id, 1342);
+    EXPECT_TRUE(result.completed);
+    EXPECT_EQ(result.failure, "");
     EXPECT_TRUE(fixture.downloaded.contains(1342));
     EXPECT_FALSE(fixture.indexed.contains(1342));
 
@@ -91,9 +93,10 @@ TEST(Pipeline, SecondStepIndexesTheDownloadedBook) {
     PipelineFixture fixture;
     fixture.step({1342});  // downloads it first
 
-    auto decision = fixture.step({1342});
+    auto result = fixture.step({1342});
 
-    EXPECT_EQ(decision.action, ControlAction::IndexBook);
+    EXPECT_EQ(result.decision.action, ControlAction::IndexBook);
+    EXPECT_TRUE(result.completed);
     EXPECT_TRUE(fixture.indexed.contains(1342));
     EXPECT_EQ(fixture.index.postings("whale"), std::vector<int>{1342});
     EXPECT_TRUE(fixture.index.postings("the").empty());  // "the" is a stopword
@@ -107,27 +110,44 @@ TEST(Pipeline, ThirdStepHasNothingLeftToDo) {
     fixture.step({1342});  // download
     fixture.step({1342});  // index
 
-    auto decision = fixture.step({1342});
+    auto result = fixture.step({1342});
 
-    EXPECT_EQ(decision.action, ControlAction::Nothing);
+    EXPECT_EQ(result.decision.action, ControlAction::Nothing);
+    EXPECT_TRUE(result.completed);  // nothing to do counts as done
 }
 
 TEST(Pipeline, AFailedDownloadIsNeverMarkedDownloaded) {
     PipelineFixture fixture;
     fixture.http_client = FakeHttpClient(DownloadResult::failure("HTTP 404"));
 
-    auto decision = fixture.step({1342});
+    auto result = fixture.step({1342});
 
-    EXPECT_EQ(decision.action, ControlAction::DownloadBook);  // attempted
-    EXPECT_FALSE(fixture.downloaded.contains(1342));          // but never marked
+    EXPECT_EQ(result.decision.action, ControlAction::DownloadBook);  // attempted
+    EXPECT_FALSE(result.completed);                                   // reported as not done
+    EXPECT_EQ(result.failure, "HTTP 404");                            // with the fetch's own error
+    EXPECT_FALSE(fixture.downloaded.contains(1342));                  // and never marked
 }
 
 TEST(Pipeline, ABookWithoutMarkersIsNeverMarkedDownloaded) {
     PipelineFixture fixture;
     fixture.http_client = FakeHttpClient(DownloadResult::success("Just some text, no Gutenberg markers at all."));
 
-    auto decision = fixture.step({1342});
+    auto result = fixture.step({1342});
 
-    EXPECT_EQ(decision.action, ControlAction::DownloadBook);
+    EXPECT_EQ(result.decision.action, ControlAction::DownloadBook);
+    EXPECT_FALSE(result.completed);
+    EXPECT_NE(result.failure.find("START/END markers"), std::string::npos);
     EXPECT_FALSE(fixture.downloaded.contains(1342));
+}
+
+TEST(Pipeline, IndexingABookWithoutMetadataIsReportedAndNeverMarkedIndexed) {
+    PipelineFixture fixture;
+    fixture.downloaded.mark(1342);  // marked downloaded, but no metadata row was ever stored
+
+    auto result = fixture.step({1342});
+
+    EXPECT_EQ(result.decision.action, ControlAction::IndexBook);
+    EXPECT_FALSE(result.completed);
+    EXPECT_NE(result.failure.find("no metadata row"), std::string::npos);
+    EXPECT_FALSE(fixture.indexed.contains(1342));
 }

@@ -1,0 +1,16 @@
+language,experiment,structure,dataset_size,repetition,metric,value,unit
+cpp,datalake_storage,book,200,1,files,400.000,count
+cpp,datalake_storage,book,200,1,directories,200.000,count
+cpp,datalake_storage,book,200,1,max_entries_per_dir,200.000,count
+cpp,datalake_storage,book,200,1,bytes,128980349.000,bytes
+cpp,datalake_storage,book,200,1,allocated_bytes,130883584.000,bytes
+cpp,datalake_storage,range,200,1,files,400.000,count
+cpp,datalake_storage,range,200,1,directories,47.000,count
+cpp,datalake_storage,range,200,1,max_entries_per_dir,220.000,count
+cpp,datalake_storage,range,200,1,bytes,128980349.000,bytes
+cpp,datalake_storage,range,200,1,allocated_bytes,130256896.000,bytes
+cpp,datalake_storage,time,200,1,files,400.000,count
+cpp,datalake_storage,time,200,1,directories,21.000,count
+cpp,datalake_storage,time,200,1,max_entries_per_dir,20.000,count
+cpp,datalake_storage,time,200,1,bytes,128980349.000,bytes
+cpp,datalake_storage,time,200,1,allocated_bytes,130150400.000,bytes

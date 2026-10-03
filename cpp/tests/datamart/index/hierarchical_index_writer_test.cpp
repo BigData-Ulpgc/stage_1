@@ -71,6 +71,24 @@ TEST(HierarchicalIndexWriter, EmptyIndexWritesNoFiles) {
     EXPECT_NO_THROW(HierarchicalIndexWriter(root.path()).write(InvertedIndex{}));
 }
 
+TEST(HierarchicalIndexWriter, WritingAgainReplacesThePreviousContents) {
+    // write() means "make the folder match this index" (DEVLOG Entry 18), as
+    // the monolithic and Mongo writers already do: a term that is no longer
+    // in the index must not keep its old file around.
+    TempDir root("stage1_hierarchical_index_writer_test_rewrite");
+    HierarchicalIndexWriter writer(root.path());
+    InvertedIndex bigger;
+    bigger.add_book(1, {"car", "boat"});
+    writer.write(bigger);
+
+    InvertedIndex smaller;
+    smaller.add_book(2, {"car"});
+    writer.write(smaller);
+
+    EXPECT_EQ(read_file(root.path() / "C" / "car.txt"), "2\n");
+    EXPECT_FALSE(std::filesystem::exists(root.path() / "B" / "boat.txt"));
+}
+
 TEST(HierarchicalIndexWriter, UpdateTermsOnlyTouchesTheGivenTermsFiles) {
     TempDir root("stage1_hierarchical_index_writer_test_update");
     InvertedIndex index;

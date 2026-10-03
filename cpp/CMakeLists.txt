@@ -54,6 +54,7 @@ add_library(stage1_core
   src/crawler/book_splitter.cpp
   src/crawler/curl_http_client.cpp
   src/crawler/gutenberg_client.cpp
+  src/crawler/local_file_source.cpp
   src/datamart/metadata/metadata.cpp
   src/datamart/metadata/metadata_store.cpp
   src/util/file_io.cpp
@@ -70,20 +71,25 @@ add_library(stage1_core
   src/control/book_id_list.cpp
   src/control/pipeline.cpp
   src/benchmark/benchmark.cpp
+  src/benchmark/java_random.cpp
   src/benchmark/sample_books.cpp
-  src/benchmark/index_build_benchmark.cpp
-  src/benchmark/query_list.cpp
-  src/benchmark/index_query_benchmark.cpp
-  src/benchmark/datalake_write_benchmark.cpp
-  src/benchmark/datalake_lookup_benchmark.cpp
-  src/benchmark/datalake_incremental_benchmark.cpp
-  src/benchmark/datalake_recovery_benchmark.cpp
-  src/benchmark/datalake_storage_benchmark.cpp
-  src/benchmark/metadata_insert_benchmark.cpp
-  src/benchmark/metadata_query_benchmark.cpp
-  src/benchmark/index_update_benchmark.cpp
-  src/benchmark/index_memory_benchmark.cpp
-  src/benchmark/index_disk_benchmark.cpp)
+  src/benchmark/datalake/datalake_benchmark_support.cpp
+  src/benchmark/datalake/datalake_incremental_benchmark.cpp
+  src/benchmark/datalake/datalake_lookup_benchmark.cpp
+  src/benchmark/datalake/datalake_recovery_benchmark.cpp
+  src/benchmark/datalake/datalake_storage_benchmark.cpp
+  src/benchmark/datalake/datalake_write_benchmark.cpp
+  src/benchmark/datalake/simulated_clock.cpp
+  src/benchmark/index/index_benchmark_support.cpp
+  src/benchmark/index/index_build_benchmark.cpp
+  src/benchmark/index/index_disk_benchmark.cpp
+  src/benchmark/index/index_memory_benchmark.cpp
+  src/benchmark/index/index_query_benchmark.cpp
+  src/benchmark/index/index_update_benchmark.cpp
+  src/benchmark/index/query_list.cpp
+  src/benchmark/metadata/metadata_benchmark_support.cpp
+  src/benchmark/metadata/metadata_insert_benchmark.cpp
+  src/benchmark/metadata/metadata_query_benchmark.cpp)
 target_link_libraries(stage1_core PUBLIC stage1_deps)
 
 # ---- Executable ----
@@ -98,6 +104,7 @@ target_link_libraries(search_engine_stage1 PRIVATE stage1_core)
 # STAGE1_SHARED_DIR, see tests/CMakeLists.txt).
 target_compile_definitions(search_engine_stage1 PRIVATE
   STAGE1_SHARED_DIR="${CMAKE_SOURCE_DIR}/../shared"
+  STAGE1_SAMPLE_DIR="${CMAKE_SOURCE_DIR}/../sample_dataset"
   STAGE1_DATA_DIR="${CMAKE_SOURCE_DIR}/data"
   STAGE1_BENCHMARKS_DIR="${CMAKE_SOURCE_DIR}/benchmarks")
 

@@ -39,30 +39,35 @@ public:
     void insert_book(int book_id, const BookMetadata& metadata, const std::string& body_path,
                       const std::string& header_path);
 
+    // Inserts (or replaces) every row of `rows` as one batch, the Java
+    // module's saveAll: one transaction and one prepared statement for the
+    // whole batch. All or nothing: if a row fails, the batch is rolled back
+    // and the error rethrown. An empty batch does nothing.
+    void insert_books(const std::vector<StoredBook>& rows);
+
+    // How many rows the `books` table holds.
+    long long count() const;
+
     // Looks up a book by id. Returns std::nullopt if no such book is stored.
     std::optional<StoredBook> find_by_id(int book_id) const;
 
     // Every book whose author/title is exactly `author`/`title` (empty if
-    // none). Exact match, not a substring search -- what SPEC section 4's
+    // none), in ascending book_id order, the order the Java module's queries
+    // return. Exact match, not a substring search -- what SPEC section 4's
     // "find all books by a specific author" means, and what the author/title
     // indexes this class already creates (see the constructor) exist for;
     // nothing called either of these until DEVLOG entry 38.
     std::vector<StoredBook> find_by_author(const std::string& author) const;
     std::vector<StoredBook> find_by_title(const std::string& title) const;
 
-    // Groups every insert_book() call between begin_transaction() and
-    // commit_transaction() into a single disk commit, instead of each
-    // insert_book() committing on its own (SQLite's default, "autocommit"
-    // behavior). Inserting many rows one by one without this pays one fsync
-    // per row, which Entry 36's benchmark run showed as noisy, lower
-    // throughput; see Entry 37 for the measured before/after. rollback_
-    // transaction() discards everything written since begin_transaction()
-    // instead of committing it.
+private:
+    // The transaction insert_books() wraps each batch in. One commit per batch
+    // instead of one per row (SQLite's autocommit) is what made bulk inserts
+    // fast (DEVLOG Entries 36 and 37); rollback discards the whole batch.
     void begin_transaction();
     void commit_transaction();
     void rollback_transaction();
 
-private:
     sqlite3* db_;
 };
 
