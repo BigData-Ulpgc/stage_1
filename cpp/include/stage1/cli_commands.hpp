@@ -4,10 +4,15 @@
 
 namespace stage1 {
 
-// Implements `search_engine_stage1 pipeline <N>`: downloads and indexes up
+// Implements `search_engine_stage1 pipeline <N> [--offline]`: downloads and indexes up
 // to `steps` books, resuming from whatever shared/book_ids.txt and the
 // control logs under data/ already reflect. Returns the process exit code.
-int run_pipeline_command(int steps);
+//
+// With `offline`, the books come from sample_dataset/ instead of Project
+// Gutenberg: its 15 ids (sample_dataset/book_ids.txt), read from
+// sample_dataset/raw/ with LocalFileSource. No network is used, and
+// everything after fetching a book stays exactly the same.
+int run_pipeline_command(int steps, bool offline);
 
 // Implements `search_engine_stage1 search <words...>`: an AND query (SPEC
 // section 7) answered straight from the inverted index `pipeline` persisted

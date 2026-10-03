@@ -24,6 +24,7 @@
 #include "stage1/benchmark/datalake_write_benchmark.hpp"
 #include "stage1/util/file_io.hpp"
 #include "stage1/crawler/gutenberg_client.hpp"
+#include "stage1/crawler/local_file_source.hpp"
 #include "stage1/benchmark/index_build_benchmark.hpp"
 #include "stage1/benchmark/index_disk_benchmark.hpp"
 #include "stage1/benchmark/index_memory_benchmark.hpp"
@@ -50,6 +51,7 @@ namespace {
 // its own data/ and benchmarks/ directories regardless of the current working
 // directory it is launched from.
 const std::filesystem::path kSharedDir = STAGE1_SHARED_DIR;
+const std::filesystem::path kSampleDir = STAGE1_SAMPLE_DIR;
 const std::filesystem::path kDataDir = STAGE1_DATA_DIR;
 const std::filesystem::path kBenchmarksDir = STAGE1_BENCHMARKS_DIR;
 
@@ -79,15 +81,24 @@ void describe(const ControlDecision& decision) {
 // behind their own interface (Datalake, IndexWriter), so swapping either for
 // a benchmark run means changing these two lines, not anything in
 // stage1_core.
-int run_pipeline_command(int steps) {
+int run_pipeline_command(int steps, bool offline) {
     const auto stopwords = load_stopwords(kSharedDir / "stopwords.txt");
-    const auto candidate_ids = load_book_ids(kSharedDir / "book_ids.txt");
+    const auto candidate_ids = load_book_ids(offline ? kSampleDir / "book_ids.txt" : kSharedDir / "book_ids.txt");
 
     ControlLog downloaded(kDataDir / "control" / "downloaded_books.txt");
     ControlLog indexed(kDataDir / "control" / "indexed_books.txt");
 
+    // Where the books come from is the only difference between the two modes:
+    // both sources are BookSources, and nothing below this point knows which
+    // one it was given.
     CurlHttpClient http_client;
-    GutenbergSource source(http_client);
+    GutenbergSource gutenberg(http_client);
+    LocalFileSource sample(kSampleDir / "raw");
+    BookSource& source = offline ? static_cast<BookSource&>(sample) : gutenberg;
+    if (offline) {
+        std::cout << "[pipeline] offline: reading books from " << (kSampleDir / "raw").lexically_normal() << "\n";
+    }
+
     BookBasedDatalake datalake(kDataDir / "datalake" / "book");
     MetadataStore metadata(kDataDir / "datamarts" / "metadata.db");
     MonolithicIndexWriter index_writer(kIndexPath);

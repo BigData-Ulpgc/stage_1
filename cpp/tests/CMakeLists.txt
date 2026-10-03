@@ -8,6 +8,7 @@ add_executable(stage1_tests
   crawler/book_splitter_test.cpp
   crawler/download_result_test.cpp
   crawler/gutenberg_client_test.cpp
+  crawler/local_file_source_test.cpp
   datamart/metadata/metadata_test.cpp
   datamart/metadata/metadata_store_test.cpp
   datalake/book_based_datalake_test.cpp

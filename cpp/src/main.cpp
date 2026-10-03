@@ -12,7 +12,7 @@
 namespace {
 
 void print_usage() {
-    std::cerr << "usage: search_engine_stage1 pipeline <N>\n"
+    std::cerr << "usage: search_engine_stage1 pipeline <N> [--offline]\n"
                  "       search_engine_stage1 search <words...>\n"
                  "       search_engine_stage1 status\n"
                  "       search_engine_stage1 benchmark "
@@ -25,14 +25,15 @@ void print_usage() {
 
 int main(int argc, char** argv) {
     try {
-        if (argc == 3 && std::string_view(argv[1]) == "pipeline") {
+        if ((argc == 3 || argc == 4) && std::string_view(argv[1]) == "pipeline") {
             char* end = nullptr;
             const long steps = std::strtol(argv[2], &end, 10);
-            if (end == argv[2] || steps <= 0) {
+            const bool offline = argc == 4 && std::string_view(argv[3]) == "--offline";
+            if (end == argv[2] || steps <= 0 || (argc == 4 && !offline)) {
                 print_usage();
                 return 1;
             }
-            return stage1::run_pipeline_command(static_cast<int>(steps));
+            return stage1::run_pipeline_command(static_cast<int>(steps), offline);
         }
 
         if (argc >= 3 && std::string_view(argv[1]) == "search") {

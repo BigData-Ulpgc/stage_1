@@ -37,14 +37,15 @@ in a shell variable for the rest of the session:
 B=./build/release/search_engine_stage1
 ```
 
-The binary finds `../shared/` and its own `data/` folder through paths fixed at build time, so it
-works from any directory.
+The binary finds `../shared/`, `../sample_dataset/` and its own `data/` folder through paths fixed
+at build time, so it works from any directory.
 
 ## 3. Commands
 
 | Command | What it does | Network | Writes to disk |
 |---|---|---|---|
-| `$B pipeline <N>` | Runs up to N pipeline steps. Each step either **downloads** one book from Project Gutenberg (header/body split, datalake, metadata) or **indexes** one already-downloaded book, indexing first. Stops early when nothing is left. | yes | `data/` |
+| `$B pipeline <N>` | Runs up to N pipeline steps over the 200 books of `shared/book_ids.txt`. Each step either **downloads** one book from Project Gutenberg (header/body split, datalake, metadata) or **indexes** one already-downloaded book, indexing first. Stops early when nothing is left. | yes | `data/` |
+| `$B pipeline <N> --offline` | The same pipeline, but **without network**: the books are the 15 of `sample_dataset/`, read from `sample_dataset/raw/` instead of Project Gutenberg. Everything after fetching a book is identical. | no | `data/` |
 | `$B search <words...>` | AND search: the books containing **every** word, with their titles. Words are tokenized like the books (case, punctuation and stopwords ignored). | no | nothing |
 | `$B status` | How many books the dataset lists, how many are downloaded and indexed, and which are downloaded but not indexed yet. | no | nothing |
 | `$B benchmark <experiment>` | Runs one of the 12 SPEC experiments on the books already downloaded and writes `benchmarks/results/cpp_<experiment>.csv`. | no | `benchmarks/` |
@@ -57,17 +58,19 @@ Running `$B` with no arguments, or with wrong ones, prints this usage and exits 
 
 ## 4. Quick start
 
+**Without network, in about a second.** These are the 15 books of `sample_dataset/`, a snapshot
+kept in the repository:
+
 ```bash
-$B pipeline 40
+$B pipeline 30 --offline
 $B status
 $B search whale island
 ```
 
-`pipeline 40` downloads and indexes the 15 books in `shared/book_ids.txt` (about 20 seconds with a
-normal connection; each book takes one download step and one index step). Then:
+Each book takes one step to fetch and one to index, so 30 steps cover all 15. Then:
 
 ```
-dataset:    15 book id(s) in shared/book_ids.txt
+dataset:    200 book id(s) in shared/book_ids.txt
 downloaded: 15
 indexed:    15
 pending:    0
@@ -78,6 +81,17 @@ pending:    0
   84  Frankenstein; or, the modern prometheus
   2701  Moby Dick; Or, The Whale
 ```
+
+**The whole dataset, from Project Gutenberg.** 200 books, 400 steps, about 10 minutes:
+
+```bash
+$B pipeline 400
+```
+
+Both modes write to the same `data/`. If you start offline and then run `pipeline` online, the 15
+sample books are already done and only the other 185 are downloaded. The sample files are
+byte-identical to what Gutenberg served when the sample was made, so the result is the same either
+way.
 
 ## 5. Where the data goes
 
@@ -104,21 +118,23 @@ The ids in the last line must match the ones `$B search whale` prints.
 
 ## 6. Trying it by hand
 
-**Resuming after an interruption.** This test downloads everything again, so move your current data
-out of the way first:
+**Resuming after an interruption.** This test starts from an empty `data/`, so move your current data
+out of the way first. It runs offline, so it needs no network and takes seconds:
 
 ```bash
 mv data ~/stage1_data_backup
-$B pipeline 5
+$B pipeline 5 --offline
 $B status
-$B pipeline 40
+$B pipeline 40 --offline
 ```
 
 | Step | Expected |
 |---|---|
-| `pipeline 5` | 3 books downloaded, 2 indexed |
-| `status` | `pending: 1`, the third book (downloaded, not indexed yet) |
-| `pipeline 40` | its **first** line indexes that pending book, then it continues and ends with `nothing left to do` |
+| `pipeline 5 --offline` | 3 books fetched, 2 indexed |
+| `status` | `pending: 1 (downloaded, not indexed yet: 11)`, the third book |
+| `pipeline 40 --offline` | after the `offline: reading books from ...` line, its **first** step is `indexed book 11`; it then continues and ends with `nothing left to do` |
+
+The same works online (without `--offline`); it is just slower.
 
 Pressing Ctrl+C in the middle of a `pipeline` run and starting it again behaves the same way: work
 already recorded in `data/control/` is never repeated. Afterwards, either delete the backup
@@ -150,3 +166,6 @@ $B status x ; echo $?
   `pipeline 5`.
 - **Starting over.** `rm -rf data` deletes all downloaded books and the indexes. The next `pipeline`
   run downloads everything again.
+- **Checking the offline output.** After `pipeline 30 --offline` on an empty `data/`, the datalake is
+  byte-identical to the sample's expected output: `diff -r data/datalake/book ../sample_dataset/book`
+  prints nothing.

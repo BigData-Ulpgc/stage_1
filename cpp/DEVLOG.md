@@ -2367,3 +2367,77 @@ and SPEC section 9 referenced it, but it did not exist.
   their fake source.
 - SPEC section 10.1 still says `sample_dataset/` "does not exist yet". That sentence belongs to the
   shared contract, so it is left for an explicit decision.
+
+## Entry 49 – Offline pipeline mode: `pipeline <N> --offline` reads `sample_dataset/raw/` (2026-10-03)
+
+### What was done
+- `include/stage1/crawler/local_file_source.hpp` + `src/crawler/local_file_source.cpp`:
+  `LocalFileSource`, a second `BookSource` next to `GutenbergSource`. `fetch(id)` reads
+  `<dir>/pg<ID>.txt` in binary mode and returns its bytes untouched: the `\r\n` normalization stays
+  in `split_book` (SPEC section 2), exactly as for a download. A missing file is a failed fetch, not
+  an exception, so the pipeline leaves the book unmarked as it does after a failed download.
+- `pipeline <N> --offline`:
+  - `main.cpp` accepts an optional `--offline`; any other fourth argument prints usage and exits 1.
+  - `run_pipeline_command(steps, offline)` takes the ids from `sample_dataset/book_ids.txt` instead
+    of `shared/book_ids.txt`, and uses `LocalFileSource(sample_dataset/raw)` instead of
+    `GutenbergSource`.
+  - New compile definition `STAGE1_SAMPLE_DIR`, the same pattern as the other directory macros.
+  - Everything after the source is selected is untouched. Both sources are built, and a
+    `BookSource&` refers to the chosen one, so nothing downstream knows which mode it runs in.
+- 3 tests:
+  - the bytes come back unmodified (CRLF and UTF-8 included);
+  - a missing file is a failure that names the file;
+  - for all 15 real sample books, `LocalFileSource` + `split_book` reproduce `sample_dataset/book/`
+    byte for byte. That test ties the sample and the splitter together on every test run.
+  
+  Suite total: 175.
+- `cpp/README.md`:
+  - the new mode is documented;
+  - the quick start and the resume test now run offline (seconds, no network);
+  - the full online dataset is described as `pipeline 400`, about 10 minutes;
+  - figures left stale by the move to 200 books are fixed (the quick start still showed
+    `dataset: 15`, and `pipeline 40` no longer reaches the end).
+- `sample_dataset/README.md`: it no longer says that no implementation has an offline mode.
+
+### Verification (real run, network blocked)
+The real data was moved aside, and every HTTP(S) request was sent to a closed local port
+(`https_proxy=http://127.0.0.1:9`).
+- **Control:** the normal mode fetched nothing (`downloaded: 0`), so the network really was blocked.
+- **Offline:** 15 books fetched and indexed in under a second (about 18 s when downloading).
+  - `data/datalake/book/` was byte-identical to `sample_dataset/book/` (`diff -r` empty).
+  - The index gave 30,396 terms and 89,727 postings, and `search whale island` returned the usual 3
+    books.
+- Every command the updated README shows was run, and its output matches.
+- The real 200-book `data/` was restored afterwards.
+
+### Why
+- **A sample nobody can feed to the program is not a sample.** The assignment wants instructors to
+  "quickly test the pipeline". Without a way to read `sample_dataset/`, the program could only
+  download from the internet. The offline mode is what makes the sample usable, it gives the same
+  result on every machine, and it removes the dependency on Gutenberg being reachable.
+- **A new `BookSource`, not a new pipeline.** `BookSource` was introduced so the transport could be
+  swapped, and the tests already relied on that. Adding one class and choosing it in the CLI keeps
+  the split, datalake, metadata, index and control code identical in both modes. That is why the
+  offline output can serve as evidence for the online one.
+- **Sample ids, not the 200.** Offline, only the 15 sample books exist. Using `shared/book_ids.txt`
+  would leave 185 ids failing on every step.
+- **Same `data/` folder in both modes.** The sample files are byte-identical to what Gutenberg served
+  when the sample was made. An offline run followed by an online one therefore gives the same
+  `data/` as an online run alone: the online run just skips the 15 books already done.
+
+### Two existing bugs found along the way (not fixed yet)
+- **Misleading `downloaded book X` message.** `run_pipeline_step` returns the *decision* it took, not
+  its outcome, and the CLI prints the decision. With the network blocked, `pipeline 3` printed
+  `downloaded book 1342` three times while `status` reported 0 downloaded. No data is affected, since
+  the book is correctly left unmarked and retried, but the message is false.
+- **`HierarchicalIndexWriter::write()` never removes term files that are no longer in the index.** It
+  only writes the current index's terms, which breaks its own contract (Entry 18: "make the structure
+  match this index, not append"); the monolithic and Mongo writers do follow it. The pipeline's index
+  only grows, so nothing is wrong there. But `benchmarks/work/` is reused between runs, and the
+  benchmarks do not clear it first. Writing the N=50 index over the N=200 one would leave 129,356 stale
+  files: `index_disk` would count files and bytes that are not in the index, and hierarchical
+  `index_query` would return books outside the 50. It must be fixed before the id-ordered prefixes
+  (step 3 of the benchmark adaptation).
+- Seen while looking into it: the N=200 hierarchical index holds **7,251,967 bytes of data**, exactly
+  Java's `bytes` value, but occupies **~530 MB of disk blocks** (Java: 530,001,920 bytes allocated).
+  Each of its 129,356 small files takes at least one 4,096-byte block, about 73 times the data size.
