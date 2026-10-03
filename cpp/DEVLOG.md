@@ -3205,3 +3205,51 @@ expectation ("this module's Mongo `index_update` will be slower for that reason"
 Each `write()`/`update_terms()` call still opens a new client connection, while Java keeps one per
 index object (Entry 58). With the round trips gone, that connection is a larger share of each call,
 but it was not measured separately.
+
+---
+
+## Entry 65 – The benchmark module split into one subfolder per category (2026-10-03)
+
+### What was done
+At the user's request, `benchmark/` was split into subfolders. It had grown to 20 headers, 20
+sources and 20 test files side by side. The split is the same in `include/stage1/benchmark/`,
+`src/benchmark/` and `tests/benchmark/`:
+
+```
+benchmark/
+├── benchmark, java_random, sample_books          shared by more than one category
+├── datalake/   datalake_{write,lookup,incremental,recovery,storage}_benchmark,
+│               datalake_benchmark_support, simulated_clock
+├── index/      index_{build,query,update,memory,disk}_benchmark,
+│               index_benchmark_support, query_list
+└── metadata/   metadata_{insert,query}_benchmark, metadata_benchmark_support
+```
+
+- **What stays at the root:**
+  - `benchmark` is the runner, the CSV writer, `allocated_bytes` and the row helpers;
+  - `java_random` is used by the datalake and metadata experiments;
+  - `sample_books` is used by the datalake and index experiments.
+- **Which category the helpers went to:**
+  - `simulated_clock` is only used by the datalake experiments, so it went to `datalake/`;
+  - `query_list` loads the query workload of the index experiments, so it went to `index/`.
+- **File names were kept**, prefix included, for three reasons:
+  - every basename stays unique, so there is no `index/query_benchmark` next to a
+    `metadata/query_benchmark`;
+  - `grep` and the editor still find each file by its old name;
+  - it follows the `datamart/index/inverted_index.hpp` style already used in this module.
+- The 51 files were moved with `git mv`, so git records them as renames and keeps their history.
+- 37 files had their `#include "stage1/benchmark/..."` lines updated. Both `CMakeLists.txt` lists
+  are now grouped by folder.
+- The namespace stays the flat `stage1`, as decided in Entry 45.
+
+### Why
+These are the categories the experiments already have everywhere else: SPEC section 9, Java's three
+benchmark classes, and the `results/real|synthetic/<category>/` layout of Entry 63. Each of the
+categories now fits on one screen. The Java module keeps its `benchmark` package flat, but it has a
+single class per category, against six or seven files per category here.
+
+### Verification
+- A clean configure and build in an empty folder had no warnings outside GoogleTest. All 217 tests
+  pass; the 10 Mongo ones were skipped because no server was running.
+- The rebuilt CLI reran the deterministic `datalake_storage`, and its CSV came out identical to the
+  committed one: the moved code produces exactly the same results.
