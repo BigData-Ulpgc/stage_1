@@ -1,27 +1,27 @@
 #pragma once
 
+#include <cstddef>
 #include <filesystem>
 #include <string>
 #include <vector>
 
 #include "stage1/benchmark/benchmark.hpp"
-#include "stage1/benchmark/sample_books.hpp"
+#include "stage1/benchmark/metadata_benchmark_support.hpp"
 
 namespace stage1 {
 
-// SPEC section 9's "metadata_insert" experiment (section 4's own "insertion
-// speed"): before each repetition (untimed), opens a fresh, empty
-// MetadataStore; the timed part is only "extract metadata from every book's
-// header and insert it" -- opening the database and creating its schema is a
-// one-time cost, not part of what "insertion speed" means. Verifies every
-// book ended up present after the final repetition. `measure_elapsed_ms`'s
-// default 2+5 repetitions. `structure` is always "sqlite": this project has
-// only one metadata backend (see DEVLOG entry 13's reasoning for not
-// generalizing MetadataStore without a second real implementation), unlike
-// the Java module, which also compares "sqlite" against "sqlite_no_index".
-// Returns 5 "elapsed" rows plus 5 derived "throughput" rows (rows/s).
+// SPEC section 9's "metadata_insert" experiment, as the Java module's
+// MetadataBenchmark.insert runs it, on already built rows (no header is
+// parsed: building the metadata is not part of the timing). The rows are split
+// into batches of `batch_size` before anything is timed. For each variant
+// (sqlite, sqlite_no_index), the untimed setup of every repetition opens an
+// empty database; the timed part inserts every batch with insert_books (one
+// transaction per batch). Throws unless the table ends up with every row. Rows
+// per variant, in Java's order: 5 "elapsed" (ms), then 5 "throughput"
+// (rows_per_s). The databases go to `output_dir`/insert/<variant>_<N>.db.
 std::vector<BenchmarkResult> benchmark_metadata_insert(const std::string& language,
-                                                         const std::vector<SampleBook>& books,
-                                                         const std::filesystem::path& output_dir);
+                                                         const std::vector<StoredBook>& rows,
+                                                         const std::filesystem::path& output_dir,
+                                                         std::size_t batch_size = kMetadataBatchSize);
 
 }  // namespace stage1

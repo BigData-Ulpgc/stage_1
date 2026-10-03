@@ -235,11 +235,34 @@ int run_status_command() {
     return 0;
 }
 
-// Runs one SPEC section 9 experiment against books a previous `pipeline <N>`
-// run already downloaded (never the network: see load_sample_books), and
-// writes the result CSV to benchmarks/results/cpp_<experiment>.csv, the same
+// Runs one SPEC section 9 experiment -- the datalake and index ones against
+// books a previous `pipeline <N>` run already downloaded (never the network:
+// see load_sample_books), the metadata ones on synthetic rows (SPEC section
+// 10.2) -- and writes the result CSV to benchmarks/results/cpp_<experiment>.csv, the same
 // "results get committed, work is scratch" convention the Java module uses.
 int run_benchmark_command(const std::string& experiment) {
+    const auto work_dir = kBenchmarksDir / "work";
+    const auto csv_path = kBenchmarksDir / "results" / ("cpp_" + experiment + ".csv");
+
+    // SPEC section 10.2: the metadata experiments run on synthetic rows, not
+    // on the downloaded books, once per size N (each a prefix of the largest).
+    if (experiment == "metadata_insert" || experiment == "metadata_query") {
+        const auto dataset =
+            synthetic_metadata(*std::max_element(std::begin(kMetadataSizes), std::end(kMetadataSizes)));
+        std::vector<BenchmarkResult> results;
+        for (std::size_t n : kMetadataSizes) {
+            std::cout << "[benchmark] " << experiment << ", N=" << n << "\n";
+            const std::vector<StoredBook> rows(dataset.begin(), dataset.begin() + static_cast<std::ptrdiff_t>(n));
+            const auto part = experiment == "metadata_insert"
+                                  ? benchmark_metadata_insert("cpp", rows, work_dir / "metadata")
+                                  : benchmark_metadata_query("cpp", rows, work_dir / "metadata");
+            results.insert(results.end(), part.begin(), part.end());
+        }
+        write_benchmark_results(csv_path, results);
+        std::cout << "[benchmark] wrote " << results.size() << " rows to " << csv_path << "\n";
+        return 0;
+    }
+
     const auto stopwords = load_stopwords(kSharedDir / "stopwords.txt");
     const auto candidate_ids = load_book_ids(kSharedDir / "book_ids.txt");
 
@@ -254,7 +277,6 @@ int run_benchmark_command(const std::string& experiment) {
     }
     std::cout << "[benchmark] using " << books.size() << " already-downloaded book(s)\n";
 
-    const auto work_dir = kBenchmarksDir / "work";
     std::vector<BenchmarkResult> results;
 
     if (experiment == "datalake_write") {
@@ -267,10 +289,6 @@ int run_benchmark_command(const std::string& experiment) {
         results = benchmark_datalake_recovery("cpp", books, work_dir);
     } else if (experiment == "datalake_storage") {
         results = benchmark_datalake_storage("cpp", books, work_dir);
-    } else if (experiment == "metadata_insert") {
-        results = benchmark_metadata_insert("cpp", books, work_dir);
-    } else if (experiment == "metadata_query") {
-        results = benchmark_metadata_query("cpp", books, work_dir);
     } else if (experiment == "index_build" || experiment == "index_query" || experiment == "index_update" ||
                experiment == "index_memory" || experiment == "index_disk") {
         for (std::size_t n : kIndexSizes) {
@@ -293,7 +311,6 @@ int run_benchmark_command(const std::string& experiment) {
         return 1;
     }
 
-    const auto csv_path = kBenchmarksDir / "results" / ("cpp_" + experiment + ".csv");
     write_benchmark_results(csv_path, results);
     std::cout << "[benchmark] wrote " << results.size() << " rows to " << csv_path << "\n";
     return 0;

@@ -60,7 +60,7 @@ at build time, so it works from any directory.
 | `$B pipeline <N> --offline` | The same pipeline, but **without network**: the books are the 15 of `sample_dataset/`, read from `sample_dataset/raw/` instead of Project Gutenberg. Everything after fetching a book is identical. | no | `data/` |
 | `$B search <words...>` | AND search: the books containing **every** word, with their titles. Words are tokenized like the books (case, punctuation and stopwords ignored). | no | nothing |
 | `$B status` | How many books the dataset lists, how many are downloaded and indexed, and which are downloaded but not indexed yet. | no | nothing |
-| `$B benchmark <experiment>` | Runs one of the 12 SPEC experiments on the books already downloaded and writes `benchmarks/results/cpp_<experiment>.csv`. | no | `benchmarks/` |
+| `$B benchmark <experiment>` | Runs one of the 12 SPEC experiments and writes `benchmarks/results/cpp_<experiment>.csv`. The datalake and index experiments use the books already downloaded; the metadata ones use synthetic rows at N=1,000, 10,000 and 100,000 (SPEC section 10.2). | no | `benchmarks/` |
 
 Experiments: `datalake_write`, `datalake_lookup`, `datalake_incremental`, `datalake_recovery`,
 `datalake_storage`, `metadata_insert`, `metadata_query`, `index_build`, `index_query`, `index_update`,

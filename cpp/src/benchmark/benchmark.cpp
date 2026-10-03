@@ -2,6 +2,7 @@
 
 #include <sys/statvfs.h>
 
+#include <algorithm>
 #include <chrono>
 #include <iomanip>
 #include <sstream>
@@ -43,6 +44,30 @@ long long allocated_bytes(const std::filesystem::path& root) {
         total += in_blocks(entry.is_directory() ? 1 : static_cast<long long>(entry.file_size()));
     }
     return total;
+}
+
+std::vector<BenchmarkResult> elapsed_rows(const std::string& language, const std::string& experiment,
+                                          const std::string& structure, int dataset_size,
+                                          const std::vector<double>& elapsed_ms) {
+    std::vector<BenchmarkResult> rows;
+    int repetition = 1;
+    for (double ms : elapsed_ms) {
+        rows.push_back(BenchmarkResult{language, experiment, structure, dataset_size, repetition++, "elapsed", ms, "ms"});
+    }
+    return rows;
+}
+
+std::vector<BenchmarkResult> derived_rows(const std::vector<BenchmarkResult>& elapsed, const std::string& metric,
+                                          const std::string& unit, const std::function<double(double)>& from_ms) {
+    std::vector<BenchmarkResult> rows;
+    for (const auto& row : elapsed) {
+        BenchmarkResult derived = row;  // same language, experiment, structure, size and repetition
+        derived.metric = metric;
+        derived.value = from_ms(std::max(row.value, 0.001));
+        derived.unit = unit;
+        rows.push_back(derived);
+    }
+    return rows;
 }
 
 std::vector<double> measure_elapsed_ms(const std::function<void()>& setup, const std::function<void()>& operation,

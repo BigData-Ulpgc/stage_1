@@ -1,6 +1,5 @@
 #include "stage1/benchmark/datalake_benchmark_support.hpp"
 
-#include <algorithm>
 #include <stdexcept>
 
 #include "stage1/benchmark/simulated_clock.hpp"
@@ -42,30 +41,6 @@ std::unique_ptr<Datalake> fresh_datalake(const std::string& structure, const std
         return std::make_unique<RangeBasedDatalake>(dir);
     }
     return std::make_unique<SimulatedTimeDatalake>(dir);
-}
-
-std::vector<BenchmarkResult> elapsed_rows(const std::string& language, const std::string& experiment,
-                                          const std::string& structure, int dataset_size,
-                                          const std::vector<double>& elapsed_ms) {
-    std::vector<BenchmarkResult> rows;
-    int repetition = 1;
-    for (double ms : elapsed_ms) {
-        rows.push_back(BenchmarkResult{language, experiment, structure, dataset_size, repetition++, "elapsed", ms, "ms"});
-    }
-    return rows;
-}
-
-std::vector<BenchmarkResult> derived_rows(const std::vector<BenchmarkResult>& elapsed, const std::string& metric,
-                                          const std::string& unit, const std::function<double(double)>& from_ms) {
-    std::vector<BenchmarkResult> rows;
-    for (const auto& row : elapsed) {
-        BenchmarkResult derived = row;  // same language, experiment, structure, size and repetition
-        derived.metric = metric;
-        derived.value = from_ms(std::max(row.value, 0.001));
-        derived.unit = unit;
-        rows.push_back(derived);
-    }
-    return rows;
 }
 
 }  // namespace stage1

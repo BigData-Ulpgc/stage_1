@@ -4,49 +4,43 @@
 #include "support/temp_dir.hpp"
 
 using stage1::benchmark_metadata_query;
-using stage1::SampleBook;
+using stage1::synthetic_metadata;
 using stage1::testing::TempDir;
 
-namespace {
-
-const std::vector<SampleBook> kCorpus = {
-    {1342, "body", "Title: Pride and Prejudice\nAuthor: Jane Austen"},
-    {84, "body", "Title: Frankenstein\nAuthor: Mary Shelley"},
-    {11, "body", "Title: Alice in Wonderland\nAuthor: Lewis Carroll"},
-};
-
-}  // namespace
-
-TEST(BenchmarkMetadataQuery, ProducesFiveRowsForEachOfTheThreeQueryTypesPlusTheirAverages) {
+TEST(BenchmarkMetadataQuery, GivesEachTypeAndItsAveragePerRepetitionInJavasOrder) {
     TempDir root("stage1_metadata_query_benchmark_test");
 
-    auto results = benchmark_metadata_query("cpp", kCorpus, root.path(), /*query_count=*/20);
+    // Must not throw: every query of the workload has to find something.
+    const auto results = benchmark_metadata_query("cpp", synthetic_metadata(30), root.path(), 50);
 
-    int by_id = 0, by_id_avg = 0, by_author = 0, by_author_avg = 0, by_title = 0, by_title_avg = 0;
-    for (const auto& result : results) {
-        EXPECT_EQ(result.language, "cpp");
-        EXPECT_EQ(result.experiment, "metadata_query");
-        EXPECT_EQ(result.structure, "sqlite");
-        EXPECT_EQ(result.dataset_size, 3);
-        EXPECT_GE(result.value, 0.0);
-        if (result.metric == "find_by_id") ++by_id;
-        if (result.metric == "find_by_id_avg") ++by_id_avg;
-        if (result.metric == "find_by_author") ++by_author;
-        if (result.metric == "find_by_author_avg") ++by_author_avg;
-        if (result.metric == "find_by_title") ++by_title;
-        if (result.metric == "find_by_title_avg") ++by_title_avg;
+    ASSERT_EQ(results.size(), 60u);  // 2 variants x 3 types x 5 repetitions x (total + avg)
+    const std::vector<std::string> structures = {"sqlite", "sqlite_no_index"};
+    const std::vector<std::string> types = {"find_by_id", "find_by_author", "find_by_title"};
+    std::size_t row = 0;
+    for (const auto& structure : structures) {
+        for (const auto& type : types) {
+            for (int repetition = 1; repetition <= 5; ++repetition) {
+                const auto& total = results[row++];
+                const auto& average = results[row++];
+                EXPECT_EQ(total.experiment, "metadata_query");
+                EXPECT_EQ(total.structure, structure);
+                EXPECT_EQ(total.dataset_size, 30);
+                EXPECT_EQ(total.metric, type);
+                EXPECT_EQ(total.unit, "ms");
+                EXPECT_EQ(total.repetition, repetition);
+                EXPECT_EQ(average.metric, type + "_avg");
+                EXPECT_EQ(average.unit, "us");
+                EXPECT_EQ(average.repetition, repetition);
+                EXPECT_DOUBLE_EQ(average.value, total.value * 1000.0 / 50);
+            }
+        }
     }
-    EXPECT_EQ(by_id, 5);
-    EXPECT_EQ(by_id_avg, 5);
-    EXPECT_EQ(by_author, 5);
-    EXPECT_EQ(by_author_avg, 5);
-    EXPECT_EQ(by_title, 5);
-    EXPECT_EQ(by_title_avg, 5);
 }
 
-TEST(BenchmarkMetadataQuery, ThrowsWhenABookHasNoAuthor) {
-    TempDir root("stage1_metadata_query_benchmark_test_missing");
-    const std::vector<SampleBook> missing_author = {{1, "body", "Title: Only A Title"}};
+TEST(BenchmarkMetadataQuery, ThrowsWhenARowHasNoAuthor) {
+    TempDir root("stage1_metadata_query_benchmark_test_no_author");
+    auto rows = synthetic_metadata(1);
+    rows[0].author = std::nullopt;
 
-    EXPECT_THROW(benchmark_metadata_query("cpp", missing_author, root.path(), 10), std::invalid_argument);
+    EXPECT_THROW(benchmark_metadata_query("cpp", rows, root.path(), 10), std::invalid_argument);
 }

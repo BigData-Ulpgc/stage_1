@@ -1,11 +1,16 @@
 #include <gtest/gtest.h>
 
+#include <sqlite3.h>
+
 #include <filesystem>
+#include <stdexcept>
+#include <vector>
 
 #include "stage1/datamart/metadata/metadata_store.hpp"
 
 using stage1::BookMetadata;
 using stage1::MetadataStore;
+using stage1::StoredBook;
 
 namespace {
 
@@ -110,30 +115,6 @@ TEST(MetadataStore, CreatesMissingParentDirectories) {
     std::filesystem::remove_all(db_path.path().parent_path() / "datamarts");
 }
 
-TEST(MetadataStore, InsertsInsideATransactionAreVisibleAfterCommit) {
-    MetadataStore store(":memory:");
-
-    store.begin_transaction();
-    store.insert_book(1, BookMetadata{"One", std::nullopt, std::nullopt, std::nullopt}, "b1", "h1");
-    store.insert_book(2, BookMetadata{"Two", std::nullopt, std::nullopt, std::nullopt}, "b2", "h2");
-    store.commit_transaction();
-
-    EXPECT_TRUE(store.find_by_id(1).has_value());
-    EXPECT_TRUE(store.find_by_id(2).has_value());
-}
-
-TEST(MetadataStore, RollbackDiscardsEverythingSinceBeginTransaction) {
-    MetadataStore store(":memory:");
-    store.insert_book(1, BookMetadata{"Already committed", std::nullopt, std::nullopt, std::nullopt}, "b", "h");
-
-    store.begin_transaction();
-    store.insert_book(2, BookMetadata{"Should vanish", std::nullopt, std::nullopt, std::nullopt}, "b", "h");
-    store.rollback_transaction();
-
-    EXPECT_TRUE(store.find_by_id(1).has_value());   // committed before the transaction: unaffected
-    EXPECT_FALSE(store.find_by_id(2).has_value());  // rolled back: never really there
-}
-
 TEST(MetadataStore, FindByAuthorReturnsEveryMatchingBook) {
     MetadataStore store(":memory:");
     store.insert_book(1, BookMetadata{"Emma", "Jane Austen", std::nullopt, std::nullopt}, "b1", "h1");
@@ -171,4 +152,72 @@ TEST(MetadataStore, FindByAuthorIsAnExactMatchNotASubstringSearch) {
     store.insert_book(1, BookMetadata{"T", "Jane Austen", std::nullopt, std::nullopt}, "b", "h");
 
     EXPECT_TRUE(store.find_by_author("Jane").empty());  // substring, not exact: no match
+}
+
+namespace {
+
+StoredBook row(int book_id, const std::string& title, const std::string& author) {
+    return StoredBook{book_id, title, author, "English", "2000", "b" + std::to_string(book_id),
+                      "h" + std::to_string(book_id)};
+}
+
+}  // namespace
+
+TEST(MetadataStore, InsertBooksStoresTheWholeBatch) {
+    MetadataStore store(":memory:");
+
+    store.insert_books({row(1, "One", "A"), row(2, "Two", "B"), row(3, "Three", "C")});
+
+    EXPECT_EQ(store.count(), 3);
+    const auto book = store.find_by_id(2);
+    ASSERT_TRUE(book.has_value());
+    EXPECT_EQ(book->title, "Two");
+    EXPECT_EQ(book->language, "English");
+    EXPECT_EQ(book->body_path, "b2");
+}
+
+TEST(MetadataStore, InsertBooksWithAnEmptyBatchDoesNothing) {
+    MetadataStore store(":memory:");
+
+    store.insert_books({});
+
+    EXPECT_EQ(store.count(), 0);
+}
+
+TEST(MetadataStore, InsertBooksIsAllOrNothing) {
+    TempDbPath db_path;
+    MetadataStore store(db_path.path());
+    {
+        // A trigger that makes book 3 fail, added through a connection of the test's own.
+        sqlite3* connection = nullptr;
+        ASSERT_EQ(sqlite3_open(db_path.path().string().c_str(), &connection), SQLITE_OK);
+        ASSERT_EQ(sqlite3_exec(connection,
+                               "CREATE TRIGGER fail_on_3 BEFORE INSERT ON books WHEN NEW.book_id = 3 "
+                               "BEGIN SELECT RAISE(ABORT, 'book 3 refused'); END;",
+                               nullptr, nullptr, nullptr),
+                  SQLITE_OK);
+        sqlite3_close(connection);
+    }
+
+    EXPECT_THROW(store.insert_books({row(1, "One", "A"), row(2, "Two", "B"), row(3, "Three", "C")}),
+                 std::runtime_error);
+
+    EXPECT_EQ(store.count(), 0);  // books 1 and 2 were rolled back with the failing one
+    store.insert_book(4, BookMetadata{"Four", std::nullopt, std::nullopt, std::nullopt}, "b", "h");
+    EXPECT_EQ(store.count(), 1);  // and the store is usable again: no transaction left open
+}
+
+TEST(MetadataStore, FindByAuthorAndTitleReturnBooksInAscendingIdOrder) {
+    MetadataStore store(":memory:");
+    store.insert_books({row(30, "Same", "Same"), row(10, "Same", "Same"), row(20, "Same", "Same")});
+
+    const auto by_author = store.find_by_author("Same");
+    const auto by_title = store.find_by_title("Same");
+
+    ASSERT_EQ(by_author.size(), 3u);
+    ASSERT_EQ(by_title.size(), 3u);
+    for (std::size_t i = 0; i < 3; ++i) {
+        EXPECT_EQ(by_author[i].book_id, static_cast<int>(10 * (i + 1)));
+        EXPECT_EQ(by_title[i].book_id, static_cast<int>(10 * (i + 1)));
+    }
 }

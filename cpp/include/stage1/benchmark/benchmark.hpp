@@ -32,6 +32,18 @@ void write_benchmark_results(const std::filesystem::path& path, const std::vecto
 // to. Throws std::runtime_error if the filesystem cannot be queried.
 long long allocated_bytes(const std::filesystem::path& root);
 
+// One "elapsed" row (ms) per measured repetition, numbered from 1.
+std::vector<BenchmarkResult> elapsed_rows(const std::string& language, const std::string& experiment,
+                                          const std::string& structure, int dataset_size,
+                                          const std::vector<double>& elapsed_ms);
+
+// Java's derived() (DatalakeBenchmark, MetadataBenchmark): for every
+// "elapsed" row, a `metric` row with the same repetition and value
+// from_ms(ms). Times under 0.001 ms count as 0.001 ms, so a rate never
+// divides by zero.
+std::vector<BenchmarkResult> derived_rows(const std::vector<BenchmarkResult>& elapsed, const std::string& metric,
+                                          const std::string& unit, const std::function<double(double)>& from_ms);
+
 // Runs, once per repetition (`warmup_runs` discarded, then `measured_runs`
 // measured): `setup()` untimed, then `operation()` timed with a steady clock.
 // Useful when every repetition must start from the same prepared state (e.g.

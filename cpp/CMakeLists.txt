@@ -73,6 +73,7 @@ add_library(stage1_core
   src/benchmark/benchmark.cpp
   src/benchmark/simulated_clock.cpp
   src/benchmark/datalake_benchmark_support.cpp
+  src/benchmark/metadata_benchmark_support.cpp
   src/benchmark/index_benchmark_support.cpp
   src/benchmark/java_random.cpp
   src/benchmark/sample_books.cpp

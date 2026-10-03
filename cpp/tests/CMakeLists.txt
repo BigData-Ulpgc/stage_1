@@ -26,6 +26,7 @@ add_executable(stage1_tests
   benchmark/benchmark_test.cpp
   benchmark/simulated_clock_test.cpp
   benchmark/datalake_benchmark_support_test.cpp
+  benchmark/metadata_benchmark_support_test.cpp
   benchmark/index_benchmark_support_test.cpp
   benchmark/java_random_test.cpp
   benchmark/sample_books_test.cpp

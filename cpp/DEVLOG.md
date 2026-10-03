@@ -3032,3 +3032,88 @@ for real pipeline bursts.
   in a real `time` datalake. Whether to remove it is the user's decision.
 - `ctest -j 8` makes 5 `Pipeline` tests fail: they share temporary folder names and are not safe to
   run in parallel. Run sequentially (as `make test` does), all 205 pass. Not fixed here.
+
+---
+
+## Entry 62 – Parity with Java, step D: the metadata experiments on Java's synthetic rows, with `sqlite_no_index` (2026-10-03)
+
+### What was done
+`metadata_insert` and `metadata_query` were rewritten after reading the Java module's
+`MetadataBenchmark` and `SqliteMetadataRepository`, and SPEC section 10.2.
+
+- **Data.** They no longer use the downloaded books. `synthetic_metadata(N)` (new,
+  `benchmark/metadata_benchmark_support`) is Java's `syntheticDataset`: row *i* has `book_id` *i*+1,
+  `"Title " + i/2`, `"Author " + i/10`, `English`, `January 1, 2000` and the `datalake/book/<id>/`
+  paths. The CLI generates 100,000 rows once and runs each experiment at N = 1,000, 10,000 and
+  100,000, each N a prefix of the next.
+- **Two variants**, as in Java: `sqlite` (SPEC section 4's schema) and `sqlite_no_index` (the same
+  without `idx_books_author` and `idx_books_title`). `fresh_metadata_store` is Java's
+  `freshRepository`: it deletes the file and its `-journal`, then opens an empty store. For the
+  second variant it then calls `drop_author_and_title_indexes`, which, as in Java, uses a
+  connection of its own. Each database is `work/metadata/<insert|query>/<variant>_<N>.db`.
+- **`MetadataStore::insert_books(rows)`** (new) is Java's `saveAll`: one transaction and **one
+  prepared statement** per batch, and all or nothing (rollback and rethrow if a row fails).
+  `count()` is new as well, for Java's post-insert check.
+- **`find_by_author` / `find_by_title`** now end in `ORDER BY book_id`, Java's SQL. Results come in
+  a fixed order. It costs nothing measurable: equal keys in an index, and a full table scan, both
+  already come in rowid order.
+- **`metadata_insert`:** the rows are split into batches of 1,000 before anything is timed. The setup
+  of every repetition closes the previous store and opens an empty one; the timed part is one
+  `insert_books` per batch. Afterwards `count()` must equal N. Rows: 5 `elapsed`, then 5
+  `throughput` (`rows_per_s`); before, the two were interleaved.
+- **`metadata_query`:** the workload is now Java's own: 1,000 picks with `JavaRandom(42).next_int(N)`
+  (its second use, Entry 57). Before, it used `std::mt19937`, so it was a different set of queries.
+  For each variant, every row is inserted once (untimed). Then each of `find_by_id`,
+  `find_by_author` and `find_by_title` is timed over the whole workload, and each query must find
+  something. Rows per repetition: `<type>` (ms) and `<type>_avg` (us), as in Java.
+- **Fixed by the way:** the old `metadata_insert` timed `extract_metadata` (the header regexes) as
+  part of the insert, and prepared the INSERT statement again for every row. Java times neither.
+- **Moved:** `elapsed_rows`/`derived_rows` (Entry 61) moved from `datalake_benchmark_support` to
+  `benchmark.hpp`, since both experiment families now use them.
+- **`begin/commit/rollback_transaction` are now private.** Their only outside caller was the old
+  benchmark; `insert_books` is the public way to batch. Their two direct tests were replaced by
+  `insert_books` ones: a whole batch is stored, and a batch that fails on its third row leaves
+  nothing behind and the store usable. The failure comes from a test-only trigger.
+- Tests: 214 in total (205 + 11 new − 2 replaced). The new ones cover `insert_books`, `count`, the
+  `ORDER BY`, the generator (values and prefix property), `fresh_metadata_store` (empty, and which
+  indexes each variant has, read from `sqlite_master`), and both experiments' rows and order.
+
+### Verification (against Java's `results/synthetic/`)
+Both CSVs have **exactly Java's rows in Java's order** (60 and 180 rows).
+
+Medians of the 5 runs (Java's figures come from its own machine):
+
+| Variant | N | insert, rows/s (C++ / Java) | find_by_id, us | find_by_author, us | find_by_title, us |
+|---|---|---|---|---|---|
+| sqlite | 1,000 | 462,330 / 38,761 | 8.1 / 28.5 | 12.3 / 77.2 | 9.5 / 39.3 |
+| sqlite_no_index | 1,000 | 932,219 / 48,929 | 7.9 / 27.9 | 44.3 / 115.1 | 41.3 / 94.4 |
+| sqlite | 10,000 | 507,759 / 47,009 | 8.8 / 22.9 | 13.1 / 48.8 | 10.5 / 31.9 |
+| sqlite_no_index | 10,000 | 1,005,172 / 51,934 | 8.8 / 22.7 | 349.8 / 633.4 | 327.5 / 608.3 |
+| sqlite | 100,000 | 454,570 / 50,036 | 9.0 / 24.0 | 15.4 / 52.0 | 12.7 / 33.5 |
+| sqlite_no_index | 100,000 | 915,179 / 58,103 | 9.3 / 24.4 | 5,869 / 8,460 | 5,726 / 8,609 |
+
+Both languages show the same shape, which is what the experiment is about:
+- `find_by_id` does not depend on the indexes (it uses the primary key) and stays flat as N grows.
+- With the indexes, author and title lookups stay flat too.
+- Without them, author and title lookups grow linearly with N. At 100,000 rows they are 380 times
+  slower than indexed in C++, and 160 times slower in Java.
+- Dropping the indexes makes inserting faster, since there is less to maintain: about 2x here,
+  about 1.2x in Java.
+
+Inserting is about 10 times faster here. This module calls the SQLite C API directly, while Java
+goes through JDBC (JNI, binding and batching every row). The runs were also on different machines,
+and the cost of each of the 100 commits (an `fsync` with SQLite's default `synchronous=FULL`)
+depends on the disk and the OS. These data do not separate the two causes. Java's small 1.2x
+index effect suggests its time is mostly spent outside SQLite's own B-tree work.
+
+### Design differences left as they are
+- The insert is `INSERT OR REPLACE` here and `INSERT ... ON CONFLICT DO UPDATE` in Java. On the
+  empty tables of this experiment, both just insert.
+- Each `find_*` prepares its statement on every call, in both languages, and reads every column of
+  every row.
+
+### Supersedes
+Entries 36 and 37 benchmarked only `sqlite`, on the 15 real books. This experiment now follows SPEC
+section 10.2: synthetic rows and both variants. `sqlite_no_index` is the same backend with a
+different schema, not a second `MetadataStore`, so Entry 13's reasoning against generalising the
+store still holds.

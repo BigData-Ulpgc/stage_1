@@ -4,53 +4,48 @@
 #include <memory>
 #include <stdexcept>
 
-#include "stage1/datamart/metadata/metadata.hpp"
-#include "stage1/datamart/metadata/metadata_store.hpp"
-
 namespace stage1 {
 
 std::vector<BenchmarkResult> benchmark_metadata_insert(const std::string& language,
-                                                         const std::vector<SampleBook>& books,
-                                                         const std::filesystem::path& output_dir) {
-    const auto db_path = output_dir / "metadata.db";
-
-    std::unique_ptr<MetadataStore> store;
-    const auto setup = [&] {
-        std::filesystem::remove(db_path);
-        store = std::make_unique<MetadataStore>(db_path);  // opens + creates schema: untimed on purpose
-    };
-    const auto operation = [&] {
-        // One commit for the whole batch instead of one per row: see DEVLOG
-        // entry 37 for the before/after this made (entry 36 found the gap).
-        store->begin_transaction();
-        for (const auto& book : books) {
-            const BookMetadata metadata = extract_metadata(book.header);
-            const std::string body_path = "datalake/" + std::to_string(book.book_id) + "/body.txt";
-            const std::string header_path = "datalake/" + std::to_string(book.book_id) + "/header.txt";
-            store->insert_book(book.book_id, metadata, body_path, header_path);
-        }
-        store->commit_transaction();
-    };
-
-    const auto elapsed = measure_elapsed_ms(setup, operation);
-
-    for (const auto& book : books) {
-        if (!store->find_by_id(book.book_id)) {
-            throw std::runtime_error("metadata_insert: book " + std::to_string(book.book_id) +
-                                      " was not inserted");
-        }
+                                                         const std::vector<StoredBook>& rows,
+                                                         const std::filesystem::path& output_dir,
+                                                         std::size_t batch_size) {
+    if (batch_size == 0) {
+        throw std::invalid_argument("benchmark_metadata_insert needs a batch size of at least 1");
+    }
+    // Split before anything is timed, as Java's batches().
+    std::vector<std::vector<StoredBook>> batches;
+    for (std::size_t from = 0; from < rows.size(); from += batch_size) {
+        const std::size_t to = std::min(from + batch_size, rows.size());
+        batches.emplace_back(rows.begin() + static_cast<std::ptrdiff_t>(from),
+                             rows.begin() + static_cast<std::ptrdiff_t>(to));
     }
 
-    const int dataset_size = static_cast<int>(books.size());
+    const int dataset_size = static_cast<int>(rows.size());
     std::vector<BenchmarkResult> results;
-    int repetition = 1;
-    for (double ms : elapsed) {
-        results.push_back(
-            BenchmarkResult{language, "metadata_insert", "sqlite", dataset_size, repetition, "elapsed", ms, "ms"});
-        const double rows_per_second = dataset_size / (std::max(ms, 0.001) / 1000.0);
-        results.push_back(BenchmarkResult{language, "metadata_insert", "sqlite", dataset_size, repetition,
-                                           "throughput", rows_per_second, "rows_per_s"});
-        ++repetition;
+
+    for (const auto& structure : kMetadataStructures) {
+        const auto db = output_dir / "insert" / (structure + "_" + std::to_string(dataset_size) + ".db");
+        std::unique_ptr<MetadataStore> store;
+        const auto elapsed_ms = measure_elapsed_ms(
+            [&] {  // untimed: an empty database every repetition
+                store.reset();  // the previous one is closed first, as Java does
+                store = fresh_metadata_store(structure, db);
+            },
+            [&] {
+                for (const auto& batch : batches) {
+                    store->insert_books(batch);
+                }
+            });
+        if (store->count() != dataset_size) {
+            throw std::runtime_error(structure + ": metadata_insert did not insert every row");
+        }
+
+        const auto elapsed = elapsed_rows(language, "metadata_insert", structure, dataset_size, elapsed_ms);
+        const auto throughput = derived_rows(elapsed, "throughput", "rows_per_s",
+                                             [&](double ms) { return dataset_size / (ms / 1000.0); });
+        results.insert(results.end(), elapsed.begin(), elapsed.end());
+        results.insert(results.end(), throughput.begin(), throughput.end());
     }
     return results;
 }
