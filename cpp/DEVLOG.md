@@ -2666,3 +2666,80 @@ with the group (Entry 53).
 - The figure counts what the allocator handed out, including its own per-allocation overhead. It
   does not count pages the operating system keeps around afterwards. That is exactly "what this
   structure costs in memory", but it is not the whole process's footprint.
+
+## Entry 55 – `index_query` and `index_memory` now measure exactly what the Java module measures (2026-10-03)
+
+### What was decided
+Entry 53 found that this module's `index_query` and Java's measured different things, and gave
+opposite rankings. The user decided that both experiments must measure what Java measures, so that
+the comparison between languages is as fair as possible. Java's `IndexBenchmark` was read and its
+definitions were ported as they are.
+
+### What was done
+**`index_query`**, following Java's `IndexBenchmark.query`:
+- **Untimed:**
+  - build the index of the N books once, and write monolithic, hierarchical, and Mongo if
+    reachable;
+  - **open each structure once**, the way a running search service would (monolithic parses its
+    JSON here, outside the timing);
+  - **verify** that every query gets the same answer as from the in-memory index, and throw
+    otherwise (Java's `verify`).
+- **Timed** (2 warmups + 5 runs): `kDefaultQueryRounds = 100` passes over the 10 queries of
+  `shared/queries.txt`, each one tokenized and answered with `query_and`, as Java's `SearchService`
+  does.
+- **Rows:** 5 `elapsed` (ms, the whole batch of 1,000 queries), then 5 `per_query`
+  (µs = elapsed × 1000 / 1000). Same metrics, units and order as Java.
+- **Sanity check:** every repetition's answers are added up. If repetitions disagree, it throws,
+  and the total also keeps any query from being optimized away.
+- `prepare_index_query` (Entry 53) is gone: writing the structures is now part of the experiment's own
+  untimed setup.
+
+**`index_memory`**, following Java's `IndexBenchmark.memory`. For each structure (monolithic,
+hierarchical, and Mongo if reachable), it reports Java's two metrics:
+- `heap_after_build`: memory in use after building the index of the N books and writing it through
+  that structure's writer, with the index still alive.
+- `heap_after_open`: memory in use after opening the written structure for reading. The reader is a
+  postings fetcher (`index_readers.hpp`): monolithic parses the whole JSON, hierarchical keeps only
+  its folder path, and Mongo keeps only its client.
+- The books are tokenized to their distinct terms **before** anything is measured (Java's
+  `tokenizeAll`). The measure is still the allocator's in-use bytes (Entry 54), the counterpart of
+  Java's heap used after GC.
+
+Tests rewritten for both experiments: row shape, the `per_query` formula, Mongo rows only when
+reachable, the files that `index_query` writes, and the relation between the four memory figures.
+Suite total: 178.
+
+### Results on the 200 real books, side by side with Java's `results/real/`
+`index_query`, `per_query` in µs (median of 5):
+
+| | N=50 | N=100 | N=200 |
+|---|---|---|---|
+| monolithic | C++ 2.3 · Java 3.7 | C++ 1.4 · Java 2.0 | C++ 2.6 · Java 4.5 |
+| hierarchical | C++ 41.4 · Java 26.0 | C++ 41.2 · Java 31.7 | C++ 61.8 · Java 48.3 |
+
+`index_memory`, in MB:
+
+| | N=50 | N=100 | N=200 |
+|---|---|---|---|
+| `heap_after_build` monolithic | C++ 16.2 · Java 21.5 | C++ 30.2 · Java 45.0 | C++ 60.5 · Java 97.2 |
+| `heap_after_build` hierarchical | C++ 16.2 · Java 0.5 | C++ 30.2 · Java 0.5 | C++ 60.5 · Java 2.1 |
+| `heap_after_open` monolithic | C++ 14.4 · Java 18.5 | C++ 25.6 · Java 48.3 | C++ 49.9 · Java 100.3 |
+| `heap_after_open` hierarchical | 0 · 0 | 0 · 0 | 0 · 0 |
+
+### Reading the results
+- **The ranking now agrees.** Once the structure is open, a monolithic query costs a few µs in both
+  languages: a lookup in a parsed map. A hierarchical query costs tens of µs, because every query
+  term opens and reads a file. Entry 53's inverted ranking came entirely from timing the JSON parse,
+  not from querying.
+- **C++ holds roughly half of Java's memory** for the same monolithic index. That is plausible: every
+  Java object carries a header, and Java's posting lists box their integers.
+- **One real architectural difference, measured rather than hidden.** Java's hierarchical and Mongo
+  backends write postings through as books are added and keep almost nothing resident (0.5 to
+  2.1 MB). This module builds every structure from one complete in-memory `InvertedIndex`
+  (Entries 17-18), so building the hierarchical structure costs as much memory as building the
+  monolithic one (60.5 MB at N=200). Once written, opening it costs nothing in either language. This
+  belongs in the report's design discussion: the C++ pipeline trades memory during building for a
+  single, simple index type shared by every writer.
+- **Still not identical:** the machines differ (this Mac with APFS against Java's Linux run with
+  NVMe). That may explain why hierarchical queries, dominated by file opens, are somewhat slower
+  here. It is the still-open point about running every language on one machine.

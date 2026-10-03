@@ -65,8 +65,7 @@ const std::filesystem::path kIndexPath = kDataDir / "datamarts" / "inverted_inde
 // books with the lowest ids (load_sample_books already returns them sorted).
 constexpr std::array<std::size_t, 3> kIndexSizes = {50, 100, 200};
 
-// One index experiment on exactly `books` (one size). index_query first
-// writes the structures it reads, once and untimed.
+// One index experiment on exactly `books` (one size).
 std::vector<BenchmarkResult> run_index_experiment(const std::string& experiment, const std::vector<SampleBook>& books,
                                                   const std::unordered_set<std::string>& stopwords,
                                                   const std::filesystem::path& work_dir) {
@@ -74,9 +73,8 @@ std::vector<BenchmarkResult> run_index_experiment(const std::string& experiment,
         return benchmark_index_build("cpp", books, stopwords, work_dir);
     }
     if (experiment == "index_query") {
-        prepare_index_query(books, stopwords, work_dir);
         const auto queries = load_queries(kSharedDir / "queries.txt");
-        return benchmark_index_query("cpp", static_cast<int>(books.size()), queries, stopwords, work_dir);
+        return benchmark_index_query("cpp", books, queries, stopwords, work_dir);
     }
     if (experiment == "index_update") {
         return benchmark_index_update("cpp", books, stopwords, work_dir);

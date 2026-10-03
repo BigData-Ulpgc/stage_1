@@ -1,6 +1,9 @@
 #include <gtest/gtest.h>
 
+#include <map>
+
 #include "stage1/benchmark/index_memory_benchmark.hpp"
+#include "stage1/datamart/index/mongo_index_writer.hpp"
 #include "support/temp_dir.hpp"
 
 using stage1::benchmark_index_memory;
@@ -17,24 +20,24 @@ const std::unordered_set<std::string> kStopwords = {"the", "to", "near"};
 
 }  // namespace
 
-TEST(BenchmarkIndexMemory, ProducesOneRowForInMemoryIndexAndOneForMonolithic) {
+TEST(BenchmarkIndexMemory, ReportsHeapAfterBuildAndAfterOpenPerStructureLikeTheJavaModule) {
     TempDir root("stage1_index_memory_benchmark_test");
 
     auto results = benchmark_index_memory("cpp", kCorpus, kStopwords, root.path());
 
-    bool saw_in_memory_index = false;
-    bool saw_monolithic = false;
+    std::map<std::string, double> value;  // "structure/metric" -> bytes
     for (const auto& result : results) {
         EXPECT_EQ(result.language, "cpp");
         EXPECT_EQ(result.experiment, "index_memory");
         EXPECT_EQ(result.dataset_size, 2);
-        EXPECT_EQ(result.metric, "heap_delta");
         EXPECT_EQ(result.unit, "bytes");
-        EXPECT_GT(result.value, 0.0);  // both structures hold real allocations, even for 2 tiny books
-        if (result.structure == "in_memory_index") saw_in_memory_index = true;
-        if (result.structure == "monolithic") saw_monolithic = true;
+        value[result.structure + "/" + result.metric] = result.value;
     }
-    EXPECT_TRUE(saw_in_memory_index);
-    EXPECT_TRUE(saw_monolithic);
-    EXPECT_EQ(results.size(), 2u);
+    EXPECT_EQ(results.size(), stage1::mongo_is_reachable() ? 6u : 4u);
+    // Building keeps the whole in-memory index alive, whatever the structure.
+    EXPECT_GT(value.at("monolithic/heap_after_build"), 0.0);
+    EXPECT_GT(value.at("hierarchical/heap_after_build"), 0.0);
+    // Opening: monolithic parses its whole JSON, hierarchical keeps only a path.
+    EXPECT_GT(value.at("monolithic/heap_after_open"), 0.0);
+    EXPECT_LT(value.at("hierarchical/heap_after_open"), value.at("monolithic/heap_after_open"));
 }

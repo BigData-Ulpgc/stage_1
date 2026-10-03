@@ -2,16 +2,12 @@
 
 #include <algorithm>
 
-#include "stage1/benchmark/index_build_benchmark.hpp"
 #include "stage1/benchmark/index_query_benchmark.hpp"
-#include "stage1/datamart/index/index_readers.hpp"
 #include "stage1/datamart/index/mongo_index_writer.hpp"
 #include "support/temp_dir.hpp"
 
-using stage1::benchmark_index_build;
+using stage1::BenchmarkResult;
 using stage1::benchmark_index_query;
-using stage1::monolithic_postings_fetcher;
-using stage1::prepare_index_query;
 using stage1::SampleBook;
 using stage1::testing::TempDir;
 
@@ -23,56 +19,53 @@ const std::vector<SampleBook> kCorpus = {
 };
 const std::unordered_set<std::string> kStopwords = {"the", "to", "near"};
 const std::vector<std::string> kQueries = {"whale island", "boat", "dragon"};
+constexpr int kRounds = 3;  // small: the tests check the shape of the result, not the timing
+
+std::vector<BenchmarkResult> rows_of(const std::vector<BenchmarkResult>& results, const std::string& structure,
+                                     const std::string& metric) {
+    std::vector<BenchmarkResult> rows;
+    std::copy_if(results.begin(), results.end(), std::back_inserter(rows),
+                 [&](const BenchmarkResult& r) { return r.structure == structure && r.metric == metric; });
+    return rows;
+}
 
 }  // namespace
 
-TEST(BenchmarkIndexQuery, ProducesFiveMeasuredRowsPerAvailableStructure) {
+TEST(BenchmarkIndexQuery, ProducesElapsedAndPerQueryRowsLikeTheJavaModule) {
     TempDir root("stage1_index_query_benchmark_test");
-    benchmark_index_build("cpp", kCorpus, kStopwords, root.path());  // builds the structures to query
 
-    auto results = benchmark_index_query("cpp", 2, kQueries, kStopwords, root.path());
+    auto results = benchmark_index_query("cpp", kCorpus, kQueries, kStopwords, root.path(), kRounds);
 
-    int monolithic_rows = 0;
-    int hierarchical_rows = 0;
-    for (const auto& result : results) {
-        EXPECT_EQ(result.language, "cpp");
-        EXPECT_EQ(result.experiment, "index_query");
-        EXPECT_EQ(result.dataset_size, 2);
-        EXPECT_EQ(result.unit, "ms");
-        EXPECT_GE(result.value, 0.0);
-        if (result.structure == "monolithic") ++monolithic_rows;
-        if (result.structure == "hierarchical") ++hierarchical_rows;
+    for (const std::string structure : {"monolithic", "hierarchical"}) {
+        const auto elapsed = rows_of(results, structure, "elapsed");
+        const auto per_query = rows_of(results, structure, "per_query");
+        ASSERT_EQ(elapsed.size(), 5u) << structure;
+        ASSERT_EQ(per_query.size(), 5u) << structure;
+        for (std::size_t i = 0; i < elapsed.size(); ++i) {
+            EXPECT_EQ(elapsed[i].unit, "ms");
+            EXPECT_EQ(per_query[i].unit, "us");
+            EXPECT_EQ(elapsed[i].dataset_size, 2);
+            EXPECT_EQ(per_query[i].repetition, elapsed[i].repetition);
+            // per_query (µs) = elapsed (ms) * 1000 / (rounds * queries)
+            EXPECT_NEAR(per_query[i].value, elapsed[i].value * 1000.0 / (kRounds * kQueries.size()), 1e-9);
+        }
     }
-    EXPECT_EQ(monolithic_rows, 5);
-    EXPECT_EQ(hierarchical_rows, 5);
-}
-
-TEST(BenchmarkIndexQuery, PrepareWritesExactlyWhatTheQueriesRead) {
-    TempDir root("stage1_index_query_benchmark_test_prepare");
-    prepare_index_query(kCorpus, kStopwords, root.path());  // no benchmark_index_build needed
-
-    auto results = benchmark_index_query("cpp", 2, kQueries, kStopwords, root.path());
-
-    const auto rows = [&](const char* structure) {
-        return std::count_if(results.begin(), results.end(), [&](const auto& r) { return r.structure == structure; });
-    };
-    EXPECT_EQ(rows("monolithic"), 5);
-    EXPECT_EQ(rows("hierarchical"), 5);
-    EXPECT_EQ(monolithic_postings_fetcher(root.path() / "monolithic" / "inverted_index.json")("whale"),
-              std::vector<int>{1});
 }
 
 TEST(BenchmarkIndexQuery, IncludesMongoOnlyWhenReachable) {
     TempDir root("stage1_index_query_benchmark_test_mongo");
-    benchmark_index_build("cpp", kCorpus, kStopwords, root.path());
 
-    auto results = benchmark_index_query("cpp", 2, kQueries, kStopwords, root.path());
+    auto results = benchmark_index_query("cpp", kCorpus, kQueries, kStopwords, root.path(), kRounds);
 
-    const int mongo_rows =
-        static_cast<int>(std::count_if(results.begin(), results.end(), [](const auto& r) { return r.structure == "mongo"; }));
-    if (stage1::mongo_is_reachable()) {
-        EXPECT_EQ(mongo_rows, 5);
-    } else {
-        EXPECT_EQ(mongo_rows, 0);
-    }
+    const auto mongo_rows = rows_of(results, "mongo", "elapsed").size() + rows_of(results, "mongo", "per_query").size();
+    EXPECT_EQ(mongo_rows, stage1::mongo_is_reachable() ? 10u : 0u);
+}
+
+TEST(BenchmarkIndexQuery, WritesTheStructuresItQueries) {
+    TempDir root("stage1_index_query_benchmark_test_files");
+
+    benchmark_index_query("cpp", kCorpus, kQueries, kStopwords, root.path(), kRounds);
+
+    EXPECT_TRUE(std::filesystem::exists(root.path() / "monolithic" / "inverted_index.json"));
+    EXPECT_TRUE(std::filesystem::exists(root.path() / "hierarchical" / "inverted_index" / "W" / "whale.txt"));
 }

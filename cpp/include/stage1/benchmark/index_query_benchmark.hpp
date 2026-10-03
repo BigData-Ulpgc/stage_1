@@ -10,31 +10,31 @@
 
 namespace stage1 {
 
-// SPEC section 9's "index_query" experiment: for each required structure
-// that benchmark_index_build already wrote under `index_dir` (monolithic,
-// hierarchical, and mongo if reachable), times loading that structure fresh
-// and then answering every query in `queries` (tokenized with `stopwords`,
-// combined with the same AND semantics as query_and) against it directly --
-// not through the shared in-memory InvertedIndex, which would make every
-// structure score identically and defeat the point of comparing them.
+// How many times the whole query workload runs inside one measurement: 10
+// queries alone take microseconds, too short to time reliably. The same value
+// as the Java module's IndexBenchmark.DEFAULT_QUERY_ROUNDS.
+inline constexpr int kDefaultQueryRounds = 100;
+
+// SPEC section 9's "index_query" experiment, measured exactly as the Java
+// module's IndexBenchmark.query does, so the two can be compared directly:
 //
-// Loading and the whole query batch are timed together, as one unit per
-// measure_elapsed_ms repetition (N_WARMUP=2, N_RUNS=5): a deliberately
-// "cold" measurement, the same for all three structures, so the comparison
-// stays fair even though a real query service would normally keep a
-// structure loaded across many queries. `dataset_size` is the number of
-// books the index was originally built from (informational only).
-std::vector<BenchmarkResult> benchmark_index_query(const std::string& language, int dataset_size,
+//  - Untimed: builds the index of `books` once, writes every available
+//    structure under `index_dir` (monolithic, hierarchical, and mongo if
+//    reachable), then opens each one for reading, once, as a running search
+//    service would. For monolithic, opening means parsing the whole JSON.
+//    Every opened structure must answer each query exactly like the
+//    in-memory index; if one does not, this throws instead of producing
+//    numbers.
+//  - Timed (N_WARMUP=2, N_RUNS=5): `query_rounds` times the whole query
+//    workload. Each query is tokenized with `stopwords` and answered with
+//    query_and, as Java's SearchService does.
+//
+// Rows per structure, in Java's order: 5 `elapsed` (ms, the whole batch), then
+// 5 `per_query` (µs: elapsed / (query_rounds * queries.size())).
+std::vector<BenchmarkResult> benchmark_index_query(const std::string& language, const std::vector<SampleBook>& books,
                                                      const std::vector<std::string>& queries,
                                                      const std::unordered_set<std::string>& stopwords,
-                                                     const std::filesystem::path& index_dir);
-
-// Builds the index of `books` once and writes it, untimed, to exactly the
-// places benchmark_index_query reads under `index_dir`: monolithic,
-// hierarchical, and mongo if reachable. This lets index_query run on its
-// own, without a whole benchmark_index_build, whose 7 timed repetitions
-// would only write the same files over and over.
-void prepare_index_query(const std::vector<SampleBook>& books, const std::unordered_set<std::string>& stopwords,
-                         const std::filesystem::path& index_dir);
+                                                     const std::filesystem::path& index_dir,
+                                                     int query_rounds = kDefaultQueryRounds);
 
 }  // namespace stage1

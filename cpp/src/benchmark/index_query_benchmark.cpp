@@ -1,13 +1,16 @@
 #include "stage1/benchmark/index_query_benchmark.hpp"
 
-#include "stage1/datamart/index/hierarchical_index_writer.hpp"
-#include "stage1/datamart/index/inverted_index.hpp"
-#include "stage1/datamart/index/monolithic_index_writer.hpp"
+#include <cstddef>
+#include <functional>
+#include <stdexcept>
 
+#include "stage1/datamart/index/hierarchical_index_writer.hpp"
 #include "stage1/datamart/index/index_readers.hpp"
+#include "stage1/datamart/index/inverted_index.hpp"
 #include "stage1/datamart/index/mongo_index_writer.hpp"
-#include "stage1/query/query_engine.hpp"
+#include "stage1/datamart/index/monolithic_index_writer.hpp"
 #include "stage1/datamart/index/tokenizer.hpp"
+#include "stage1/query/query_engine.hpp"
 
 namespace stage1 {
 
@@ -15,67 +18,83 @@ namespace {
 
 using Postings = std::function<std::vector<int>(const std::string&)>;
 
-// Where each file-based structure lives under `index_dir`: the same paths
-// benchmark_index_build writes, used by both functions below.
-std::filesystem::path monolithic_file(const std::filesystem::path& index_dir) {
-    return index_dir / "monolithic" / "inverted_index.json";
-}
-std::filesystem::path hierarchical_root(const std::filesystem::path& index_dir) {
-    return index_dir / "hierarchical" / "inverted_index";
+// Java's verify step: every query must get, through the opened structure, the
+// same answer as through the in-memory index it was written from. A benchmark
+// that measures a structure giving wrong answers fails instead of reporting.
+void verify(const std::string& structure, const Postings& postings, const InvertedIndex& reference,
+            const std::vector<std::string>& queries, const std::unordered_set<std::string>& stopwords) {
+    for (const auto& query_text : queries) {
+        const auto terms = tokenize(query_text, stopwords);
+        if (query_and(postings, terms) != query_and(reference, terms)) {
+            throw std::runtime_error("index_query: " + structure + " answers \"" + query_text +
+                                     "\" differently from the in-memory index");
+        }
+    }
 }
 
 void run_and_record(const std::string& language, const std::string& structure, int dataset_size,
                      const std::vector<std::string>& queries, const std::unordered_set<std::string>& stopwords,
-                     const std::function<Postings()>& load_structure, std::vector<BenchmarkResult>& results) {
+                     const Postings& postings, int query_rounds, std::vector<BenchmarkResult>& results) {
+    // Every answer is added up and checked afterwards: no query can be
+    // optimized away, and each repetition must have found the same books.
+    std::size_t found = 0;
+    std::size_t batches = 0;
     const auto elapsed = measure_elapsed_ms([&] {
-        const Postings postings = load_structure();
-        for (const auto& query_text : queries) {
-            query_and(postings, tokenize(query_text, stopwords));
+        ++batches;
+        for (int round = 0; round < query_rounds; ++round) {
+            for (const auto& query_text : queries) {
+                found += query_and(postings, tokenize(query_text, stopwords)).size();
+            }
         }
     });
+    if (found % batches != 0) {
+        throw std::runtime_error("index_query: " + structure + " found different results across repetitions");
+    }
 
+    const double total_queries = static_cast<double>(query_rounds) * static_cast<double>(queries.size());
     int repetition = 1;
     for (double ms : elapsed) {
         results.push_back(
             BenchmarkResult{language, "index_query", structure, dataset_size, repetition++, "elapsed", ms, "ms"});
     }
+    repetition = 1;
+    for (double ms : elapsed) {
+        results.push_back(BenchmarkResult{language, "index_query", structure, dataset_size, repetition++, "per_query",
+                                           ms * 1000.0 / total_queries, "us"});
+    }
 }
 
 }  // namespace
 
-std::vector<BenchmarkResult> benchmark_index_query(const std::string& language, int dataset_size,
+std::vector<BenchmarkResult> benchmark_index_query(const std::string& language, const std::vector<SampleBook>& books,
                                                      const std::vector<std::string>& queries,
                                                      const std::unordered_set<std::string>& stopwords,
-                                                     const std::filesystem::path& index_dir) {
-    std::vector<BenchmarkResult> results;
+                                                     const std::filesystem::path& index_dir, int query_rounds) {
+    const int dataset_size = static_cast<int>(books.size());
 
-    run_and_record(
-        language, "monolithic", dataset_size, queries, stopwords,
-        [&] { return monolithic_postings_fetcher(monolithic_file(index_dir)); }, results);
-
-    run_and_record(
-        language, "hierarchical", dataset_size, queries, stopwords,
-        [&] { return hierarchical_postings_fetcher(hierarchical_root(index_dir)); }, results);
-
-    if (mongo_is_reachable()) {
-        run_and_record(
-            language, "mongo", dataset_size, queries, stopwords, [&] { return mongo_postings_fetcher(); }, results);
-    }
-
-    return results;
-}
-
-void prepare_index_query(const std::vector<SampleBook>& books, const std::unordered_set<std::string>& stopwords,
-                         const std::filesystem::path& index_dir) {
+    // Untimed: build once, write every structure, keep the in-memory index as
+    // the reference the opened structures are verified against.
     InvertedIndex index;
     for (const auto& book : books) {
         index.add_book(book.book_id, tokenize(book.body, stopwords));
     }
-    MonolithicIndexWriter(monolithic_file(index_dir)).write(index);
-    HierarchicalIndexWriter(hierarchical_root(index_dir)).write(index);
+    const auto monolithic_path = index_dir / "monolithic" / "inverted_index.json";
+    const auto hierarchical_path = index_dir / "hierarchical" / "inverted_index";
+    MonolithicIndexWriter(monolithic_path).write(index);
+    HierarchicalIndexWriter(hierarchical_path).write(index);
+
+    std::vector<BenchmarkResult> results;
+    const auto measure = [&](const std::string& structure, const Postings& opened) {
+        verify(structure, opened, index, queries, stopwords);
+        run_and_record(language, structure, dataset_size, queries, stopwords, opened, query_rounds, results);
+    };
+    measure("monolithic", monolithic_postings_fetcher(monolithic_path));  // opened once, outside the timing
+    measure("hierarchical", hierarchical_postings_fetcher(hierarchical_path));
     if (mongo_is_reachable()) {
         MongoIndexWriter().write(index);
+        measure("mongo", mongo_postings_fetcher());
     }
+    return results;
 }
 
 }  // namespace stage1
