@@ -2268,3 +2268,52 @@ guide shows. The resume scenario was already verified for real in Entry 44.
 - **Commands safe to paste into zsh.** No inline `#` comments (interactive zsh may pass them on as
   arguments), and single quotes for literal queries (`!"` inside double quotes leaves zsh at a
   `dquote>` prompt). Both pitfalls actually happened while testing the CLI by hand.
+
+## Entry 47 – The group's benchmark dataset agreement, written into the SPEC (2026-10-03)
+
+### What was done
+The group agreed on how every language runs the benchmarks: 200 real books, plus synthetic metadata.
+Until now this was only implemented in Java and described in Java's report. It is now the shared
+contract:
+- `shared/SPEC.md`: new section 10, appended without changing any existing line.
+  - **10.1, real books.** Datalake experiments run at N=200 and index experiments at N=50, 100 and
+    200, on the 200 ids of `shared/book_ids.txt`, read from a `book` datalake the pipeline already
+    filled. **A size N means the N books with the lowest ids** (ascending id order, as in Java's
+    `BenchmarkBooks.fromDatalake`), not the first N lines of `book_ids.txt`. The section also gives
+    reference counts every implementation must reproduce exactly: 58,834 terms / 360,970 postings at
+    N=50, 78,820 / 759,087 at N=100, and 129,356 / 1,581,064 at N=200, taken from Java's
+    `index_disk`.
+  - **10.2, synthetic metadata.** Java's deterministic generator (`"Title " + i/2`,
+    `"Author " + i/10`, ...) at N=1,000, 10,000 and 100,000, as `sqlite` and `sqlite_no_index`.
+  - **10.3, other synthetic data.** Synthetic books are not compared across languages.
+  - **10.4, results folders.** `benchmarks/results/real/` and `benchmarks/results/synthetic/`.
+- Root `.gitignore`: the CSV exceptions became `!cpp/benchmarks/results/**/*.csv` and
+  `!java/stage1/benchmarks/results/**/*.csv`. Every `*.csv` is ignored globally, and the old
+  `results/*.csv` exceptions did not reach the new `real/` and `synthetic/` subfolders. Checked with
+  `git check-ignore` before and after: those subfolders are now trackable, while `benchmarks/work/`,
+  `data/` and any other CSV stay ignored.
+
+### Why
+- **The agreement has to live in the contract, not in one module's report.** Python and C++ must
+  follow it the same way, and before this nobody could check their implementation against a written
+  rule.
+- **Prefixes by ascending id, as Java already does.** With N=50 or N=100, "lowest ids" and "first
+  lines of `book_ids.txt`" select different books, so the two rules cannot be mixed. Following
+  Java's rule keeps its existing `results/real/` comparable instead of forcing a re-run, and it
+  makes every N a prefix of the next.
+- **Reference counts as a contract test.** The tokenizer is identical by contract (section 5), so
+  the same books must give the same term and posting counts in every language. Comparing two
+  integers catches a wrong book set or a tokenizer drift before any time is compared.
+- **Deterministic metadata generator; synthetic books excluded from comparisons.** Generating the
+  same rows with integer division needs no random numbers. Random generators differ across languages
+  even with the same seed (C++ `mt19937`, Python and Java all gave different sequences for seed 42),
+  so cross-language synthetic *books* would silently be different datasets.
+
+### Consequences for this module (not done yet)
+- `load_sample_books` returns books in `book_ids.txt` order. The index benchmarks must sort by id
+  and take prefixes of 50, 100 and 200.
+- Download the 200 books (`pipeline 400`) and check the reference counts above.
+- `metadata_insert`/`metadata_query`: switch from real books to the 10.2 generator, and add
+  `sqlite_no_index`.
+- Write the results into `results/real/` and `results/synthetic/`.
+- The current `results/*.csv` (15 books) predate the agreement.
