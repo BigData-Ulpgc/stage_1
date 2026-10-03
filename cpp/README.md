@@ -39,7 +39,7 @@ make test
 ```
 
 `make` configures and builds in Release mode (needed for meaningful benchmark numbers). The first run
-also downloads the dependencies. `make test` runs the whole GoogleTest suite (214 tests; the 7 Mongo
+also downloads the dependencies. `make test` runs the whole GoogleTest suite (217 tests; the 10 Mongo
 ones show as skipped without a MongoDB server, and all pass with one).
 
 The result is one executable, `build/release/search_engine_stage1`. To save typing, store its path

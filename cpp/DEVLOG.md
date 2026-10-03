@@ -3156,3 +3156,52 @@ SPEC section 10.4 names the files directly inside `real/` and `synthetic/`, and 
 them that way. The category subfolders are this module's choice. If the group wants every language
 to share one layout, either the SPEC gains the subfolders or this module flattens them. That is a
 one-line change in `results_path()`. The SPEC was not edited, since it is a shared file.
+
+---
+
+## Entry 64 – `MongoIndexWriter::update_terms` sends one bulk write, as Java's `flush` does (2026-10-03)
+
+### What was done
+Entry 58 left one difference open: `update_terms` issued one `update_one` per term, about 7,900 round
+trips for a real book, while Java's `MongoInvertedIndex.flush` sends all of a book's terms in one
+`bulkWrite`. The user asked for it to be aligned before the teammate runs `index_update`, since that
+experiment is where it shows.
+
+- `update_terms` now builds **one unordered `bulk_write`** with one `update_one` model per term
+  (filter `term`, `$set` of its postings, `upsert: true`) and executes it once. The driver sends the
+  operations in a few large messages, not one round trip each. As in Java, it is unordered: the terms
+  are different documents, so the order does not matter.
+- An empty term list returns at once, because the driver refuses a bulk write with no operations.
+- **Kept on purpose:** `$set` of the term's whole current postings, where Java does `$addToSet` of the
+  new ids only. This module's `IndexWriter` contract is "persist these terms' current postings from
+  the index" (Entry 40), and the writer does not know which ids are new. The result in the database
+  is the same. The messages are larger, because a common word sends its whole list instead of one id.
+- Three new tests, run against the real server (MongoDB 8.2.12, the group's `docker-compose` on
+  Colima):
+  - each given term ends up with its current postings: an existing term updated, a new one
+    upserted, and a term not given left unchanged;
+  - a batch of 10,000 terms is written whole;
+  - an empty list changes nothing.
+
+  Suite: **217 tests, none skipped** with the server up (10 of them need MongoDB; `cpp/README.md` updated).
+
+### Measurement on real books
+This was not the official benchmark, but a scratch program outside the repository. It used the same
+writer and the same steps as `index_update` for mongo: an index of the 45 lowest-id books was
+written, then the next 5 books were added one at a time, each persisted with `update_terms` for its
+own terms (5,716 to 11,228 terms per book). The old version was compiled from the previous commit's
+source.
+
+| Version | Mean per book |
+|---|---|
+| Before: one `update_one` per term | 3,421 ms |
+| After: one unordered bulk write | 285–315 ms over four runs (one outlier run at 579 ms) |
+
+That is **about 11 times faster**. For scale, Java's `index_update` `per_book` for mongo at N=50 was
+637–814 ms on its own machine. So the two languages now do the same operation, and Entry 58's
+expectation ("this module's Mongo `index_update` will be slower for that reason") no longer applies.
+
+### Still different
+Each `write()`/`update_terms()` call still opens a new client connection, while Java keeps one per
+index object (Entry 58). With the round trips gone, that connection is a larger share of each call,
+but it was not measured separately.

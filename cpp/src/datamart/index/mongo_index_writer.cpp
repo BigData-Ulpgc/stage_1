@@ -4,11 +4,13 @@
 #include <bsoncxx/builder/basic/document.hpp>
 #include <bsoncxx/builder/basic/kvp.hpp>
 #include <bsoncxx/types.hpp>
+#include <mongocxx/bulk_write.hpp>
 #include <mongocxx/client.hpp>
 #include <mongocxx/exception/exception.hpp>
 #include <mongocxx/instance.hpp>
+#include <mongocxx/model/update_one.hpp>
+#include <mongocxx/options/bulk_write.hpp>
 #include <mongocxx/options/index.hpp>
-#include <mongocxx/options/update.hpp>
 #include <mongocxx/pipeline.hpp>
 #include <mongocxx/uri.hpp>
 
@@ -82,25 +84,37 @@ void MongoIndexWriter::write(const InvertedIndex& index) {
 }
 
 void MongoIndexWriter::update_terms(const InvertedIndex& index, const std::vector<std::string>& changed_terms) {
+    if (changed_terms.empty()) {
+        return;  // the driver refuses a bulk write with no operations
+    }
     try {
         mongocxx::client client{mongocxx::uri{uri_}};
         mongocxx::collection collection = client[database_][collection_];
 
-        mongocxx::options::update upsert;
-        upsert.upsert(true);
+        // Every term goes in ONE unordered bulk write, as the Java module's
+        // flush() does: the driver sends them in a few large messages instead
+        // of one round trip per term (about 7,900 for a real book). Unordered
+        // lets the server apply them in any order; they touch different
+        // documents, so the result is the same.
+        mongocxx::options::bulk_write unordered;
+        unordered.ordered(false);
+        mongocxx::bulk_write bulk = collection.create_bulk_write(unordered);
         for (const auto& term : changed_terms) {
             bsoncxx::builder::basic::array postings_array;
             for (int book_id : index.postings(term)) {
                 postings_array.append(book_id);
             }
-            // $set, not a full document replace: touches only this one
-            // document (term)'s "postings" field, same spirit as
-            // HierarchicalIndexWriter::update_terms touching only that
-            // term's file. upsert(true) covers a term that is brand new.
-            collection.update_one(make_document(kvp("term", term)),
-                                   make_document(kvp("$set", make_document(kvp("postings", postings_array.extract())))),
-                                   upsert);
+            // $set of the term's current postings, not a full document
+            // replace: touches only this term's document, as
+            // HierarchicalIndexWriter::update_terms touches only its file.
+            // upsert covers a term that is brand new.
+            mongocxx::model::update_one update{
+                make_document(kvp("term", term)),
+                make_document(kvp("$set", make_document(kvp("postings", postings_array.extract()))))};
+            update.upsert(true);
+            bulk.append(update);
         }
+        bulk.execute();
     } catch (const mongocxx::exception& error) {
         throw std::runtime_error(std::string("failed to update index in MongoDB: ") + error.what());
     }
