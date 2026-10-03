@@ -1,51 +1,49 @@
-"""
-Datalake Module — Book-based Structure
-=========================================
-Write logic for the book ID folder structure: <ID>/.
-"""
+"""Book-based datalake implementation."""
+from __future__ import annotations
+import re
+from pathlib import Path
+from typing import Optional, List
 
-import os
-
-# Datalake root relative to the src/ directory
-DATALAKE_ROOT = os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "..", "..", "data", "datalake")
+from ..models import RawBook, BookLocation
+from .base import Datalake
 
 
-def _write_file(path: str, content: str):
-    """Writes a UTF-8 text file, creating the necessary directories."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(content)
+_CANONICAL_ID = re.compile(r'^(0|[1-9][0-9]{0,8})$')
 
 
-def _get_book_paths(book_id: int) -> tuple[str, str]:
-    """
-    'book' structure: <ID>/body.txt  and  <ID>/header.txt
-    """
-    folder = os.path.join(DATALAKE_ROOT, "book", str(book_id))
-    body_path = os.path.join(folder, "body.txt")
-    header_path = os.path.join(folder, "header.txt")
-    return header_path, body_path
+class BookBasedDatalake(Datalake):
+    def name(self) -> str:
+        return "book"
 
+    def save(self, book: RawBook) -> BookLocation:
+        book_dir = self._root / str(book.id)
+        header_path = book_dir / "header.txt"
+        body_path = book_dir / "body.txt"
+        
+        self._write_file(header_path, book.header)
+        self._write_file(body_path, book.body)
+        
+        return BookLocation(book.id, header_path, body_path)
 
-def save_book_based(
-    book_id: int,
-    header: str,
-    body: str,
-) -> tuple[str, str]:
-    """
-    Saves a book in the Book-based structure (<ID>/).
+    def locate(self, book_id: int) -> Optional[BookLocation]:
+        book_dir = self._root / str(book_id)
+        header_path = book_dir / "header.txt"
+        body_path = book_dir / "body.txt"
+        
+        if self._is_complete_book(header_path, body_path):
+            return BookLocation(book_id, header_path, body_path)
+        return None
 
-    Args:
-        book_id: Numeric book ID on Project Gutenberg.
-        header:  Already processed header text (str, UTF-8).
-        body:    Already processed body text (str, UTF-8).
-
-    Returns:
-        A (header_path, body_path) tuple with the absolute paths of
-        the written files.
-    """
-    header_path, body_path = _get_book_paths(book_id)
-    _write_file(header_path, header)
-    _write_file(body_path, body)
-
-    return header_path, body_path
+    def list_book_ids(self) -> List[int]:
+        if not self._root.exists():
+            return []
+            
+        valid_ids = []
+        for entry in self._root.iterdir():
+            if entry.is_dir() and _CANONICAL_ID.match(entry.name):
+                header_path = entry / "header.txt"
+                body_path = entry / "body.txt"
+                if self._is_complete_book(header_path, body_path):
+                    valid_ids.append(int(entry.name))
+        
+        return sorted(valid_ids)

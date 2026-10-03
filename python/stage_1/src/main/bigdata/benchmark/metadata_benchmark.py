@@ -1,80 +1,147 @@
-"""
-Metadata Benchmark Module
-=========================
-Measures SQLite metadata metrics and generates two CSV files:
+"""Metadata benchmark suite — 2 experiments for SQLite metadata.
 
-  python_metadata_insert.csv  — Insertion speed
-  python_metadata_query.csv   — Query performance (find by author)
+Experiments: metadata_insert, metadata_query
 """
+from __future__ import annotations
 
-import sqlite3
-import time
+import random
 from pathlib import Path
+from typing import Dict, List
 
-from src.main.bigdata.datamart.metadata.repository import MetadataManager
-from src.main.bigdata.benchmark.csv_results import save_csv
+from ..models import BookMetadata
+from ..datamart.metadata.parser import parse_metadata
+from ..datamart.metadata.repository import MetadataRepository
+from .runner import measure, derived_rows, single_row, BenchmarkRow
+from .csv_results import write_experiment
 
-N_WARMUP = 2
-N_RUNS = 5
 
-def run_metadata_benchmarks(
-    books: list[tuple[int, str, str]],
-    datalake_root: Path,
-    metadata_db_path: Path,
-) -> None:
-    """
-    Execute the metadata benchmarks and write their CSV results.
-    """
-    print("\n--- Running Metadata Benchmarks ---")
-    dataset_size = len(books)
+DEFAULT_QUERY_COUNT = 1000
 
-    # ------------------------------------------------------------------
-    # 6. Insertion speed
-    # ------------------------------------------------------------------
-    print("Measuring metadata insertion speed...")
-    insert_rows = []
 
-    for rep in range(1 - N_WARMUP, N_RUNS + 1):
-        metadata = MetadataManager(db_path=str(metadata_db_path))
+# ------------------------------------------------------------------ #
+# Synthetic metadata generation (matches Java's approach)             #
+# ------------------------------------------------------------------ #
 
-        start = time.perf_counter()
-        for book_id, header, body in books:
-            body_path = str(datalake_root / "book" / str(book_id) / "body.txt")
-            header_path = str(datalake_root / "book" / str(book_id) / "header.txt")
-            metadata.insert_or_update_book(
-                book_id=book_id,
-                header_text=header,
-                body_path=body_path,
-                header_path=header_path,
-            )
-        elapsed_ms = (time.perf_counter() - start) * 1000
-        metadata.close()
+def _synthetic_metadata(size: int) -> List[tuple]:
+    """Generate synthetic metadata rows: (book_id, title, author, language, release_date, body_path, header_path)."""
+    rows = []
+    for i in range(size):
+        book_id = i + 1
+        title = f'Title {i // 2}'
+        author = f'Author {i // 10}'
+        language = 'English'
+        release_date = 'January 1, 2000'
+        body_path = f'/data/datalake/book/{book_id}/body.txt'
+        header_path = f'/data/datalake/book/{book_id}/header.txt'
+        rows.append((book_id, title, author, language, release_date, body_path, header_path))
+    return rows
 
-        if rep > 0:
-            insert_rows.append([
-                "python", "metadata_insert", "sqlite", dataset_size, rep, "elapsed", round(elapsed_ms, 3), "ms"
-            ])
 
-    save_csv("python_metadata_insert.csv", insert_rows)
+# ================================================================== #
+# Experiment 1: metadata_insert                                       #
+# ================================================================== #
 
-    # ------------------------------------------------------------------
-    # 7. Query performance
-    # ------------------------------------------------------------------
-    print("Measuring metadata query performance...")
-    query_rows = []
-    conn = sqlite3.connect(str(metadata_db_path))
-    cursor = conn.cursor()
+def insert(size: int, work_dir: Path) -> List[BenchmarkRow]:
+    data = _synthetic_metadata(size)
+    rows = []
 
-    for rep in range(1 - N_WARMUP, N_RUNS + 1):
-        start = time.perf_counter()
-        cursor.execute("SELECT * FROM books WHERE author IS NOT NULL LIMIT 10")
-        _ = cursor.fetchall()
-        elapsed_ms = (time.perf_counter() - start) * 1000
+    for backend in ('sqlite', 'sqlite_no_index'):
+        db_path = work_dir / 'insert' / f'{backend}.db'
 
-        if rep > 0:
-            query_rows.append([
-                "python", "metadata_query", "sqlite", dataset_size, rep, "elapsed", round(elapsed_ms, 3), "ms"
-            ])
+        def setup(p=db_path, b=backend):
+            p.parent.mkdir(parents=True, exist_ok=True)
+            if p.exists():
+                p.unlink()
+            # Pre-create to ensure clean state
 
-    conn.close()
-    save_csv("python_metadata_query.csv", query_rows)
+        def task(p=db_path, b=backend):
+            with_idx = (b == 'sqlite')
+            repo = MetadataRepository(p, with_indexes=with_idx)
+            repo.save_all(data)
+            repo.close()
+
+        elapsed = measure('metadata_insert', backend, size, setup=setup, task=task)
+        rows.extend(elapsed)
+        rows.extend(derived_rows(elapsed, 'throughput', 'books_per_s',
+                                 lambda ms, n=size: n / (ms / 1000.0)))
+    return rows
+
+
+# ================================================================== #
+# Experiment 2: metadata_query                                        #
+# ================================================================== #
+
+def query(size: int, work_dir: Path, n_queries: int = DEFAULT_QUERY_COUNT) -> List[BenchmarkRow]:
+    data = _synthetic_metadata(size)
+    rows = []
+    rng = random.Random(42)
+
+    for backend in ('sqlite', 'sqlite_no_index'):
+        db_path = work_dir / 'query' / f'{backend}.db'
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        if db_path.exists():
+            db_path.unlink()
+
+        with_idx = (backend == 'sqlite')
+        repo = MetadataRepository(db_path, with_indexes=with_idx)
+        repo.save_all(data)
+
+        # Pre-generate query targets
+        query_ids = [rng.randint(1, size) for _ in range(n_queries)]
+        query_authors = [f'Author {rng.randint(0, size // 10)}' for _ in range(n_queries)]
+        query_titles = [f'Title {rng.randint(0, size // 2)}' for _ in range(n_queries)]
+
+        found = [0]
+
+        def setup():
+            found[0] = 0
+
+        def task(r=repo):
+            for bid in query_ids:
+                result = r.find_by_id(bid)
+                if result:
+                    found[0] += 1
+            for author in query_authors:
+                found[0] += len(r.find_by_author(author))
+            for title in query_titles:
+                found[0] += len(r.find_by_title(title))
+
+        elapsed = measure('metadata_query', backend, size, setup=setup, task=task)
+        total_q = n_queries * 3
+        rows.extend(elapsed)
+        rows.extend(derived_rows(elapsed, 'per_query', 'us',
+                                 lambda ms, tq=total_q: ms * 1000.0 / tq))
+        repo.close()
+    return rows
+
+
+# ================================================================== #
+# Run all 2 and write CSVs                                            #
+# ================================================================== #
+
+def run_all(
+    work_dir: Path,
+    results_dir: Path,
+    sizes: List[int] = None,
+) -> Dict[str, List[BenchmarkRow]]:
+    """Run both metadata experiments and write CSVs."""
+    if sizes is None:
+        sizes = [1000, 10000, 100000]
+
+    results: Dict[str, List[BenchmarkRow]] = {
+        'metadata_insert': [],
+        'metadata_query': [],
+    }
+
+    for size in sizes:
+        print(f'  [metadata] size={size} ...')
+        print('    insert ...')
+        results['metadata_insert'].extend(insert(size, work_dir))
+        print('    query ...')
+        results['metadata_query'].extend(query(size, work_dir))
+
+    for experiment, rows in results.items():
+        write_experiment(results_dir, experiment, rows)
+        print(f'    -> {experiment}: {len(rows)} rows')
+
+    return results

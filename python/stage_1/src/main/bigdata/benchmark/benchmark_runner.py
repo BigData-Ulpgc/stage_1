@@ -1,154 +1,135 @@
+"""Main benchmark entry point — generates all 12 CSV files.
+
+Usage:
+    python -m src.main.bigdata.benchmark.benchmark_runner [book_datalake_path]
+
+If book_datalake_path is provided, books are read from that datalake.
+Otherwise, 200 synthetic books (300 KB each) are generated.
+
+The 12 experiments:
+    datalake_write, datalake_lookup, datalake_incremental,
+    datalake_recovery, datalake_storage,
+    metadata_insert, metadata_query,
+    index_build, index_query, index_update, index_memory, index_disk
 """
-Benchmark Runner — Main Entry Point
-====================================
-Orchestrates the full Python benchmarking suite:
+from __future__ import annotations
 
-  1. Downloads books from Project Gutenberg into RAM  (shared phase).
-  2. Runs **Datalake** benchmarks       → 5 CSV files  (1–5).
-  3. Runs **Metadata** benchmarks       → 2 CSV files  (6–7).
-  4. Runs **Inverted Index** benchmarks → 5 CSV files  (8–12).
-
-Usage (from the Python project root ``python/stage_1/``):
-
-.. code-block:: bash
-
-   python -m src.main.bigdata.benchmark.benchmark_runner
-
-All 12 result CSV files are written to
-``python/stage_1/benchmarks/results/``.
-"""
-
+import sys
+import time
 from pathlib import Path
 
-from src.main.bigdata.crawler.splitter import fetch_book
-from src.main.bigdata.benchmark.csv_results import RESULTS_DIR
-from src.main.bigdata.benchmark.datalake_benchmark import run_datalake_benchmarks
-from src.main.bigdata.benchmark.metadata_benchmark import run_metadata_benchmarks
-from src.main.bigdata.benchmark.index_benchmark import run_index_benchmarks
+# ================================================================== #
+# PATH CONFIGURATION (aligned with SPEC.md and project statement)    #
+# ================================================================== #
+_PYTHON_ROOT = Path(__file__).resolve().parents[4]
+_REPO_ROOT = Path(__file__).resolve().parents[6]
 
-# ---------------------------------------------------------------------------
-# Path configuration — resolved from this file's physical location
-# ---------------------------------------------------------------------------
-_BENCHMARK_DIR: Path = Path(__file__).resolve().parent
-_PROJECT_ROOT: Path = _BENCHMARK_DIR.parents[5]   # stage_1/ (overall root)
+# --- Shared file paths ---
+_SHARED_DIR = _REPO_ROOT / 'shared'
 
-BOOK_IDS_PATH: Path = _PROJECT_ROOT / "shared" / "book_ids.txt"
-DATALAKE_ROOT: Path = _PROJECT_ROOT / "data" / "datalake"
-DATAMARTS_ROOT: Path = _PROJECT_ROOT / "data" / "datamarts"
-MONOLITHIC_PATH: Path = DATAMARTS_ROOT / "inverted_index.json"
-HIERARCHICAL_BASE: Path = DATAMARTS_ROOT / "inverted_index"
-METADATA_DB_PATH: Path = DATAMARTS_ROOT / "metadata.db"
+# --- CSV output (SPEC section 9) ---
+_BENCHMARKS_DIR = _PYTHON_ROOT / 'benchmarks'
+_RESULTS_DIR = _BENCHMARKS_DIR / 'results'
+
+# --- Physical data output (SPEC sections 3 and 4) ---
+_DATA_DIR = _BENCHMARKS_DIR / 'data'
+_DATALAKE_DIR = _DATA_DIR / 'datalake'
+_DATAMARTS_DIR = _DATA_DIR / 'datamarts'
 
 
-# ---------------------------------------------------------------------------
-# Utilities
-# ---------------------------------------------------------------------------
-
-def load_book_ids(filepath: Path, limit: int = 50) -> list[int]:
-    """
-    Read numeric book IDs from *filepath*.
-
-    Lines that are empty or start with ``#`` are ignored.  Returns at
-    most *limit* IDs.
-    """
-    ids: list[int] = []
-    with open(filepath, encoding="utf-8") as fh:
-        for line in fh:
+def _load_queries() -> list[str]:
+    """Load queries from shared/queries.txt."""
+    queries_file = _SHARED_DIR / 'queries.txt'
+    queries = []
+    with open(queries_file, encoding='utf-8') as f:
+        for line in f:
             line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            try:
-                ids.append(int(line))
-            except ValueError:
-                pass
-            if len(ids) >= limit:
-                break
-    return ids
+            if line and not line.startswith('#'):
+                queries.append(line)
+    return queries
 
-
-def download_books(book_ids: list[int]) -> list[tuple[int, str, str]]:
-    """
-    Download books from Project Gutenberg using the real crawler.
-
-    Returns:
-        List of ``(book_id, header, body)`` tuples for every book that
-        was downloaded successfully.
-    """
-    books: list[tuple[int, str, str]] = []
-    total = len(book_ids)
-
-    for i, book_id in enumerate(book_ids, start=1):
-        print(
-            f"  [{i}/{total}] Downloading book {book_id}...",
-            end=" ", flush=True,
-        )
-        result = fetch_book(book_id)
-        if result is None:
-            print("FAILED -- skipped.")
-            continue
-        header, body = result
-        books.append((book_id, header, body))
-        print(
-            f"OK  (header: {len(header):,} chars, "
-            f"body: {len(body):,} chars)"
-        )
-
-    return books
-
-
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
 
 def main() -> None:
-    """Top-level orchestrator — download once, benchmark everything."""
-    print("=" * 65)
-    print("  Starting Python Benchmarking Suite")
-    print("=" * 65)
+    from . import books as benchmark_books
+    from . import datalake_benchmark
+    from . import index_benchmark
+    from . import metadata_benchmark
+    from ..datalake.book_based import BookBasedDatalake
 
-    # Validate book_ids.txt -------------------------------------------------
-    if not BOOK_IDS_PATH.exists():
-        print(f"[ERROR] book_ids.txt not found at: {BOOK_IDS_PATH}")
-        raise SystemExit(1)
+    # Create only the directories required by the contract
+    _RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    _DATALAKE_DIR.mkdir(parents=True, exist_ok=True)
+    _DATAMARTS_DIR.mkdir(parents=True, exist_ok=True)
 
-    book_ids = load_book_ids(BOOK_IDS_PATH)
-    print(f"[INFO] Book IDs loaded: {len(book_ids)} -> {book_ids}\n")
+    print('=' * 70)
+    print('  Python Benchmark Suite')
+    print('  Generating 12 CSV files (SPEC section 9)')
+    print('=' * 70)
 
-    # Phase 0 — download books into RAM (shared across all benchmarks) ------
-    print("[PHASE 0] Downloading books from Project Gutenberg...")
-    print("-" * 55)
-    books = download_books(book_ids)
-    print("-" * 55)
-    print(
-        f"[INFO] Books downloaded successfully: "
-        f"{len(books)} / {len(book_ids)}\n"
+    # ------------------------------------------------------------------ #
+    # Load or generate books                                             #
+    # ------------------------------------------------------------------ #
+    if len(sys.argv) > 1:
+        source_path = Path(sys.argv[1])
+        print(f'\n  Loading books from datalake: {source_path}')
+        raw_books = benchmark_books.from_datalake(BookBasedDatalake(source_path))
+    else:
+        print('\n  Generating 200 synthetic Zipf books ...')
+        raw_books = benchmark_books.synthetic_zipf(
+            count=200, tokens_per_book=5000, vocabulary_size=5000, seed=1)
+
+    print(f'  Books ready: {len(raw_books)}')
+    queries = _load_queries()
+    print(f'  Queries: {len(queries)}')
+
+    t0 = time.time()
+
+    # ------------------------------------------------------------------ #
+    # 1. Datalake benchmarks (5 CSVs) -> writes to data/datalake         #
+    # ------------------------------------------------------------------ #
+    print('\n--- Datalake Benchmarks (5 experiments) ---')
+    datalake_benchmark.run_all(
+        raw_books,
+        work_dir=_DATALAKE_DIR,
+        results_dir=_RESULTS_DIR,
     )
 
-    if not books:
-        print("[ERROR] No books were downloaded. Aborting benchmarks.")
-        raise SystemExit(1)
+    # ------------------------------------------------------------------ #
+    # 2. Metadata benchmarks (2 CSVs) -> writes to data/datamarts        #
+    # ------------------------------------------------------------------ #
+    print('\n--- Metadata Benchmarks (2 experiments) ---')
+    metadata_benchmark.run_all(
+        work_dir=_DATAMARTS_DIR,
+        results_dir=_RESULTS_DIR,
+        sizes=[1000, 10000, 100000],
+    )
 
-    # Phase 1–5 — Datalake --------------------------------------------------
-    run_datalake_benchmarks(books, DATALAKE_ROOT)
+    # ------------------------------------------------------------------ #
+    # 3. Index benchmarks (5 CSVs) -> writes to data/datamarts           #
+    # ------------------------------------------------------------------ #
+    print('\n--- Index Benchmarks (5 experiments) ---')
+    index_sizes = [50, 100, 200] if len(raw_books) >= 200 else [len(raw_books)]
+    index_benchmark.run_all(
+        raw_books,
+        work_dir=_DATAMARTS_DIR,
+        results_dir=_RESULTS_DIR,
+        queries=queries,
+        sizes=index_sizes,
+    )
 
-    # Phase 6–7 — Metadata --------------------------------------------------
-    run_metadata_benchmarks(books, DATALAKE_ROOT, METADATA_DB_PATH)
-
-    # Phase 8–12 — Inverted Index -------------------------------------------
-    run_index_benchmarks(books, MONOLITHIC_PATH, HIERARCHICAL_BASE)
-
-    # Final summary ---------------------------------------------------------
-    print("\n" + "=" * 65)
-    print("  All 12 CSV files have been successfully generated!")
-    print(f"  Output folder: {RESULTS_DIR}")
-    print("=" * 65)
-
-    print("\n  Generated files:")
-    for csv_file in sorted(RESULTS_DIR.glob("python_*.csv")):
-        size_kb = csv_file.stat().st_size / 1024
-        print(f"    - {csv_file.name}  ({size_kb:.1f} KB)")
+    # ------------------------------------------------------------------ #
+    # Summary                                                            #
+    # ------------------------------------------------------------------ #
+    elapsed = time.time() - t0
+    print(f'\n{"=" * 70}')
+    print(f'  All 12 CSVs generated in {elapsed:.1f}s')
+    print(f'  Results directory: {_RESULTS_DIR}')
     print()
+    for csv_file in sorted(_RESULTS_DIR.glob('python_*.csv')):
+        line_count = sum(1 for _ in open(csv_file)) - 1  # minus header
+        print(f'    {csv_file.name:.<45} {line_count:>5} data rows')
+    print('=' * 70)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

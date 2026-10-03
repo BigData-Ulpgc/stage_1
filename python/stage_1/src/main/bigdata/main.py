@@ -10,31 +10,44 @@ Project Gutenberg end-to-end:
 
 import os
 import sys
+from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Internal module imports
 # ---------------------------------------------------------------------------
 from src.main.bigdata.control.state_manager import ControlLayer
 from src.main.bigdata.crawler.splitter import fetch_book
-from src.main.bigdata.datalake import save_to_all_structures
-from src.main.bigdata.datamart.metadata.repository import MetadataManager
+from src.main.bigdata.models import RawBook
+from src.main.bigdata.datalake.book_based import BookBasedDatalake
+from src.main.bigdata.datalake.time_based import TimeBasedDatalake
+from src.main.bigdata.datalake.range_based import RangeBasedDatalake
+from src.main.bigdata.datamart.metadata.repository import MetadataRepository
+from src.main.bigdata.datamart.metadata.parser import parse_metadata
 from src.main.bigdata.datamart.index.tokenizer import tokenize
-from src.main.bigdata.datamart.index.monolithic import MonolithicIndex
-from src.main.bigdata.datamart.index.hierarchical import HierarchicalIndex
-from src.main.bigdata.datamart.index.mongo import MongoIndex
+from src.main.bigdata.datamart.index.monolithic import MonolithicJsonIndex
+from src.main.bigdata.datamart.index.hierarchical import HierarchicalFolderIndex
+from src.main.bigdata.datamart.index.mongo import MongoInvertedIndex
 
 # ---------------------------------------------------------------------------
-# Paths (relative to this script's directory → src/)
+# Paths  (aligned with benchmark_runner.py conventions)
+#   _PYTHON_ROOT = stage_1/python/stage_1/
+#   _REPO_ROOT   = stage_1/                 (contains shared/)
 # ---------------------------------------------------------------------------
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-_BOOK_IDS_PATH = os.path.join(_SCRIPT_DIR, "..", "..", "..", "..", "..", "shared", "book_ids.txt")
+_PYTHON_ROOT = Path(__file__).resolve().parents[3]
+_REPO_ROOT = Path(__file__).resolve().parents[5]
+
+_BOOK_IDS_PATH = _REPO_ROOT / "shared" / "book_ids.txt"
+_DATA_DIR = _PYTHON_ROOT / "data"
+_DATALAKE_DIR = _DATA_DIR / "datalake"
+_DATAMARTS_DIR = _DATA_DIR / "datamarts"
+_CONTROL_DIR = _DATA_DIR / "control"
 
 
 # ---------------------------------------------------------------------------
 # Reading IDs
 # ---------------------------------------------------------------------------
 
-def load_book_ids(filepath: str) -> list[int]:
+def load_book_ids(filepath: Path) -> list[int]:
     """
     Reads *filepath* and returns the list of numeric IDs.
 
@@ -64,7 +77,7 @@ def main() -> None:
     print("[INFO] Starting indexing pipeline")
     print("=" * 65)
 
-    if not os.path.isfile(_BOOK_IDS_PATH):
+    if not _BOOK_IDS_PATH.is_file():
         print(f"[ERROR] Book IDs file not found: {_BOOK_IDS_PATH}")
         sys.exit(1)
 
@@ -72,15 +85,26 @@ def main() -> None:
     print(f"[INFO] Books to process: {len(book_ids)} -> {book_ids}\n")
 
     # ── 2. Initialization ──────────────────────────────────────────────
-    control = ControlLayer()                      # uses default path
-    metadata = MetadataManager()                  # creates schema in __init__
-    mono_index = MonolithicIndex()
-    hier_index = HierarchicalIndex()
+
+    # Control layer
+    control = ControlLayer(base_dir=str(_CONTROL_DIR))
+
+    # Datalake — three physical structures
+    book_dl = BookBasedDatalake(_DATALAKE_DIR / "book")
+    time_dl = TimeBasedDatalake(_DATALAKE_DIR / "time")
+    range_dl = RangeBasedDatalake(_DATALAKE_DIR / "range")
+
+    # Metadata (SQLite)
+    metadata = MetadataRepository(_DATAMARTS_DIR / "metadata.db")
+
+    # Inverted indexes (file-based)
+    mono_index = MonolithicJsonIndex(_DATAMARTS_DIR / "inverted_index.json")
+    hier_index = HierarchicalFolderIndex(_DATAMARTS_DIR / "inverted_index")
 
     # MongoDB: wrap in try-except to avoid blocking the rest
     mongo_index = None
     try:
-        mongo_index = MongoIndex()
+        mongo_index = MongoInvertedIndex()
         print("[INFO] MongoDB connection established successfully.")
     except Exception as e:
         print(f"[WARN] Could not connect to MongoDB: {e}")
@@ -112,20 +136,26 @@ def main() -> None:
         print(f"[INFO] [{book_id}] Download completed "
               f"(header: {len(header)} chars, body: {len(body)} chars).")
 
-        # 3c. Datalake
+        # 3c. Datalake — save to all 3 structures
         print(f"[INFO] [{book_id}] Saving to datalake (3 structures)...")
-        paths = save_to_all_structures(book_id, header, body)
-        book_header_path, book_body_path = paths["book"]
+        raw_book = RawBook(id=book_id, header=header, body=body)
+        book_loc = book_dl.save(raw_book)
+        time_dl.save(raw_book)
+        range_dl.save(raw_book)
         print(f"[INFO] [{book_id}] Datalake -> OK.")
 
-        # 3d. Metadata
+        # 3d. Metadata — parse header and insert into SQLite
         print(f"[INFO] [{book_id}] Inserting metadata into SQLite...")
-        metadata.insert_or_update_book(
-            book_id=book_id,
-            header_text=header,
-            body_path=book_body_path,
-            header_path=book_header_path,
-        )
+        meta = parse_metadata(header)
+        metadata.save_all([(
+            book_id,
+            meta["title"],
+            meta["author"],
+            meta["language"],
+            meta["release_date"],
+            str(book_loc.body_path),
+            str(book_loc.header_path),
+        )])
         print(f"[INFO] [{book_id}] Metadata -> OK.")
 
         # 3e. Tokenization
@@ -135,14 +165,14 @@ def main() -> None:
 
         # 3f. Inverted indexes
         print(f"[INFO] [{book_id}] Updating monolithic index...")
-        mono_index.add_postings(book_id, tokens)
+        mono_index.add_document(book_id, tokens)
 
         print(f"[INFO] [{book_id}] Updating hierarchical index...")
-        hier_index.add_postings(book_id, tokens)
+        hier_index.add_document(book_id, tokens)
 
         if mongo_index is not None:
             print(f"[INFO] [{book_id}] Updating MongoDB index...")
-            mongo_index.add_postings(book_id, tokens)
+            mongo_index.add_document(book_id, tokens)
         else:
             print(f"[WARN] [{book_id}] MongoDB index skipped (no connection).")
 
@@ -155,16 +185,21 @@ def main() -> None:
 
     # ── 4. Shutdown ────────────────────────────────────────────────────
     print("\n" + "=" * 65)
-    print("[INFO] Saving monolithic index to disk...")
-    mono_index.save()
+    print("[INFO] Flushing monolithic index to disk...")
+    mono_index.flush()
     print("[INFO] Monolithic index saved.")
+
+    print("[INFO] Flushing hierarchical index to disk...")
+    hier_index.flush()
+    print("[INFO] Hierarchical index saved.")
 
     metadata.close()
     print("[INFO] SQLite connection closed.")
 
     if mongo_index is not None:
+        mongo_index.flush()
         mongo_index.close()
-        print("[INFO] MongoDB connection closed.")
+        print("[INFO] MongoDB index flushed and connection closed.")
 
     # ── 5. Final summary ───────────────────────────────────────────────
     print("=" * 65)

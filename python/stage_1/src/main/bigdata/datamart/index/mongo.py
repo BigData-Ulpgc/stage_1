@@ -1,115 +1,72 @@
-"""
-Datamart Module — MongoDB Inverted Index
-=========================================
-Contains only the MongoIndex class (search_engine DB, inverted_index collection).
-"""
+from typing import List, Set
+from .base import InvertedIndex
 
-from __future__ import annotations
-
-# ---------------------------------------------------------------------------
-# pymongo guard: the module loads even if pymongo is not installed.
-# ---------------------------------------------------------------------------
 try:
-    from pymongo import MongoClient, ASCENDING
-    from pymongo.operations import UpdateOne
-    _PYMONGO_AVAILABLE = True
+    from pymongo import MongoClient, UpdateOne
+    from pymongo.errors import PyMongoError
+    HAS_PYMONGO = True
 except ImportError:
-    _PYMONGO_AVAILABLE = False
+    HAS_PYMONGO = False
 
+class MongoInvertedIndex(InvertedIndex):
+    def __init__(self, uri='mongodb://localhost:27017', db_name='search_engine', collection='inverted_index'):
+        if not HAS_PYMONGO:
+            raise ImportError("pymongo is required for MongoInvertedIndex")
+        
+        self._client = MongoClient(uri)
+        self._db = self._client[db_name]
+        self._collection = self._db[collection]
+        
+        self._collection.create_index("term", unique=True)
+        self._pending: dict[str, set[int]] = {}
 
-class MongoIndex:
-    """
-    Inverted index stored in MongoDB.
+    def name(self) -> str:
+        return "mongo"
 
-    - Database:   ``search_engine``
-    - Collection: ``inverted_index``
-    - Documents:  ``{"term": str, "postings": [int, ...]}``
-    - Unique index on ``term`` (guarantees one document per term).
+    def add_document(self, book_id: int, terms: Set[str]) -> None:
+        for term in terms:
+            self._pending.setdefault(term, set()).add(book_id)
 
-    Posting lists are kept sorted in ascending order using
-    the ``$push … $each … $sort`` modifier.
+    def postings(self, term: str) -> List[int]:
+        ids = set(self._pending.get(term, set()))
+        
+        doc = self._collection.find_one({"term": term})
+        if doc and "postings" in doc:
+            ids.update(doc["postings"])
+            
+        return sorted(ids)
 
-    Requires ``pymongo``. If not installed, raises
-    :class:`RuntimeError` upon instantiation.
-    """
-
-    def __init__(
-        self,
-        host: str = "localhost",
-        port: int = 27017,
-        db_name: str = "search_engine",
-        collection_name: str = "inverted_index",
-    ) -> None:
-        """
-        Connects to MongoDB and ensures the unique index on ``term``.
-
-        Args:
-            host:            MongoDB server host.
-            port:            MongoDB server port.
-            db_name:         Database name.
-            collection_name: Collection name.
-
-        Raises:
-            RuntimeError: If ``pymongo`` is not available in the environment.
-        """
-        if not _PYMONGO_AVAILABLE:
-            raise RuntimeError(
-                "pymongo is not installed. Run: pip install pymongo"
-            )
-
-        self._client = MongoClient(host, port)
-        self._col = self._client[db_name][collection_name]
-
-        # Unique index on "term" (SPEC Section 6)
-        self._col.create_index("term", unique=True)
-
-    # ------------------------------------------------------------------
-
-    def add_postings(self, book_id: int, terms: set[str]) -> None:
-        """
-        Adds *book_id* to the posting list of each term in bulk
-        (``bulk_write``) to maximize performance.
-
-        Each UpdateOne operation uses:
-        - ``upsert=True``   → creates the document if the term does not exist.
-        - ``$push … $each … $sort: 1`` → inserts the ID maintaining
-          ascending order. Deduplication is guaranteed because
-          ``add_postings`` is called exactly once per book (the
-          ``control_layer`` prevents re-indexing an already processed book).
-
-        Args:
-            book_id: Numeric book ID.
-            terms:   Set of tokens from the book.
-        """
-        if not terms:
+    def flush(self) -> None:
+        if not self._pending:
             return
-
-        operations = [
-            UpdateOne(
-                {"term": term},
-                {
-                    "$push": {
-                        "postings": {
-                            "$each": [book_id],
-                            "$sort": 1,         # maintains ascending order
-                        }
-                    }
-                },
-                upsert=True,
+            
+        operations = []
+        for term, ids in self._pending.items():
+            operations.append(
+                UpdateOne(
+                    {"term": term},
+                    {"$addToSet": {"postings": {"$each": sorted(ids)}}},
+                    upsert=True
+                )
             )
-            for term in terms
-        ]
+            
+        if operations:
+            self._collection.bulk_write(operations, ordered=False)
+            
+        self._pending.clear()
 
-        self._col.bulk_write(operations, ordered=False)
+    def clear(self) -> None:
+        self._pending.clear()
+        self._collection.drop()
+        self._collection.create_index("term", unique=True)
 
-    # ------------------------------------------------------------------
+    def disk_usage_bytes(self) -> int:
+        try:
+            stats = self._db.command("collStats", self._collection.name)
+            return stats.get("storageSize", 0) + stats.get("totalIndexSize", 0)
+        except Exception:
+            return 0
 
     def close(self) -> None:
-        """Closes the MongoDB connection."""
-        self._client.close()
-
-    def __enter__(self) -> "MongoIndex":
-        return self
-
-    def __exit__(self, *_) -> None:
-        self.close()
+        if hasattr(self, '_client'):
+            self._client.close()

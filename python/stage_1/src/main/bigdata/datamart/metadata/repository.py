@@ -1,128 +1,76 @@
-"""
-Datamart Module — Metadata Repository
-=======================================
-SQLite connection logic, table creation and data insertion
-for book metadata.
-"""
-
-import os
+"""SQLite metadata repository."""
 import sqlite3
+from pathlib import Path
+from typing import Optional, List
 
-from src.main.bigdata.datamart.metadata.parser import extract_metadata
+from ...models import BookMetadata
 
-# Default datamart path, relative to the src/datamart/metadata/ directory
-_DEFAULT_DB_PATH = os.path.join(
-    os.path.dirname(__file__), "..", "..", "..", "..", "..", "..", "..", "data", "datamarts", "metadata.db"
-)
-
-
-class MetadataManager:
-    """
-    Manages the SQLite book metadata database (Datamart).
-
-    Implements Section 4 of SPEC.md:
-    - Table ``books`` with the fields: book_id, title, author, language,
-      release_date, body_path, header_path.
-    - Indexes on ``author`` and ``title``.
-    - Idempotent insert/update with INSERT OR REPLACE.
-    """
-
-    def __init__(self, db_path: str = _DEFAULT_DB_PATH) -> None:
-        """
-        Initializes the metadata manager.
-
-        Args:
-            db_path: Path to the SQLite file. Intermediate directories
-                     are created if they do not exist.
-        """
-        self._db_path = os.path.abspath(db_path)
-        os.makedirs(os.path.dirname(self._db_path), exist_ok=True)
-        self._conn = sqlite3.connect(self._db_path)
-        self._create_schema()
-
-    # ------------------------------------------------------------------
-    # Schema creation (Section 4 · exact SQL queries from the contract)
-    # ------------------------------------------------------------------
-
-    def _create_schema(self) -> None:
-        """
-        Creates the ``books`` table and its two indexes if they do not exist yet.
-        Executes exactly the three SQL statements defined in Section 4.
-        """
+class MetadataRepository:
+    def __init__(self, db_path: Path, with_indexes: bool = True):
+        self._path = Path(db_path)
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._conn = sqlite3.connect(str(self._path))
+        
         cursor = self._conn.cursor()
-        cursor.executescript(
-            """
+        cursor.execute('''
             CREATE TABLE IF NOT EXISTS books (
-                book_id      INTEGER PRIMARY KEY,
-                title        TEXT,
-                author       TEXT,
-                language     TEXT,
+                book_id INTEGER PRIMARY KEY,
+                title TEXT,
+                author TEXT,
+                language TEXT,
                 release_date TEXT,
-                body_path    TEXT,
-                header_path  TEXT
-            );
-            CREATE INDEX IF NOT EXISTS idx_books_author ON books(author);
-            CREATE INDEX IF NOT EXISTS idx_books_title  ON books(title);
-            """
-        )
+                body_path TEXT,
+                header_path TEXT
+            )
+        ''')
+        
+        if with_indexes:
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_books_author ON books(author)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_books_title ON books(title)')
+            
         self._conn.commit()
 
-    # ------------------------------------------------------------------
-    # Insert / update (Section 4 · INSERT OR REPLACE)
-    # ------------------------------------------------------------------
-
-    def insert_or_update_book(
-        self,
-        book_id: int,
-        header_text: str,
-        body_path: str,
-        header_path: str,
-    ) -> None:
-        """
-        Inserts or updates a book record in the ``books`` table.
-
-        Extracts metadata from the ``header_text`` and executes an
-        ``INSERT OR REPLACE`` with the 7 table fields using
-        parameterized queries to prevent SQL injection and ensure
-        proper escaping of special characters.
-
-        Args:
-            book_id:     Numeric book ID on Project Gutenberg.
-            header_text: Complete book header text.
-            body_path:   Absolute path to the body file in the datalake.
-            header_path: Absolute path to the header file in the datalake.
-        """
-        meta = extract_metadata(header_text)
-
-        self._conn.execute(
-            """
+    def save_all(self, rows: list[tuple]):
+        self._conn.executemany('''
             INSERT OR REPLACE INTO books
-                (book_id, title, author, language, release_date, body_path, header_path)
-            VALUES
-                (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                book_id,
-                meta["title"],
-                meta["author"],
-                meta["language"],
-                meta["release_date"],
-                body_path,
-                header_path,
-            ),
-        )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', rows)
         self._conn.commit()
+        
+    def _row_to_metadata(self, row: tuple) -> BookMetadata:
+        return BookMetadata(
+            book_id=row[0],
+            title=row[1],
+            author=row[2],
+            language=row[3],
+            release_date=row[4],
+            body_path=row[5],
+            header_path=row[6]
+        )
 
-    # ------------------------------------------------------------------
-    # Connection lifecycle management
-    # ------------------------------------------------------------------
+    def find_by_id(self, book_id: int) -> Optional[BookMetadata]:
+        cursor = self._conn.cursor()
+        cursor.execute('SELECT * FROM books WHERE book_id = ?', (book_id,))
+        row = cursor.fetchone()
+        if row:
+            return self._row_to_metadata(row)
+        return None
 
-    def close(self) -> None:
-        """Closes the database connection."""
+    def find_by_author(self, author: str) -> List[BookMetadata]:
+        cursor = self._conn.cursor()
+        cursor.execute('SELECT * FROM books WHERE author = ?', (author,))
+        return [self._row_to_metadata(row) for row in cursor.fetchall()]
+
+    def find_by_title(self, title: str) -> List[BookMetadata]:
+        cursor = self._conn.cursor()
+        cursor.execute('SELECT * FROM books WHERE title = ?', (title,))
+        return [self._row_to_metadata(row) for row in cursor.fetchall()]
+
+    def close(self):
         self._conn.close()
 
-    def __enter__(self) -> "MetadataManager":
+    def __enter__(self):
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+    def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()

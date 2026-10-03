@@ -1,1 +1,1 @@
-
+"""Inverted index sub-package."""
