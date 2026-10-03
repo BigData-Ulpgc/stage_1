@@ -2889,3 +2889,26 @@ WiredTiger compresses and fills its pages differently in each case.
   `index_update` to be slower for that reason; a `bulk_write` would be the natural optimisation.
 - Each `write()`/`update_terms()` call opens a new client connection, while Java keeps one per index
   object. That cost is small next to the round trips, but it is inside the timing.
+
+---
+
+## Entry 59 – Index benchmark results will come from a teammate's machine with native Docker (2026-10-03)
+
+### What was done
+- Removed the five committed `benchmarks/results/cpp_index_*.csv` files (`index_build`,
+  `index_update`, `index_query`, `index_memory`, `index_disk`). They were the old 15-book results,
+  in the format from before Entries 53-58: no N=50/100/200 sizes, no `throughput`, `per_query` or
+  `allocated_bytes`, and no mongo rows.
+- Emptied the git-ignored scratch folder `benchmarks/work/` (about 1 GB of monolithic and
+  hierarchical index copies from the last local runs).
+- The index benchmark **code** is unchanged; only its outputs were removed.
+
+### Why
+- The final index results will be produced by a teammate on a machine with **native Docker**, so
+  the mongo structure runs against the group's `docker-compose.yml` without a VM in between. Here,
+  MongoDB ran inside Colima (Entry 58), which adds a virtualisation layer to every round trip and
+  does not survive a restart of the Mac.
+- Keeping the stale 15-book CSVs would have left results in the repo that no longer match what the
+  code measures, and they could have been mistaken for the final ones.
+- The datalake and metadata CSVs are kept for now: steps C and D of the parity plan will replace
+  them.
