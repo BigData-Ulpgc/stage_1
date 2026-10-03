@@ -16,7 +16,7 @@ from ..datalake.base import Datalake
 from ..datalake.book_based import BookBasedDatalake
 from ..datalake.range_based import RangeBasedDatalake
 from ..datalake.time_based import TimeBasedDatalake
-from .runner import measure, derived_rows, single_row, BenchmarkRow
+from .runner import measure, derived_rows, single_row, BenchmarkRow, JavaRandom, java_shuffle
 from .csv_results import write_experiment
 
 
@@ -76,9 +76,9 @@ def _delete_dir(d: Path):
 
 
 def _shuffled_ids(books: List[RawBook]) -> List[int]:
-    import random
     ids = [b.id for b in books]
-    random.Random(42).shuffle(ids)
+    ids.sort()
+    java_shuffle(ids, JavaRandom(42))
     return ids
 
 

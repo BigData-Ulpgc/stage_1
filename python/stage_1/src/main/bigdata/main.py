@@ -8,6 +8,7 @@ Project Gutenberg end-to-end:
     tokenization → inverted indexes → control mark
 """
 
+import argparse
 import os
 import sys
 from pathlib import Path
@@ -16,7 +17,7 @@ from pathlib import Path
 # Internal module imports
 # ---------------------------------------------------------------------------
 from src.main.bigdata.control.state_manager import ControlLayer
-from src.main.bigdata.crawler.splitter import fetch_book
+from src.main.bigdata.crawler.splitter import fetch_book, fetch_book_offline
 from src.main.bigdata.models import RawBook
 from src.main.bigdata.datalake.book_based import BookBasedDatalake
 from src.main.bigdata.datalake.time_based import TimeBasedDatalake
@@ -72,9 +73,28 @@ def load_book_ids(filepath: Path) -> list[int]:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    # ── 0. CLI arguments ───────────────────────────────────────────────
+    parser = argparse.ArgumentParser(
+        description="Indexing pipeline — Stage 1",
+    )
+    parser.add_argument(
+        "--offline-source",
+        type=str,
+        default=None,
+        help="Path to a local directory with pg<ID>.txt files. "
+             "When provided, books are read from disk instead of "
+             "downloading from Project Gutenberg.",
+    )
+    args = parser.parse_args()
+    offline_source: str | None = args.offline_source
+
     # ── 1. Reading IDs ─────────────────────────────────────────────────
     print("=" * 65)
     print("[INFO] Starting indexing pipeline")
+    if offline_source is not None:
+        print(f"[INFO] Offline mode enabled — reading from: {offline_source}")
+    else:
+        print("[INFO] Online mode — downloading from Project Gutenberg")
     print("=" * 65)
 
     if not _BOOK_IDS_PATH.is_file():
@@ -125,15 +145,19 @@ def main() -> None:
             skipped += 1
             continue
 
-        # 3b. Download
-        print(f"[INFO] [{book_id}] Downloading from Project Gutenberg...")
-        result = fetch_book(book_id)
+        # 3b. Fetch book (offline or online)
+        if offline_source is not None:
+            print(f"[INFO] [{book_id}] Reading from offline source...")
+            result = fetch_book_offline(book_id, offline_source)
+        else:
+            print(f"[INFO] [{book_id}] Downloading from Project Gutenberg...")
+            result = fetch_book(book_id)
         if result is None:
-            print(f"[ERROR] [{book_id}] Download failed. Skipping.")
+            print(f"[ERROR] [{book_id}] Fetch failed. Skipping.")
             errors += 1
             continue
         header, body = result
-        print(f"[INFO] [{book_id}] Download completed "
+        print(f"[INFO] [{book_id}] Fetch completed "
               f"(header: {len(header)} chars, body: {len(body)} chars).")
 
         # 3c. Datalake — save to all 3 structures

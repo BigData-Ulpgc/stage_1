@@ -143,3 +143,38 @@ def single_row(
         value=value,
         unit=unit,
     )
+
+
+# ------------------------------------------------------------------ #
+# java.util.Random compatible PRNG                                    #
+# ------------------------------------------------------------------ #
+
+class JavaRandom:
+    """Reimplementation of java.util.Random so Python produces the same
+    pseudo-random sequence as the Java benchmarks (seed=42)."""
+
+    def __init__(self, seed: int):
+        self.seed = (seed ^ 0x5DEECE66D) & ((1 << 48) - 1)
+
+    def _next(self, bits: int) -> int:
+        self.seed = (self.seed * 0x5DEECE66D + 0xB) & ((1 << 48) - 1)
+        return self.seed >> (48 - bits)
+
+    def next_int(self, bound: int) -> int:
+        r = self._next(31)
+        m = bound - 1
+        if bound & m == 0:
+            return (bound * r) >> 31
+        u = r
+        r = u % bound
+        while u - r + m >= 2**31:
+            u = self._next(31)
+            r = u % bound
+        return r
+
+
+def java_shuffle(items: list, rnd: JavaRandom) -> None:
+    """Fisher-Yates shuffle identical to java.util.Collections.shuffle."""
+    for i in range(len(items), 1, -1):
+        j = rnd.next_int(i)
+        items[i - 1], items[j] = items[j], items[i - 1]

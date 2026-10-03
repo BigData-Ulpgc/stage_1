@@ -101,3 +101,34 @@ def fetch_book(book_id: int) -> Optional[Tuple[str, str]]:
     except Exception as e:
         print(f"[ERROR] Unexpected error processing book {book_id}: {e}")
         return None
+
+
+def fetch_book_offline(book_id: int, offline_dir: str) -> Optional[Tuple[str, str]]:
+    """
+    Reads a book from a local file ``pg<ID>.txt`` inside *offline_dir*
+    and splits it into header and body — no network requests.
+
+    Args:
+        book_id:     Numeric book ID.
+        offline_dir: Path to the directory containing the raw text files.
+
+    Returns:
+        A (header, body) tuple or None if the file is missing or invalid.
+    """
+    from pathlib import Path
+
+    file_path = Path(offline_dir) / f"pg{book_id}.txt"
+    if not file_path.is_file():
+        print(f"[ERROR] Offline file not found: {file_path}")
+        return None
+
+    try:
+        raw_text = file_path.read_text(encoding="utf-8", errors="replace")
+        raw_text = raw_text.replace("\r\n", "\n")
+        return split_header_body(book_id, raw_text)
+    except MarkerNotFoundError as e:
+        print(f"[WARN] {e}")
+        return None
+    except Exception as e:
+        print(f"[ERROR] Unexpected error reading offline book {book_id}: {e}")
+        return None

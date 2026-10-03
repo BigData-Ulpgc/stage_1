@@ -4,14 +4,14 @@ Experiments: metadata_insert, metadata_query
 """
 from __future__ import annotations
 
-import random
+
 from pathlib import Path
 from typing import Dict, List
 
 from ..models import BookMetadata
 from ..datamart.metadata.parser import parse_metadata
 from ..datamart.metadata.repository import MetadataRepository
-from .runner import measure, derived_rows, single_row, BenchmarkRow
+from .runner import measure, derived_rows, single_row, BenchmarkRow, JavaRandom
 from .csv_results import write_experiment
 
 
@@ -74,7 +74,7 @@ def insert(size: int, work_dir: Path) -> List[BenchmarkRow]:
 def query(size: int, work_dir: Path, n_queries: int = DEFAULT_QUERY_COUNT) -> List[BenchmarkRow]:
     data = _synthetic_metadata(size)
     rows = []
-    rng = random.Random(42)
+    rnd = JavaRandom(42)
 
     for backend in ('sqlite', 'sqlite_no_index'):
         db_path = work_dir / 'query' / f'{backend}.db'
@@ -86,10 +86,10 @@ def query(size: int, work_dir: Path, n_queries: int = DEFAULT_QUERY_COUNT) -> Li
         repo = MetadataRepository(db_path, with_indexes=with_idx)
         repo.save_all(data)
 
-        # Pre-generate query targets
-        query_ids = [rng.randint(1, size) for _ in range(n_queries)]
-        query_authors = [f'Author {rng.randint(0, size // 10)}' for _ in range(n_queries)]
-        query_titles = [f'Title {rng.randint(0, size // 2)}' for _ in range(n_queries)]
+        # Pre-generate query targets using JavaRandom for cross-language parity
+        query_ids = [rnd.next_int(size) + 1 for _ in range(n_queries)]
+        query_authors = [f'Author {rnd.next_int(size // 10 + 1)}' for _ in range(n_queries)]
+        query_titles = [f'Title {rnd.next_int(size // 2 + 1)}' for _ in range(n_queries)]
 
         found = [0]
 
