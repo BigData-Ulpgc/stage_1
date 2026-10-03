@@ -2441,3 +2441,48 @@ The real data was moved aside, and every HTTP(S) request was sent to a closed lo
 - Seen while looking into it: the N=200 hierarchical index holds **7,251,967 bytes of data**, exactly
   Java's `bytes` value, but occupies **~530 MB of disk blocks** (Java: 530,001,920 bytes allocated).
   Each of its 129,356 small files takes at least one 4,096-byte block, about 73 times the data size.
+
+## Entry 50 – `HierarchicalIndexWriter::write()` now replaces its folder, and `index_build` empties it untimed (2026-10-03)
+
+### What was done
+- **Test first.** `HierarchicalIndexWriter.WritingAgainReplacesThePreviousContents` (the same name as
+  the existing Mongo test, since it checks the same contract) writes an index with `car` and `boat`,
+  then one with only `car`. Before the fix it failed: `B/boat.txt` was still there (Entry 49's
+  finding).
+- **The fix.** `write()` calls `std::filesystem::remove_all(root_)` before writing, so the folder ends
+  up holding exactly the given index. The header now states that the root folder belongs to the
+  writer. `update_terms()` is unchanged: it only adds or rewrites the given terms, which is all an
+  update with new books ever needs.
+- **`index_build`.** `run_and_record` takes a `reset` that `measure_elapsed_ms` runs before each
+  repetition, untimed. For the hierarchical structure it empties the folder; for the other two it does
+  nothing. No other benchmark needed a change: `index_update` already writes its base index in its
+  untimed setup, and `index_disk`, `index_memory` and `index_query` time no `write()`.
+- Suite total: 176.
+
+### Measured on the 200 real books
+- Deleting the 129,356 files of the N=200 hierarchical index takes **22.5 s** on this machine (macOS,
+  APFS).
+- `index_build` at N=200, mean of 5 runs: monolithic **2,567 ms**, hierarchical **23,566 ms**, with
+  the deletion outside the measurement. Had it been timed, every hierarchical repetition would have
+  measured about twice the building cost.
+- Java's report gives 1.69 s and 11.34 s for the same experiment, on Linux with an NVMe SSD. The ratio
+  between structures is similar (hierarchical about 7-9 times monolithic), but the absolute values are
+  not comparable across machines. Creating and deleting small files is a filesystem cost, which is one
+  more argument for running every language on the same machine (still an open point with the group).
+
+### Why
+- **Correctness of the contract, not just of the benchmarks.** `write()` means "make the structure
+  match this index" (Entry 18). Monolithic follows it by rewriting its file, and Mongo by
+  `delete_many` before inserting. Hierarchical silently appended instead. In the pipeline this was
+  harmless, because the index only grows. In the benchmarks, the N=50 index written over the N=200
+  one would have kept 129,356 files: `index_disk` would have counted files that are not in the index,
+  and hierarchical `index_query` would have returned books outside the 50.
+- **Fix it in the writer, and keep the cleanup out of the timing.** Clearing only in the benchmarks
+  would have hidden the bug instead of fixing it. Clearing only in the writer would have pushed 22 s of
+  deletion into every timed repetition. Doing both keeps the contract correct and the measurement
+  honest. "Setup outside the measurement" is the rule the Java module follows too.
+- **A known risk.** The local `backup/cpp-completo` branch (an earlier C++ attempt, never merged)
+  records `std::filesystem::remove_all` failing with "Directory not empty" on a ~460k-file
+  hierarchical index during a 500-book run. Nothing like it happened here at 129k files. If it ever
+  does, `write()` throws with that message, and that branch's mitigation (retrying the removal) is
+  the fix to bring in.
