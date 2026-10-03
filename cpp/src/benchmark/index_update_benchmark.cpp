@@ -74,9 +74,9 @@ std::vector<BenchmarkResult> benchmark_index_update(const std::string& language,
                    [&] { return hierarchical_postings_fetcher(hierarchical_root); }, results);
 
     if (mongo_is_reachable()) {
-        MongoIndexWriter mongo;
+        MongoIndexWriter mongo(kMongoUri, kMongoBenchDatabase);  // never the real index's database
         run_and_record(language, "mongo", tokenized, k, queries, stopwords, mongo,
-                       [] { return mongo_postings_fetcher(); }, results);
+                       [] { return mongo_postings_fetcher(kMongoUri, kMongoBenchDatabase); }, results);
     }
 
     return results;

@@ -24,6 +24,10 @@ namespace {
 // already used for the real Gutenberg download test.
 constexpr const char* kTestUri = "mongodb://localhost:27017/?serverSelectionTimeoutMS=1000";
 
+// A database of the tests' own: they must never touch the real index
+// ("search_engine") nor the benchmarks' ("search_engine_bench").
+constexpr const char* kTestDb = "search_engine_test";
+
 }  // namespace
 
 TEST(MongoIndexWriter, WritesTermsAsDocumentsWithSortedPostings) {
@@ -34,10 +38,10 @@ TEST(MongoIndexWriter, WritesTermsAsDocumentsWithSortedPostings) {
     InvertedIndex index;
     index.add_book(3, {"car"});
     index.add_book(1, {"car", "nice"});
-    MongoIndexWriter(kTestUri).write(index);
+    MongoIndexWriter(kTestUri, kTestDb).write(index);
 
     mongocxx::client client{mongocxx::uri{kTestUri}};
-    auto collection = client["search_engine"]["inverted_index"];
+    auto collection = client[kTestDb]["inverted_index"];
 
     auto car_doc = collection.find_one(make_document(kvp("term", "car")));
     ASSERT_TRUE(car_doc.has_value());
@@ -55,14 +59,14 @@ TEST(MongoIndexWriter, WritingAgainReplacesThePreviousContents) {
 
     InvertedIndex first;
     first.add_book(1, {"car"});
-    MongoIndexWriter(kTestUri).write(first);
+    MongoIndexWriter(kTestUri, kTestDb).write(first);
 
     InvertedIndex second;
     second.add_book(1, {"boat"});
-    MongoIndexWriter(kTestUri).write(second);
+    MongoIndexWriter(kTestUri, kTestDb).write(second);
 
     mongocxx::client client{mongocxx::uri{kTestUri}};
-    auto collection = client["search_engine"]["inverted_index"];
+    auto collection = client[kTestDb]["inverted_index"];
     EXPECT_FALSE(collection.find_one(make_document(kvp("term", "car"))).has_value());
     EXPECT_TRUE(collection.find_one(make_document(kvp("term", "boat"))).has_value());
 }
@@ -88,16 +92,61 @@ TEST(MongoIndexWriter, UpdateTermsOnlyTouchesTheGivenTermsDocuments) {
 
     InvertedIndex index;
     index.add_book(1, {"car", "boat"});
-    MongoIndexWriter writer(kTestUri);
+    MongoIndexWriter writer(kTestUri, kTestDb);
     writer.write(index);
 
     index.add_book(2, {"car", "dragon"});
     writer.update_terms(index, {"car", "dragon"});
 
     mongocxx::client client{mongocxx::uri{kTestUri}};
-    auto collection = client["search_engine"]["inverted_index"];
+    auto collection = client[kTestDb]["inverted_index"];
     EXPECT_TRUE(collection.find_one(make_document(kvp("term", "car"))).has_value());
     EXPECT_TRUE(collection.find_one(make_document(kvp("term", "dragon"))).has_value());
     // "boat" was never in changed_terms: write() already put it there, untouched since.
     EXPECT_TRUE(collection.find_one(make_document(kvp("term", "boat"))).has_value());
+}
+
+TEST(MongoIndexWriter, ClearDropsTheWholeCollection) {
+    if (!stage1::mongo_is_reachable(kTestUri)) {
+        GTEST_SKIP() << "no MongoDB reachable at " << kTestUri;
+    }
+    InvertedIndex index;
+    index.add_book(1, {"car"});
+    MongoIndexWriter writer(kTestUri, kTestDb);
+    writer.write(index);
+
+    writer.clear();
+
+    mongocxx::client client{mongocxx::uri{kTestUri}};
+    EXPECT_FALSE(client[kTestDb].has_collection("inverted_index"));
+}
+
+TEST(MongoPostingsFetcher, ReadsTheGivenDatabase) {
+    if (!stage1::mongo_is_reachable(kTestUri)) {
+        GTEST_SKIP() << "no MongoDB reachable at " << kTestUri;
+    }
+    InvertedIndex index;
+    index.add_book(3, {"car"});
+    index.add_book(1, {"car"});
+    MongoIndexWriter(kTestUri, kTestDb).write(index);
+
+    const auto postings = stage1::mongo_postings_fetcher(kTestUri, kTestDb);
+
+    EXPECT_EQ(postings("car"), (std::vector<int>{1, 3}));
+    EXPECT_TRUE(postings("dragon").empty());
+}
+
+TEST(MongoDiskUsageBytes, PositiveAfterWritingAndZeroForAMissingCollection) {
+    if (!stage1::mongo_is_reachable(kTestUri)) {
+        GTEST_SKIP() << "no MongoDB reachable at " << kTestUri;
+    }
+    InvertedIndex index;
+    index.add_book(1, {"car", "boat"});
+    MongoIndexWriter writer(kTestUri, kTestDb);
+    writer.write(index);
+
+    EXPECT_GT(stage1::mongo_disk_usage_bytes(kTestUri, kTestDb), 0);
+
+    writer.clear();
+    EXPECT_EQ(stage1::mongo_disk_usage_bytes(kTestUri, kTestDb), 0);
 }

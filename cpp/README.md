@@ -14,8 +14,20 @@ Tested on macOS (Apple Silicon):
 | CMake ≥ 3.20, Ninja, mongo-cxx-driver | Homebrew: `brew install cmake ninja mongo-cxx-driver` |
 | nlohmann/json, GoogleTest | Downloaded automatically by CMake on the first build |
 
-A running MongoDB server is **not** required. Without one, the Mongo-dependent tests and benchmark
-rows are skipped automatically.
+A running MongoDB server is **not** required to build or test: without one, the Mongo-dependent tests
+and benchmark rows are skipped automatically. To include the `mongo` structure, start the group's
+MongoDB (the repository's `docker-compose.yml`, MongoDB 8.2.12) from the repository root. On a Mac
+without Docker Desktop, Colima provides the Docker engine:
+
+```bash
+brew install colima docker docker-compose
+colima start --cpu 2 --memory 4
+docker-compose up -d
+```
+
+`docker-compose down` stops it again. The benchmarks write to their own database
+(`search_engine_bench`) and the tests to `search_engine_test`, never to the real index's
+`search_engine`.
 
 ## 2. Build and test
 

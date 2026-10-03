@@ -75,8 +75,8 @@ std::vector<BenchmarkResult> benchmark_index_query(const std::string& language, 
     measure("monolithic", monolithic_postings_fetcher(monolithic_path));  // opened once, outside the timing
     measure("hierarchical", hierarchical_postings_fetcher(hierarchical_path));
     if (mongo_is_reachable()) {
-        MongoIndexWriter().write(index);
-        measure("mongo", mongo_postings_fetcher());
+        MongoIndexWriter(kMongoUri, kMongoBenchDatabase).write(index);  // never the real index's database
+        measure("mongo", mongo_postings_fetcher(kMongoUri, kMongoBenchDatabase));
     }
     return results;
 }

@@ -76,8 +76,8 @@ std::vector<BenchmarkResult> benchmark_index_memory(const std::string& language,
     measure("hierarchical", hierarchical, [&] { return hierarchical_postings_fetcher(hierarchical_path); });
 
     if (mongo_is_reachable()) {
-        MongoIndexWriter mongo;
-        measure("mongo", mongo, [] { return mongo_postings_fetcher(); });
+        MongoIndexWriter mongo(kMongoUri, kMongoBenchDatabase);  // never the real index's database
+        measure("mongo", mongo, [] { return mongo_postings_fetcher(kMongoUri, kMongoBenchDatabase); });
     }
     return results;
 }

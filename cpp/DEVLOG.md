@@ -2838,3 +2838,54 @@ language would then measure different lookups and queries, which would break the
 condition. Reproducing Java's published algorithm makes the choices identical without sharing any
 data file. A short message with an equivalent Python version was prepared for the Python teammate.
 It is not used yet: the datalake (step C) and metadata (step D) benchmarks will use it.
+
+## Entry 58 – MongoDB measured for the first time, under Java's conditions (2026-10-03)
+
+### What was done
+- **A real MongoDB server on this machine.** The group's `docker-compose.yml` (MongoDB 8.2.12, the
+  image Java's results used) was started unchanged. This Mac had no Docker, so the engine comes from
+  **Colima** (`brew install colima docker docker-compose`; `colima start --cpu 2 --memory 4`, a
+  small Ubuntu VM), then `docker-compose up -d`. The container passes its own healthcheck and answers
+  on `localhost:27017`. A Homebrew `mongod` 8.3.11 was also installed but stopped. It was not used,
+  so that the server version matches Java's.
+- **The Mongo tests ran against a real server for the first time.** Until now they had always been
+  skipped. All 4 writer tests and the 2 benchmark ones passed as written.
+- **Same conditions as Java's `IndexBenchmark` for the mongo structure:**
+  - *Separate databases.* `MongoIndexWriter`, `mongo_postings_fetcher` and the new
+    `mongo_disk_usage_bytes` take a database and a collection. They default to SPEC section 6's real
+    `search_engine/inverted_index`, but the benchmarks use `search_engine_bench` (Java's
+    `BENCH_DATABASE`), and the tests use `search_engine_test`. Before this, the database name was
+    hardcoded, so every benchmark and test run overwrote the real index's collection.
+  - *Untimed emptying.* The new `MongoIndexWriter::clear()` drops the collection (Java's `clear`),
+    and `index_build` calls it in its untimed reset. `write()` still starts with `delete_many`, which
+    is now cheap on an empty collection, so the timed part measures building, not clearing.
+  - *Disk usage.* `index_disk` now covers mongo with Java's own definition. It requests an `fsync`
+    (WiredTiger only moves data into the collection file at each checkpoint), then reports
+    `storageSize + totalIndexSize` from `$collStats`, as `bytes`, followed by `terms` and `postings`.
+    There are no `files`/`allocated_bytes` rows, since Mongo has no folder of its own, as in Java.
+    This closes the gap Entry 42 left open for want of a server to verify against. The BSON numbers
+    are read whatever their type (int32, int64 or double).
+- 4 new tests: `clear`, the fetcher with a given database, disk usage (positive after writing, 0 for a
+  missing collection), and mongo's `index_disk` rows. Suite total: 194, none skipped.
+- `cpp/README.md` explains how to start the group's MongoDB, including on a Mac without Docker
+  Desktop.
+
+### Verification on the 200 real books
+`index_disk` for mongo against Java's `results/real/`:
+
+| N | C++ | Java |
+|---|---|---|
+| 50 | 3.93 MB | 3.98 MB |
+| 100 | 7.34 MB | 7.27 MB |
+| 200 | 13.91 MB | 14.13 MB |
+
+`terms` and `postings` are identical to Java's. The bytes differ by under 2%, which is plausible: this
+module inserts every document at once (`insert_many`), while Java upserts them with `$addToSet`, and
+WiredTiger compresses and fills its pages differently in each case.
+
+### Implementation differences left as they are (they are what is being compared)
+- `MongoIndexWriter::update_terms` issues one `update_one` per term, about 7,900 round trips for a
+  real book. Java sends a book's terms in a single `bulkWrite`. Expect this module's Mongo
+  `index_update` to be slower for that reason; a `bulk_write` would be the natural optimisation.
+- Each `write()`/`update_terms()` call opens a new client connection, while Java keeps one per index
+  object. That cost is small next to the round trips, but it is inside the timing.

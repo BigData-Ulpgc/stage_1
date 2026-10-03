@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "stage1/benchmark/index_disk_benchmark.hpp"
+#include "stage1/datamart/index/mongo_index_writer.hpp"
 #include "support/temp_dir.hpp"
 
 using stage1::benchmark_index_disk;
@@ -71,4 +72,21 @@ TEST(BenchmarkIndexDisk, ReportsJavasFiveMetricsInJavasOrder) {
     EXPECT_EQ(hierarchical_metrics,
               (std::vector<std::string>{"bytes", "files", "allocated_bytes", "terms", "postings"}));
     EXPECT_GT(allocated, bytes);  // a handful of tiny files still reserve whole blocks each
+}
+
+TEST(BenchmarkIndexDisk, ReportsMongoWithJavasRowsWhenReachable) {
+    if (!stage1::mongo_is_reachable()) {
+        GTEST_SKIP() << "no MongoDB reachable (start it with `docker compose up -d`)";
+    }
+    TempDir root("stage1_index_disk_benchmark_test_mongo");
+
+    auto results = benchmark_index_disk("cpp", kCorpus, kQueries, kStopwords, root.path());
+
+    std::vector<std::string> mongo_metrics;
+    for (const auto& r : results) {
+        if (r.structure != "mongo") continue;
+        mongo_metrics.push_back(r.metric);
+        if (r.metric == "bytes") EXPECT_GT(r.value, 0.0);
+    }
+    EXPECT_EQ(mongo_metrics, (std::vector<std::string>{"bytes", "terms", "postings"}));
 }

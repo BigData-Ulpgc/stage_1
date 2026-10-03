@@ -6,6 +6,7 @@
 #include "stage1/benchmark/index_benchmark_support.hpp"
 #include "stage1/datamart/index/hierarchical_index_writer.hpp"
 #include "stage1/datamart/index/index_readers.hpp"
+#include "stage1/datamart/index/mongo_index_writer.hpp"
 #include "stage1/datamart/index/monolithic_index_writer.hpp"
 
 namespace stage1 {
@@ -78,6 +79,23 @@ std::vector<BenchmarkResult> benchmark_index_disk(const std::string& language, c
     verify_index(hierarchical_postings_fetcher(hierarchical_root), tokenized, queries, stopwords,
                  "hierarchical index_disk");
     record(language, "hierarchical", dataset_size, hierarchical_root, terms, postings, results);
+
+    if (mongo_is_reachable()) {
+        // No folder of its own, so no files/allocated_bytes: only what MongoDB
+        // reports (storageSize + totalIndexSize), as in Java.
+        MongoIndexWriter mongo(kMongoUri, kMongoBenchDatabase);  // never the real index's database
+        mongo.clear();
+        mongo.write(index);
+        verify_index(mongo_postings_fetcher(kMongoUri, kMongoBenchDatabase), tokenized, queries, stopwords,
+                     "mongo index_disk");
+        const auto row = [&](const char* metric, long long value, const char* unit) {
+            results.push_back(BenchmarkResult{language, "index_disk", "mongo", dataset_size, 1, metric,
+                                               static_cast<double>(value), unit});
+        };
+        row("bytes", mongo_disk_usage_bytes(kMongoUri, kMongoBenchDatabase), "bytes");
+        row("terms", terms, "count");
+        row("postings", postings, "count");
+    }
 
     return results;
 }

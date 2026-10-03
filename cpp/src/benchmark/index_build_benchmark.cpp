@@ -72,10 +72,12 @@ std::vector<BenchmarkResult> benchmark_index_build(const std::string& language, 
         [&] { return hierarchical_postings_fetcher(hierarchical_root); }, results);
 
     if (mongo_is_reachable()) {
-        MongoIndexWriter mongo;
+        // The benchmarks' own database, never the real index's (as in Java);
+        // the collection is dropped in the untimed reset, as Java's setup does.
+        MongoIndexWriter mongo(kMongoUri, kMongoBenchDatabase);
         run_and_record(
-            language, "mongo", tokenized, queries, stopwords, mongo, [] {}, [] { return mongo_postings_fetcher(); },
-            results);
+            language, "mongo", tokenized, queries, stopwords, mongo, [&] { mongo.clear(); },
+            [] { return mongo_postings_fetcher(kMongoUri, kMongoBenchDatabase); }, results);
     }
     // Mongo unreachable: skipped, not failed, so a run without Docker still
     // reports the other two structures.
