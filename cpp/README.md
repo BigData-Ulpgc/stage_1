@@ -60,7 +60,7 @@ at build time, so it works from any directory.
 | `$B pipeline <N> --offline` | The same pipeline, but **without network**: the books are the 15 of `sample_dataset/`, read from `sample_dataset/raw/` instead of Project Gutenberg. Everything after fetching a book is identical. | no | `data/` |
 | `$B search <words...>` | AND search: the books containing **every** word, with their titles. Words are tokenized like the books (case, punctuation and stopwords ignored). | no | nothing |
 | `$B status` | How many books the dataset lists, how many are downloaded and indexed, and which are downloaded but not indexed yet. | no | nothing |
-| `$B benchmark <experiment>` | Runs one of the 12 SPEC experiments and writes `benchmarks/results/cpp_<experiment>.csv`. The datalake and index experiments use the books already downloaded; the metadata ones use synthetic rows at N=1,000, 10,000 and 100,000 (SPEC section 10.2). | no | `benchmarks/` |
+| `$B benchmark <experiment>` | Runs one of the 12 SPEC experiments and writes its CSV under `benchmarks/results/` (see section 7). The datalake and index experiments use the books already downloaded; the metadata ones use synthetic rows at N=1,000, 10,000 and 100,000 (SPEC section 10.2). | no | `benchmarks/` |
 
 Experiments: `datalake_write`, `datalake_lookup`, `datalake_incremental`, `datalake_recovery`,
 `datalake_storage`, `metadata_insert`, `metadata_query`, `index_build`, `index_query`, `index_update`,
@@ -170,9 +170,19 @@ $B status x ; echo $?
 
 ## 7. Good to know
 
-- **Benchmark results and git.** No results are committed yet: only runs with SPEC section 10's
-  sizes will be. A benchmark writes `benchmarks/results/cpp_<experiment>.csv`, which git shows as a
-  new file. If you only ran it to try it, delete that file instead of committing it.
+- **Benchmark results and git.** Each experiment writes its CSV into a folder for its data (SPEC
+  section 10.4) and its category, overwriting the previous run:
+
+  ```
+  benchmarks/results/
+  ├── real/datalake/cpp_datalake_<write|lookup|incremental|recovery|storage>.csv   200 real books
+  ├── real/index/cpp_index_<build|query|update|memory|disk>.csv                    N=50/100/200 real books
+  └── synthetic/metadata/cpp_metadata_<insert|query>.csv                           N=1k/10k/100k generated rows
+  ```
+
+  These CSVs are tracked by git, and only runs with SPEC section 10's sizes are committed. If you
+  only ran a benchmark to try it, restore the committed file with `git checkout -- <file>`, or
+  delete it if git shows it as new. `benchmarks/work/` is scratch space, ignored by git.
 - **Quoting in zsh.** Use single quotes for multi-word queries with punctuation, for example
   `$B search 'The Whale, and the Island!'`. Inside double quotes, zsh treats `!"` specially and
   leaves the quote open (a `dquote>` prompt; Ctrl+C gets you out).

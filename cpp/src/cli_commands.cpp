@@ -61,6 +61,16 @@ const std::filesystem::path kBenchmarksDir = STAGE1_BENCHMARKS_DIR;
 // apart. Swapping pipeline's index format means swapping search's reader too.
 const std::filesystem::path kIndexPath = kDataDir / "datamarts" / "inverted_index.json";
 
+// Where an experiment's CSV goes: SPEC section 10.4's real/ (the downloaded
+// books: datalake and index experiments) or synthetic/ (the generated rows of
+// section 10.2: metadata experiments), then one folder per category, e.g.
+// benchmarks/results/real/datalake/cpp_datalake_write.csv.
+std::filesystem::path results_path(const std::string& experiment) {
+    const std::string category = experiment.substr(0, experiment.find('_'));  // datalake, index or metadata
+    const std::string data = category == "metadata" ? "synthetic" : "real";
+    return kBenchmarksDir / "results" / data / category / ("cpp_" + experiment + ".csv");
+}
+
 // SPEC section 10.1: the index experiments run once per size N, on the N
 // books with the lowest ids (load_sample_books already returns them sorted).
 constexpr std::array<std::size_t, 3> kIndexSizes = {50, 100, 200};
@@ -238,11 +248,11 @@ int run_status_command() {
 // Runs one SPEC section 9 experiment -- the datalake and index ones against
 // books a previous `pipeline <N>` run already downloaded (never the network:
 // see load_sample_books), the metadata ones on synthetic rows (SPEC section
-// 10.2) -- and writes the result CSV to benchmarks/results/cpp_<experiment>.csv, the same
+// 10.2) -- and writes the result CSV where results_path() says, the same
 // "results get committed, work is scratch" convention the Java module uses.
 int run_benchmark_command(const std::string& experiment) {
     const auto work_dir = kBenchmarksDir / "work";
-    const auto csv_path = kBenchmarksDir / "results" / ("cpp_" + experiment + ".csv");
+    const auto csv_path = results_path(experiment);
 
     // SPEC section 10.2: the metadata experiments run on synthetic rows, not
     // on the downloaded books, once per size N (each a prefix of the largest).

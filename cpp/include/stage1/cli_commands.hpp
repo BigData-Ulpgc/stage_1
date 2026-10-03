@@ -32,7 +32,8 @@ int run_status_command();
 // section 9 experiment -- the datalake and index ones against books a
 // previous `pipeline <N>` run already downloaded, the metadata ones on
 // synthetic rows at N=1,000/10,000/100,000 (SPEC section 10.2) -- and writes
-// benchmarks/results/cpp_<experiment>.csv. Returns the process exit code.
+// benchmarks/results/<real|synthetic>/<category>/cpp_<experiment>.csv.
+// Returns the process exit code.
 int run_benchmark_command(const std::string& experiment);
 
 }  // namespace stage1

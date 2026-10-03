@@ -3117,3 +3117,42 @@ Entries 36 and 37 benchmarked only `sqlite`, on the 15 real books. This experime
 section 10.2: synthetic rows and both variants. `sqlite_no_index` is the same backend with a
 different schema, not a second `MetadataStore`, so Entry 13's reasoning against generalising the
 store still holds.
+
+---
+
+## Entry 63 – Benchmark results committed, in `real/` and `synthetic/`, one folder per category (2026-10-03)
+
+### What was done
+- With steps C and D done, the seven datalake and metadata CSVs have the sizes SPEC section 10 asks
+  for. They were moved into SPEC section 10.4's folders and, at the user's request, split into one
+  subfolder per category:
+
+  ```
+  cpp/benchmarks/results/
+  ├── real/datalake/        cpp_datalake_{write,lookup,incremental,recovery,storage}.csv   (N=200)
+  ├── real/index/           cpp_index_*.csv, to come from the teammate's run (Entry 59)
+  └── synthetic/metadata/   cpp_metadata_{insert,query}.csv                                 (N=1k/10k/100k)
+  ```
+
+- `run_benchmark_command` now writes there directly. The new `results_path()` takes the category
+  from the experiment's name (`datalake`, `index` or `metadata`) and picks `synthetic/` for metadata,
+  `real/` for the rest. A rerun overwrites its CSV in place, and the teammate's index run will land
+  in `real/index/` with no manual step.
+- Verified: rerunning `datalake_storage`, which is deterministic, rewrote
+  `real/datalake/cpp_datalake_storage.csv` byte-identical to the moved file. An unknown experiment
+  still exits with code 1 and writes nothing.
+- `cpp/README.md`, sections 3 and 7, describe the layout. The CSVs are tracked again, so the note
+  explains how to undo a trial run.
+
+### Why
+- `real/` against `synthetic/` is SPEC section 10.4's agreed split. The category subfolders keep each
+  folder small and match how the experiments are grouped everywhere else: SPEC section 9, Java's
+  three benchmark classes, and this module's `benchmark/` sources.
+- The root `.gitignore` exception `!cpp/benchmarks/results/**/*.csv` already covers subfolders, so it
+  needed no change.
+
+### Open point for the group
+SPEC section 10.4 names the files directly inside `real/` and `synthetic/`, and the Java module keeps
+them that way. The category subfolders are this module's choice. If the group wants every language
+to share one layout, either the SPEC gains the subfolders or this module flattens them. That is a
+one-line change in `results_path()`. The SPEC was not edited, since it is a shared file.
