@@ -72,6 +72,7 @@ add_library(stage1_core
   src/control/pipeline.cpp
   src/benchmark/benchmark.cpp
   src/benchmark/index_benchmark_support.cpp
+  src/benchmark/java_random.cpp
   src/benchmark/sample_books.cpp
   src/benchmark/index_build_benchmark.cpp
   src/benchmark/query_list.cpp

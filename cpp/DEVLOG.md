@@ -2807,3 +2807,34 @@ cause is in this module's own code: `write_text_file` calls `create_directories`
 possible optimisation of the implementation. That is exactly what the comparison measures, so it is
 not something to hide or adjust in the benchmark.
 
+## Entry 57 – Parity with Java, step B: `JavaRandom`, Java's random generator reproduced number for number (2026-10-03)
+
+### What was done
+- `include/stage1/benchmark/java_random.hpp` + `src/benchmark/java_random.cpp`:
+  - `JavaRandom(seed)` and `next_int(bound)` reproduce `java.util.Random`, a 48-bit linear
+    congruential generator whose algorithm is part of the Java API specification;
+  - `java_shuffle(items, random)` reproduces `Collections.shuffle(list, random)` for a random-access
+    list.
+- Java's rejection loop in `nextInt(bound)` detects biased values through 32-bit `int` overflow
+  (`u - r + m < 0`). Signed overflow is undefined behaviour in C++, so the sum is computed in 64 bits
+  and compared with `INT_MAX`. The state uses unsigned 64-bit arithmetic masked to 48 bits, which
+  wraps exactly like Java's `long`.
+- `tests/benchmark/java_random_test.cpp`, 6 tests. **Every expected value was printed by a real JVM**
+  (OpenJDK 23, a throwaway `JavaRandomReference.java` outside the repo):
+  - `nextInt(100)` and `nextInt(16)` (the power-of-two branch);
+  - `nextInt(2^30 + 1)`, where about half of all draws are rejected, which exercises the overflow
+    path;
+  - a negative seed;
+  - `Collections.shuffle` of 1..10;
+  - a non-positive bound throws.
+
+  All 6 passed on the first run. Suite total: 190.
+
+### Why
+The Java module makes two "random" choices with `new Random(42)`: the order in which
+`datalake_lookup` looks books up, and the 1,000 queries of `metadata_query`. C++'s `std::mt19937`,
+Python's `random` and Java's generator give three different sequences for the same seed. Each
+language would then measure different lookups and queries, which would break the "same data"
+condition. Reproducing Java's published algorithm makes the choices identical without sharing any
+data file. A short message with an equivalent Python version was prepared for the Python teammate.
+It is not used yet: the datalake (step C) and metadata (step D) benchmarks will use it.
