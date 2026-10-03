@@ -2532,3 +2532,34 @@ now stops at it, and the books after it in `book_ids.txt` are never reached. The
 problem, only hidden behind misleading messages. None of the 200 current books is affected, since all
 were checked to have both markers. If one ever is, the fix belongs in the shared contract (for example
 a "discarded" control file), not in one implementation.
+
+## Entry 52 – Benchmark adaptation, step 2: `load_sample_books` returns books in ascending id order (2026-10-03)
+
+### What was done
+- `src/benchmark/sample_books.cpp`: after loading, the books are sorted by `book_id`. The header now
+  states the order and points to SPEC section 10.1.
+- `tests/benchmark/sample_books_test.cpp`: `PreservesCandidateOrder` asserted the old behaviour
+  (84, 5, 1342 kept in candidate order). It was replaced on purpose by
+  `ReturnsBooksInAscendingIdOrderWhateverTheCandidateOrder` (5, 84, 1342, each body still matching its
+  id), which failed before the change. Suite total: 177.
+
+### Verification
+An independent script computed the term and posting counts of the real books two ways: the N lowest
+ids, and the first N lines of `book_ids.txt`.
+
+| N | Lowest ids | First N lines of `book_ids.txt` | Java (SPEC 10.1) |
+|---|---|---|---|
+| 50 | 58,834 / 360,970 | 57,780 / 362,160 | 58,834 / 360,970 |
+| 100 | 78,820 / 759,087 | 98,858 / 803,819 | 78,820 / 759,087 |
+| 200 | 129,356 / 1,581,064 | 129,356 / 1,581,064 | 129,356 / 1,581,064 |
+
+"Lowest ids" reproduces Java exactly at every size. File order would have measured different books at
+N=50 and N=100, which is the risk the agreement was written to prevent.
+
+### Why
+- **The order is part of the dataset definition.** With the same 200 books, "the first 50" is only
+  well defined once the order is fixed, and the group fixed it as ascending id (SPEC 10.1). Sorting
+  inside `load_sample_books` means every benchmark receives the same order, so the prefixes of the
+  next step can simply take the first N books.
+- **Sorting at load time, not in each benchmark.** All 12 benchmarks receive their books from this one
+  function. Sorting here is one change instead of twelve, and no benchmark can forget it.

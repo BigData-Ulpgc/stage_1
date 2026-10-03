@@ -42,7 +42,9 @@ TEST(LoadSampleBooks, ReturnsEmptyWhenNothingIsDownloaded) {
     EXPECT_TRUE(load_sample_books({1, 2, 3}, downloaded, metadata).empty());
 }
 
-TEST(LoadSampleBooks, PreservesCandidateOrder) {
+TEST(LoadSampleBooks, ReturnsBooksInAscendingIdOrderWhateverTheCandidateOrder) {
+    // SPEC section 10.1: a benchmark size N means the N books with the lowest
+    // ids, so the list must come back sorted by id, not in book_ids.txt order.
     TempDir root("stage1_sample_books_test_order");
     ControlLog downloaded(root.path() / "downloaded_books.txt");
     MetadataStore metadata(root.path() / "metadata.db");
@@ -57,10 +59,11 @@ TEST(LoadSampleBooks, PreservesCandidateOrder) {
         downloaded.mark(id);
     }
 
-    auto books = load_sample_books({84, 5, 1342}, downloaded, metadata);
+    auto books = load_sample_books({84, 1342, 5}, downloaded, metadata);
 
     ASSERT_EQ(books.size(), 3u);
-    EXPECT_EQ(books[0].book_id, 84);
-    EXPECT_EQ(books[1].book_id, 5);
+    EXPECT_EQ(books[0].book_id, 5);
+    EXPECT_EQ(books[1].book_id, 84);
     EXPECT_EQ(books[2].book_id, 1342);
+    EXPECT_EQ(books[1].body, "body 84");  // each body still belongs to its own id
 }

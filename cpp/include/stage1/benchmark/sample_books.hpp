@@ -28,6 +28,10 @@ struct SampleBook {
 // involved: this is meant to run against books a real pipeline run already
 // downloaded (see main.cpp's `pipeline <N>`), the real-text counterpart to
 // generating synthetic benchmark data.
+//
+// The result is sorted by ascending book id, whatever the order of
+// `candidate_ids` (SPEC section 10.1): a benchmark of size N takes its first
+// N books, which must be the N lowest ids in every language.
 std::vector<SampleBook> load_sample_books(const std::vector<int>& candidate_ids, const ControlLog& downloaded,
                                            const MetadataStore& metadata);
 
