@@ -994,3 +994,1277 @@ against the real `docker compose up -d` MongoDB the next time this runs on a mac
   candidate qualifies), and every caller must switch on `action` first regardless; an `optional` here
   would only add a second way to represent the same "there is nothing to act on" fact already carried
   by the enum, without preventing any additional mistake.
+
+---
+
+## Entry 25 – main.cpp: wiring everything into a runnable pipeline (2026-09-30)
+
+### What was done
+- `include/stage1/file_io.hpp`/`.cpp`: added `read_text_file(path)`, the missing symmetric
+  counterpart to `write_text_file` (Entry 14), needed to read a book's body back off the datalake
+  before indexing it.
+- `include/stage1/pipeline.hpp` + `src/pipeline.cpp`: `run_pipeline_step(candidate_ids, downloaded,
+  indexed, source, datalake, metadata, index, index_writer, stopwords)`. Calls
+  `next_control_action` (Entry 24) and performs exactly one of:
+  - **Download**: `source.fetch` -> `split_book` -> `datalake.write` -> `extract_metadata` ->
+    `metadata.insert_book` -> `downloaded.mark`. A failed fetch or a book missing its START/END
+    markers is left unmarked on purpose (retried on a future run), never throws.
+  - **Index**: `metadata.find_by_id` -> `read_text_file` the stored body -> `tokenize` -> `index.
+    add_book` -> `index_writer.write` (rewrites the whole structure) -> `indexed.mark`.
+  - **Nothing**: no-op.
+  Every dependency is a reference parameter (`BookSource&`, `Datalake&`, `MetadataStore&`,
+  `InvertedIndex&`, `IndexWriter&`), the same shape used everywhere else in this project, so it can
+  be exercised with fakes and temporary directories instead of the real network or database.
+- `src/main.cpp` rewritten: a thin CLI (`search_engine_stage1 pipeline <N>`, mirroring the Java
+  module's `pipeline <N>` command) that wires the real components — `CurlHttpClient` +
+  `GutenbergSource`, `BookBasedDatalake`, `MetadataStore` (SQLite), `MonolithicIndexWriter` (JSON) —
+  loads `shared/stopwords.txt` and `shared/book_ids.txt`, rebuilds the in-memory `InvertedIndex` from
+  every already-indexed book's stored body (there is no on-disk index *reader*, only writers, so this
+  is the simplest correct way to resume with a populated index), then calls `run_pipeline_step` up to
+  `N` times, stopping early once there is nothing left to do.
+- `tests/pipeline_test.cpp`: 5 tests against a `PipelineFixture` (temp directories, in-memory SQLite
+  path, a `FakeHttpClient` returning a small but realistic Gutenberg-shaped fake book) — a full
+  download-then-index round trip through every component, "nothing left to do" once both steps are
+  done, and a failed download / a markerless book each left unmarked. Suite total, before the fix
+  below: 108.
+- `CMakeLists.txt`: `pipeline.cpp` added to `stage1_core`; `STAGE1_SHARED_DIR`/`STAGE1_DATA_DIR`
+  compile definitions added to the **executable** (mirroring the tests' own `STAGE1_SHARED_DIR`), so
+  the binary finds `shared/` and its own `data/` directory regardless of the working directory it is
+  launched from.
+
+### A real bug this caught: `MetadataStore` never created its own directory
+Running the assembled binary for real (`./search_engine_stage1 pipeline 4`, real network, a fresh
+`cpp/data/`) failed immediately: `cannot open metadata database: unable to open database file`.
+`MetadataStore`'s constructor (Entry 12) opened `sqlite3_open` directly, unlike every other
+path-taking constructor in the project (`ControlLog`, `write_text_file`'s callers), which all create
+missing parent directories first. Its own unit tests never caught this because they always used
+`":memory:"` or a path directly inside an already-created `TempDir`, never a path with a
+not-yet-existing subdirectory like `datamarts/metadata.db`. Fixed by creating the parent directory in
+the constructor (skipped for `":memory:"`, whose `parent_path()` is empty), and added
+`MetadataStore.CreatesMissingParentDirectories`, the same test shape already used for `ControlLog`
+and `MonolithicIndexWriter`. Suite total after the fix: 109.
+
+### Verification
+After the fix, `./search_engine_stage1 pipeline 4` ran against the real network end to end and
+downloaded, split, stored the metadata of, and indexed two real books (1342, *Pride and Prejudice*;
+84, *Frankenstein*), producing a correct `control/`, `datalake/book/`, `datamarts/metadata.db` and
+`datamarts/inverted_index.json` (10114 terms) under `cpp/data/` (git-ignored). Spot-checked: `"whale"`
+-> `[84]` only; `"elizabeth"` -> `[84, 1342]` (a character in both books — a nice, unplanned
+confirmation that indexing and querying are both working on real text). The data directory was
+removed afterward; it was only a verification artifact, not a deliverable.
+
+### Why
+- **`run_pipeline_step` lives in `stage1_core`, `main.cpp` stays thin and untested.** All of this
+  phase's real logic is a testable library function taking references, exactly like every other piece
+  of this project (`GutenbergSource`, `next_control_action`, ...); `main.cpp` only wires concrete
+  types together and drives a loop, with nothing left in it worth a unit test of its own.
+- **A failed download or a markerless book is never marked, and does not throw.** This is the
+  "write first, mark after" discipline (discussed before Phase 8's first line of code) applied at the
+  level that actually matters: the pipeline's job is to make progress on what it *can* do and quietly
+  leave problem books for a future retry, not to crash the whole run over one bad id.
+- **The in-memory index is rebuilt from stored bodies on every startup, not loaded from a saved
+  snapshot.** This stage built writers for the three on-disk index formats but no matching readers;
+  reading each already-indexed book's body back and re-tokenizing it is slower but requires no new
+  format-specific parsing code, and is correct by construction since it goes through the exact same
+  `tokenize`/`add_book` path indexing itself uses. Documented as a known cost, not hidden: a real
+  pipeline resuming a large, already-indexed collection would pay for this every restart, and adding
+  an index reader (or a private fast snapshot format) would be a natural improvement for a later stage.
+- **`index_writer.write(index)` rewrites the entire index on every single indexed book, not an
+  incremental update.** Direct consequence of `IndexWriter`'s existing contract (Entry 18: "write()
+  means make the structure match this index, not append"); correct, but means indexing N books costs
+  more here than it would with a true incremental writer. SPEC section 9 explicitly asks for
+  `index_update` to be benchmarked as its own operation — this pipeline's current behavior is exactly
+  the kind of cost that benchmark exists to surface, not something to silently optimize away before it
+  is measured.
+- **`BookBasedDatalake` and `MonolithicIndexWriter` chosen as `main`'s defaults, not because they are
+  "the best" ones.** Any `Datalake`/`IndexWriter` works identically from the pipeline's point of view
+  (it always goes through the interface, never a concrete type), since indexing always reads the body
+  back via the path `MetadataStore` stored rather than assuming a particular layout. Swapping either
+  default is a two-line change in `main.cpp`; Phase 9's benchmarks are what will actually exercise and
+  compare all three alternatives of each, not this single operational pipeline.
+- **CLI shape (`pipeline <N>`) mirrors the Java module's own `pipeline <N>` command** (see the root
+  `README.md`), keeping how the three language implementations are invoked recognizably similar for
+  whoever runs and compares them, including the grader.
+
+*(Addendum to Entry 25)* Also fixed `Makefile`'s `run` target, left stale by the CLI change above: it
+called the binary with no arguments, which now just prints usage and exits 1. It now runs
+`pipeline 5` by default, overridable with `make run ARGS="pipeline 20"`.
+
+---
+
+## Entry 26 – Benchmark infrastructure: the timer and the shared CSV writer (2026-09-30)
+
+### What was done
+- `include/stage1/benchmark.hpp` + `src/benchmark.cpp`:
+  - `BenchmarkResult`: one struct per SPEC section 9's CSV columns (`language`, `experiment`,
+    `structure`, `dataset_size`, `repetition`, `metric`, `value`, `unit`).
+  - `write_benchmark_results(path, results)`: writes the shared header plus one row per result,
+    fixed-point with 3 decimals, reusing `write_text_file` (Entry 14).
+  - `measure_elapsed_ms(operation, warmup_runs=2, measured_runs=5)`: runs `operation` (any
+    zero-argument callable) `warmup_runs` times and discards those, then `measured_runs` times,
+    timing each with `std::chrono::steady_clock`, and returns the measured elapsed times in
+    milliseconds. Defaults are exactly SPEC section 9's shared methodology (N_WARMUP=2, N_RUNS=5).
+- 7 tests: the CSV round-trips exactly (including the fixed 3-decimal formatting), an empty result
+  list still writes the header alone, missing parent directories are created, the returned vector has
+  exactly `measured_runs` entries, the defaults call the operation `2 + 5` times total, a custom
+  warmup/measured pair calls it that many times total, and every measured value is non-negative.
+  Suite total: 116 tests.
+- Not done yet: the actual per-experiment benchmarks (`datalake_write`, `index_build`, `index_query`,
+  ...) that will call `measure_elapsed_ms` and feed its output into `write_benchmark_results` — planned
+  as the next steps of this phase, one or a few experiments at a time.
+
+### Why
+- **A separate, reusable `measure_elapsed_ms` instead of hand-timing each experiment.** SPEC section 9
+  fixes one methodology (2 discarded warmup runs, 5 measured runs) for every experiment in every
+  language; writing that loop once here means every later benchmark shares the exact same warmup/
+  measurement discipline by construction, instead of each experiment's code having to remember to
+  replicate it correctly.
+- **`std::chrono::steady_clock`, not `system_clock` (the one `TimeBasedDatalake`'s `Clock` uses).**
+  `steady_clock` is guaranteed to never jump backward (e.g. from a system clock adjustment or daylight
+  saving) and is meant specifically for measuring durations; `system_clock` is for knowing what time it
+  is, which is why `TimeBasedDatalake` (Entry 16) uses it for calendar dates and this uses the other
+  for elapsed time — the two clocks solve different problems even though both come from `<chrono>`.
+- **Takes a `std::function<void()>`, so it works for any experiment.** A datalake write, an index
+  build, a metadata query — every one of SPEC section 9's experiments is, from the timer's point of
+  view, "some operation to run and time"; the operation being generic here is what avoids writing a
+  bespoke timing loop for each of the twelve named experiments.
+- **Fixed-point, 3-decimal CSV output instead of the stream's default formatting.** `double`'s default
+  `operator<<` formatting switches to scientific notation for some values (`1.23e+04`), which a naive
+  CSV/spreadsheet reader would need to special-case; three decimals keeps microsecond resolution on
+  millisecond-scale timings (this project's realistic range) while always being one plain, readable
+  number.
+- **No CSV quoting/escaping for the string fields.** Every field written here (`language`, `experiment`,
+  `structure`, `metric`, `unit`) is always one of this project's own fixed identifiers, never text from
+  an external, untrusted source (unlike, say, a book title from Gutenberg, which is exactly why
+  `MetadataStore`, Entry 12, needed SQL parameter binding); there is nothing here that could ever
+  contain a stray comma to corrupt the format.
+- **`write_benchmark_results` reuses `write_text_file` rather than writing incrementally row by row.**
+  Consistent with every other writer in this project (`MonolithicIndexWriter`, `HierarchicalIndexWriter`):
+  build the full content, then write it once. A benchmark run produces at most a few dozen rows (5
+  measured repetitions per structure per experiment), so there is no realistic case where building the
+  string first would matter for memory.
+
+---
+
+## Entry 27 – First real experiment: index_build (2026-09-30)
+
+### What was done
+- `mongo_is_reachable(uri)` promoted from a test-only helper (Entry 21) to the library
+  (`mongo_index_writer.hpp`/`.cpp`): a quick ping with a short `serverSelectionTimeoutMS`, so code can
+  skip Mongo-dependent work gracefully instead of waiting out the driver's ~30s default timeout or
+  crashing. `mongo_index_writer_test.cpp` now calls this shared function instead of its own copy, and
+  gained its own direct test (`MongoIsReachable.ReturnsFalseForAnUnreachableAddressWithoutThrowing`).
+- `include/stage1/index_build_benchmark.hpp` + `src/index_build_benchmark.cpp`: `SampleBook` (an
+  already-downloaded, already-split book — id + body, no network involved) and
+  `benchmark_index_build(language, books, stopwords, output_dir)`, SPEC section 9's `index_build`
+  experiment. For each required structure — monolithic, hierarchical, and mongo only if
+  `mongo_is_reachable()` — it runs `measure_elapsed_ms`'s default 2+5 repetitions of "build a fresh
+  `InvertedIndex` from `books` and persist it through that structure's `IndexWriter`", and appends one
+  `BenchmarkResult` per measured run. Mongo unreachable is a silent skip, not a failure: the other two
+  structures still get benchmarked.
+- 3 tests (`tests/index_build_benchmark_test.cpp`) with a small in-memory corpus (no network, no
+  `sample_dataset/`, which does not exist in the repository yet — see below): five measured rows each
+  for monolithic/hierarchical with the right shape (language, experiment, dataset_size, metric, unit,
+  ascending repetition numbers, non-negative values), Mongo rows present or absent depending on whether
+  it happens to be reachable at test time, and the resulting monolithic JSON file re-read and checked
+  for correct content. Suite total: 120 tests.
+- **Known gap, not filled by this step:** `sample_dataset/` (mentioned in the root `README.md` and
+  required by SPEC section 9's own methodology: "las descargas de red se miden aparte... se parte de
+  los libros ya descargados en `sample_dataset/`") does not exist anywhere in the repository yet, in any
+  of the three languages. This function is deliberately corpus-agnostic (it takes `books` as a plain
+  parameter) so it does not need that decision made to be written and tested; wiring an actual CLI
+  command that loads real books from `sample_dataset/` (or, meanwhile, from an already-populated
+  `cpp/data/datalake/`) is separate follow-up work once the group settles on where that shared sample
+  lives.
+
+### Why
+- **`mongo_is_reachable` moved to the library instead of staying duplicated per test file.** A second
+  caller (this benchmark) needing the exact same check is precisely the point where a test-local helper
+  earns its place in `stage1_core` instead — the same threshold already crossed by `TempDir` (Entry 14)
+  and `FakeHttpClient`/`FakeClock` once a second test needed them, except this time the second caller is
+  production code, not another test.
+- **Mongo skipped, not required, for this experiment to produce results.** SPEC's own benchmark
+  methodology explicitly separates network-dependent setup from what is measured; requiring a live
+  MongoDB (via Docker or a local `mongod`) just to get *any* `index_build` numbers would make the
+  benchmark unusable on a machine without either, exactly this machine's situation today (no Docker).
+  The two required, always-available structures still produce full results.
+- **Each repetition rebuilds the `InvertedIndex` from scratch (tokenize + `add_book` for every book),
+  not just the `write()` call.** SPEC/the course PDF describe `index_build` as "time required to build
+  the inverted index from a given dataset" — the whole path from raw text to a persisted structure, not
+  only its final write step. Re-tokenizing on every repetition costs little compared to persisting (the
+  part that actually differs across the three structures) and keeps each measured run fully
+  self-contained, with nothing carried over between repetitions that could quietly bias later ones.
+- **`benchmark_index_build` takes `books` as a plain `std::vector<SampleBook>` parameter, with no
+  opinion on where they came from.** Exactly the same reasoning as `Datalake`/`IndexWriter` being
+  interfaces the pipeline depends on rather than concrete choices: this function can be tested today
+  with a two-book fixture, and pointed at `sample_dataset/`, at `cpp/data/datalake/`, or at anything
+  else later, without changing a line of it.
+- **Each structure writes under its own subdirectory of `output_dir`** (`monolithic/`, `hierarchical/`),
+  so a single benchmark run's three structures never collide on the same path, and the output can be
+  inspected structure by structure afterward.
+
+---
+
+## Entry 28 – index_query: generalizing query_and to compare structures fairly (2026-09-30)
+
+### What was done
+- `query_and` generalized: the core now takes a `std::function<std::vector<int>(const std::string&)>
+  postings` instead of `const InvertedIndex&` directly, keeping the exact same de-duplicate/smallest-
+  first/`std::set_intersection` algorithm from Entry 22 unchanged. The original signature survives as a
+  one-line convenience overload (`query_and(index, terms)` delegates to the generic core with a lambda
+  wrapping `index.postings`), so every existing caller and test needed no changes.
+- `load_queries` (`query_list.hpp`/`.cpp`): reads `shared/queries.txt` in file order, skipping blank/`#`
+  lines -- the same shape as `load_stopwords`/`load_book_ids`, now for the query workload SPEC section 1
+  reserves that file for.
+- `mongo_postings_fetcher(uri)` added next to `MongoIndexWriter`: returns a postings-fetcher backed by a
+  live MongoDB connection (one `find_one` per term). The `mongocxx::client` is held through a
+  `std::shared_ptr`, not by value, because `mongocxx::client` is move-only and a `std::function`'s
+  target must be copy-constructible.
+- `include/stage1/index_query_benchmark.hpp` + `src/index_query_benchmark.cpp`:
+  `benchmark_index_query(language, dataset_size, queries, stopwords, index_dir)`, SPEC section 9's
+  `index_query` experiment. For each structure `benchmark_index_build` already wrote — monolithic
+  (parses the JSON file once, then answers every query from the parsed map), hierarchical (no upfront
+  load: each query term opens and reads its own small file on demand), and mongo if reachable (one
+  network round trip per term) — times "load the structure, then run every query in the workload" as
+  one unit, `measure_elapsed_ms`'s default 2+5 repetitions, and returns one `BenchmarkResult` row per
+  measured run.
+- 6 new tests: `load_queries` (order, comments/blanks, missing file, the real `shared/queries.txt`) and
+  `benchmark_index_query` (five rows per available structure with the right shape, mongo rows present
+  only when reachable), built on top of `benchmark_index_build`'s output. Suite total: 126 tests.
+
+### Why
+- **Generalizing `query_and` instead of duplicating its intersection logic per structure.** Querying
+  the monolithic JSON, the hierarchical files, and MongoDB each fetch postings a completely different
+  way, but AND-intersecting whatever they fetch is the exact same algorithm every time; writing that
+  algorithm three more times (once per structure) would triple the chance of a subtle bug (wrong sort
+  order, a missed short-circuit) appearing in only one of the four copies. This is the same "generalize
+  once a second real caller needs it" reasoning already applied to `HttpClient`, `TempDir`, and
+  `mongo_is_reachable` — except here the second caller changed an existing function's *signature*
+  rather than adding a sibling, which is why the old call shape was kept as a convenience overload
+  instead of forcing every existing caller to wrap `index.postings` in a lambda by hand.
+- **Querying each on-disk/database structure directly, not through the in-memory `InvertedIndex`.**
+  This project's `InvertedIndex` is a single, shared, structure-agnostic representation — querying it
+  would give the exact same timing for all three structures, since none of them would actually be
+  involved. That would defeat the purpose of an experiment whose entire point, per SPEC section 6 and
+  the course PDF, is comparing how these three physical structures perform.
+- **The monolithic reader parses the file once and reuses it for the whole query batch; the
+  hierarchical reader has no such step and pays a file access per query term instead.** This mirrors
+  each structure's real shape: a monolithic file is naturally something a query service loads once and
+  serves many queries against, while the hierarchical layout's whole design is "each term is its own
+  file" (SPEC section 6) — there is nothing sensible to "load upfront" for it. Measuring both fairly,
+  the same way, would hide exactly the trade-off SPEC asks the report to discuss.
+- **"Load + whole query batch" timed as one combined unit, not load and per-query costs measured
+  separately.** Keeping the measured operation identical in shape across all three structures (and
+  identical to how `benchmark_index_build` already times "build + persist" as one unit) is what makes
+  the three numbers directly comparable; splitting load from query cost would need a second,
+  structure-specific methodology decision for each format, not a clear win worth the added complexity
+  at this stage. Documented explicitly, including that this "cold" measurement does not reflect a real
+  service that keeps a structure loaded across many queries — a defensible simplification, not a hidden
+  one.
+- **`mongo_postings_fetcher` returns a `std::function`, not a class implementing some `PostingsSource`
+  interface.** Only one thing (this benchmark, so far) needs "a callable that fetches postings from
+  somewhere"; introducing a new interface hierarchy for that, mirroring `Datalake`/`IndexWriter`, would
+  be the same premature-generalization mistake already avoided once for `MetadataRepository` (Entry 13)
+  — `std::function` is already the right amount of abstraction `query_and`'s own signature needed.
+
+---
+
+## Entry 29 – Real books instead of synthetic data, and a CLI to run benchmarks (2026-10-01)
+
+### What was done
+- `SampleBook` moved out of `index_build_benchmark.hpp` into its own `include/stage1/sample_books.hpp`
+  (+ `src/sample_books.cpp`), since it is a corpus concept shared by every future experiment, not
+  something that belongs to `index_build` specifically.
+- `load_sample_books(candidate_ids, downloaded, metadata)`: walks `candidate_ids` in order, keeps only
+  the ones `downloaded` already has recorded, and reads each one's real body straight off disk via the
+  path `metadata` stored for it — the exact same lookup `main.cpp` already does to rebuild the in-memory
+  index on startup (Entry 25). No network, no synthetic text: this reuses whatever a real
+  `pipeline <N>` run already downloaded.
+- `main.cpp` gained a second command: `search_engine_stage1 benchmark <index_build|index_query>`.
+  Loads the real downloaded books via `load_sample_books`, runs the requested experiment, and writes
+  `benchmarks/results/cpp_<experiment>.csv`. `index_query` first (re)builds the structures, untimed, so
+  it always queries whatever `books` currently holds regardless of invocation order. Mirrors the Java
+  module's own `benchmarks/work/` (scratch, git-ignored) vs `benchmarks/results/*.csv` (committed)
+  split; `.gitignore` updated with the matching exception for `cpp/`, since the existing blanket `*.csv`
+  rule would otherwise silently swallow these too (the same rule Daniel's Python branch added, and the
+  same fix Java's own merge already applied for its own path).
+- 3 new tests (`tests/sample_books_test.cpp`): only downloaded books are loaded with their real body
+  content, nothing is downloaded means nothing is loaded, and candidate order is preserved regardless
+  of insertion order into the control log. Suite total: 129 tests.
+- **Ran it for real**, end to end, against this machine's actual network: `pipeline 30` downloaded and
+  indexed all 15 books currently in `shared/book_ids.txt`; `benchmark index_build` and
+  `benchmark index_query` then produced real CSVs (Mongo skipped, no Docker on this machine). Scratch
+  `data/`/`benchmarks/work/` removed afterward; the two result CSVs were kept and committed.
+
+### A genuinely useful early result
+At `dataset_size=15`: **hierarchical took ~23x longer to build** than monolithic (≈1900ms vs ≈83ms,
+averaged over 5 runs) — the cost of writing thousands of tiny per-term files that SPEC section 6 itself
+calls out as hierarchical's weakness. But **hierarchical answered the query workload ~55x faster**
+(≈0.25ms vs ≈14ms) — monolithic's measured time is dominated by re-parsing the whole JSON file on every
+repetition (Entry 28's "cold" load), while hierarchical has no such step and just opens the handful of
+small files each query actually needs. Exactly the kind of build-speed-vs-query-speed trade-off SPEC
+section 6 and the course PDF ask the report to discuss, visible already with a 15-book sample — though
+these specific numbers will need to be regenerated once the dataset is larger (see below).
+
+### Why
+- **Real text over synthetic generation**, unlike the Java module's `BenchmarkBooks.synthetic(...)`
+  approach. This project already had a working, tested downloader (`GutenbergSource`/`CurlHttpClient`,
+  Entry 9-10) and a pipeline that exercises it end to end (Entry 25); reusing real, already-downloaded
+  books costs no new "fake text" generation code and gives real vocabulary and sentence-length
+  distributions instead of a fixed, repeated word list. The trade-off, made explicit: it needs a one-time
+  network step (`pipeline <N>`) before any benchmark can run, where synthetic data would not.
+- **`SampleBook` relocated instead of left in `index_build_benchmark.hpp`.** `index_query`, and every
+  future experiment that needs real books (`datalake_write`, `metadata_insert`, ...), would otherwise
+  have had to `#include` the build benchmark's header just to get a type that has nothing to do with
+  building anything — the same "this concept now has more than one real user" signal that already moved
+  `TempDir`, `FakeHttpClient`/`FakeClock`, and `mongo_is_reachable` into shared locations.
+- **`load_sample_books` silently skips a downloaded id with no metadata row**, instead of throwing.
+  SPEC's own control-layer discipline (Entry 23-24: never mark something done until it fully succeeded)
+  already guarantees this should not happen in practice; treating it as a hard error here would turn a
+  pipeline implementation detail into a benchmark-tool crash, for no benefit over simply not counting
+  that one book.
+- **`benchmark index_query` rebuilds the structures itself, untimed, instead of assuming
+  `benchmark index_build` already ran in the same invocation.** Each CLI command is self-sufficient:
+  running `benchmark index_query` alone, days after the last `benchmark index_build`, still measures
+  against the current contents of `books`, not stale files left over from an earlier, possibly different
+  dataset size.
+- **Small dataset (15 books) acknowledged explicitly, not hidden.** This is real, honest data — not a
+  placeholder — but it is small enough that filesystem/OS caching effects could matter more than they
+  would at the "hundreds/thousands" scale `shared/book_ids.txt`'s own comment calls for; the committed
+  CSVs should be treated as an early sanity check of the benchmarking tools working correctly end to
+  end, not as the final numbers for the report.
+
+---
+
+## Entry 30 – datalake_write, and SampleBook gets a header (2026-10-01)
+
+### What was done
+- `SampleBook` extended with a `header` field, appended last (not between `book_id` and `body`) so
+  every existing two-value aggregate-init literal (`{1, "some body"}`, used by several tests) keeps
+  meaning exactly what it did, with `header` simply defaulting to `""`. `load_sample_books` now reads
+  both `body_path` and `header_path` from the stored metadata.
+- `include/stage1/datalake_write_benchmark.hpp` + `src/datalake_write_benchmark.cpp`:
+  `benchmark_datalake_write(language, books, output_dir)`, SPEC section 9's `datalake_write`
+  experiment (section 3's own "download and write throughput"). For each of the three required
+  layouts — `book`, `range`, `time` — times writing every book in `books` (header + body) through a
+  fresh instance of that `Datalake`, `measure_elapsed_ms`'s default 2+5 repetitions, one
+  `BenchmarkResult` row per measured run.
+- `main.cpp`'s `benchmark` command gained `datalake_write` alongside `index_build`/`index_query`.
+- 2 new tests (five rows per structure with the right shape; the written files actually exist at each
+  layout's expected path, including a direct check against `time_folder_name(now())` for the time
+  layout). Suite total: 131 tests.
+- **A real bug this caught:** extending `SampleBook` with `header` broke two of `sample_books_test.cpp`'s
+  own fixtures, which had been passing placeholder strings (`"header.txt"`, `"h"`) as `header_path` —
+  harmless while nothing read that path, a hard failure (`cannot open file for reading`) the moment
+  `load_sample_books` started reading it for real. Fixed by writing real header files in those fixtures,
+  mirroring what they already did for `body_path`.
+- **Ran it for real** against the same 15 real, already-downloaded books as Entry 29.
+
+### A result that is honest about its own limits
+At `dataset_size=15`, all three structures wrote in roughly the same ~10-14ms, no structure clearly
+faster. This is expected, not a bug: 15 books means `book` creates 15 directories, `range` only 3 (the
+15 ids in `shared/book_ids.txt` happen to fall into 3 thousand-ranges), and `time` just 1 (everything
+written in the same run lands in the same hour); at that scale, directory-creation cost on a local SSD
+is close to noise. The structural difference SPEC section 3 asks about — many small directories vs few
+large ones — only becomes visible at the "hundreds/thousands" scale the dataset is meant to reach.
+Documented so this result is not mistaken for "the three layouts perform identically."
+
+### Why
+- **`header` appended last on `SampleBook`, not inserted after `book_id`.** Changing an existing
+  struct's layout without breaking callers that used positional aggregate initialization is exactly the
+  kind of small compatibility decision `tokenize`'s two-argument overload (Entry 6) and `query_and`'s
+  generic core (Entry 28) already established a habit of making — grow the shape, do not reorder it.
+- **Each repetition re-writes every book, not just the first one.** Same reasoning as
+  `benchmark_index_build` (Entry 27): every repetition is fully self-contained, and `Datalake::write`
+  already overwrites rather than appends (Entry 14), so repeating the same writes 7 times measures the
+  same "steady state" cost each time, with nothing left over from a previous repetition to bias the next.
+- **Three separate `Datalake` instances (one per layout), not one function switching on a `structure`
+  string.** This mirrors `benchmark_index_build`'s own shape, and keeps each layout's real constructor
+  (including `TimeBasedDatalake`'s `Clock&`) explicit at the call site rather than hidden behind a
+  string-based dispatch that would need its own tests to get right.
+- **The small-dataset result reported honestly, with the reason written down, instead of silently
+  omitted or re-run until it "looked better."** The point of these early runs (Entry 29 already flagged
+  this) is to confirm the tools work correctly end to end; a flat result here is real evidence the
+  write-cost difference needs a larger dataset to appear, which is itself useful information for the
+  report, not a failure to hide.
+
+---
+
+## Entry 31 – datalake_lookup: giving Datalake a locate() method (2026-10-01)
+
+### What was done
+- `Datalake` interface gained `virtual std::optional<BookLocation> locate(int book_id) const = 0;`,
+  symmetric to `write()`. Each layout now implements it:
+  - `BookBasedDatalake`/`RangeBasedDatalake`: `locate` recomputes the path (pure function of the id,
+    same as `write` always did) and checks the files exist with `std::filesystem::exists`; works from
+    any instance, even a brand new one on the same root (a new test confirms this explicitly).
+  - `TimeBasedDatalake`: the path depends on *when* a book was written, not just its id, so there is no
+    formula to invert. It now keeps an internal `std::unordered_map<int, BookLocation> written_`,
+    populated by `write()`; `locate()` only ever finds books the *same instance* wrote. A new test
+    (`LocateReturnsNulloptFromAFreshInstanceEvenIfTheFileExists`) pins this down: a second
+    `TimeBasedDatalake` on the same root, after the first one already wrote the file for real, still
+    returns `nullopt` — the file is there, but nothing remembers where.
+  - `BookBasedDatalake`/`RangeBasedDatalake::write` refactored to share path computation with `locate`
+    through a private `paths_for(book_id)` helper, so the two methods cannot silently drift apart.
+- `include/stage1/datalake_lookup_benchmark.hpp` + `src/datalake_lookup_benchmark.cpp`:
+  `benchmark_datalake_lookup(language, books, output_dir)`, SPEC section 9's `datalake_lookup`
+  experiment (section 3's own "lookup cost"). For each layout: writes every book once, untimed, then
+  times calling `locate()` for every book id, `measure_elapsed_ms`'s default 2+5 repetitions.
+- `main.cpp`'s `benchmark` command gained `datalake_lookup`.
+- 7 new tests (6 `locate()` tests across the three datalake test files, 1 for the benchmark itself).
+  Suite total: 138 tests.
+- Ran it for real against the same 15 downloaded books.
+
+### An honest limitation this result exposes
+At `dataset_size=15`: `time` locates in ≈0.001ms, `book`/`range` in ≈0.04ms — `time` looks *faster*,
+which is the opposite of the real-world disadvantage already discussed before writing any code for this
+phase ("time no puede calcular la ruta solo con el ID"). The reason is specific to how this benchmark is
+built: it writes and locates through the *same* `Datalake` instance within one process, so `time`'s
+lookup is a bare in-memory hash map hit, while `book`/`range` each pay a real filesystem `stat()` call.
+This experiment, as built, cannot show `time`'s real weakness — a fresh process (like a restarted
+pipeline) that has forgotten everything and must fall back to an external index (`MetadataStore`,
+exactly what `main.cpp`'s own pipeline already does) to find anything at all. Documented explicitly in
+the header and here, rather than left to look like "time turned out to be the fastest layout."
+
+### Why
+- **`locate()` added to the existing `Datalake` interface instead of a free function per layout.**
+  Mirrors `write()`'s own shape (one virtual method, one concrete implementation per layout) and lets
+  `benchmark_datalake_lookup` work through `Datalake&` uniformly, the same reasoning `IndexWriter`
+  already established for `benchmark_index_build`.
+- **`TimeBasedDatalake`'s `written_` map is the honest way to implement "find what I wrote," not a
+  shortcut.** It cannot do better: nothing about `book_id` encodes *when* it was written, and
+  SPEC/the PDF explicitly frame this inability to compute the path as the trade-off worth measuring.
+  Keeping the map (rather than, say, always returning `nullopt`) makes `locate()` still usefully
+  correct within one running process — just not across a restart, which is the precise, narrow gap this
+  entry documents rather than papers over.
+- **`paths_for()` extracted in `BookBasedDatalake`/`RangeBasedDatalake`.** `write()` and `locate()` must
+  agree on exactly the same path for the same id; computing it in one place removes any chance of the
+  two methods disagreeing after a future edit to either.
+- **Writing happens untimed, before the measured block.** This experiment is specifically about lookup
+  cost, not write cost (already covered by `datalake_write`, Entry 30); mixing the two into one timed
+  block would make this experiment redundant with that one instead of measuring something new.
+
+---
+
+## Entry 32 – Cross-language comparison: how each language solved TimeBasedDatalake's lookup (2026-10-01)
+
+### What was found
+Comparing `locate()`'s implementation across the three language modules, each independently hit the
+exact same design problem flagged in Entry 31 (a time-based path cannot be computed from the id alone)
+and solved it differently:
+- **C++ (this module):** an in-memory `std::unordered_map<int, BookLocation>` kept by `TimeBasedDatalake`
+  itself, populated by `write()`. Fast (O(1)), but only ever finds books `write()`'s own instance has
+  seen — a fresh instance (e.g. after a restart) finds nothing, even for files genuinely on disk.
+- **Java:** no memory at all. `TimeBasedDatalake.locate()` walks every `YYYYMMDD/HH` subdirectory
+  (newest first) and checks each one for the id's files, giving up only once every folder has been
+  tried. Its own comment states the reasoning in the same words this project's DEVLOG already used:
+  *"La ruta NO se puede calcular a partir del id, así que locate tiene que buscar."* Survives a restart
+  (nothing to forget), at the cost of scanning more folders as the dataset grows.
+- **Python:** no `locate`/lookup of any kind yet for any layout, only the write path
+  (`save_time_based`). `datalake_lookup` has not been implemented there yet.
+
+### Why this is worth recording
+Three independent implementations of the same SPEC requirement arrived at the same conclusion about
+*why* `time` is the hard case, and then made genuinely different, opposite-tradeoff choices for how to
+handle it — memory-bound-but-amnesiac (C++) versus disk-scan-but-durable (Java). That contrast is
+exactly the kind of cross-language design discussion the final report's "design decisions" and
+"benchmarks and results" sections are supposed to contain, and it was found by reading a teammate's
+code after a direct question, not by planning for it in advance — worth remembering to check teammates'
+equivalent code when a design problem feels like it should be universal, not C++-specific.
+
+---
+
+## Entry 33 – datalake_incremental: Datalake gets list_book_ids() too (2026-10-01)
+
+### What was done
+- `include/stage1/file_io.hpp`/`.cpp`: `collect_body_header_pairs(dir, ids)`, a shared helper that
+  scans one directory for `"<id>.body.txt"` files with a matching `"<id>.header.txt"` sibling, parsing
+  the id with `std::from_chars` (same style as `ControlLog`/`load_book_ids`). Used by both
+  `RangeBasedDatalake` and `TimeBasedDatalake`, which only differ in how many directory levels they
+  walk before reaching files named this way.
+- `Datalake` interface gained `virtual std::vector<int> list_book_ids() const = 0;`, implemented by all
+  three layouts by walking their own directory tree (never by remembering past writes — unlike
+  `locate()` for `time`, Entry 31/32, this needs no bookkeeping and works from a brand new instance,
+  confirmed by a dedicated test for each layout).
+- `include/stage1/datalake_incremental_benchmark.hpp` + `src/datalake_incremental_benchmark.cpp`:
+  `benchmark_datalake_incremental(language, books, output_dir)`, SPEC section 9's `datalake_incremental`
+  experiment. **Methodology deliberately mirrors the Java module's own `DatalakeBenchmark.incremental`**
+  (found by reading its code, see Entry 32): the most recent 10% of `books` (at least one) are treated
+  as "fresh", the rest as already "known"; both get written (untimed setup), then each layout is timed
+  calling `list_book_ids()` and subtracting the known ids, `measure_elapsed_ms`'s default 2+5
+  repetitions. Every repetition's detected set is checked against the real fresh ids and throws if it
+  ever disagrees, the same correctness guard Java's version has.
+- `main.cpp`'s `benchmark` command gained `datalake_incremental`.
+- 7 new tests (3 `list_book_ids()` tests across the three datalake test files, 2 for the benchmark
+  itself, plus the two `list_book_ids` tests). Suite total: 144 tests.
+- Ran it for real against the 15 downloaded books (10 cmd correctness checks all passed silently, no
+  thrown mismatch); all three layouts came out close and sub-millisecond at this small scale.
+
+### Why
+- **Matching Java's 90/10 methodology instead of inventing our own.** SPEC section 9 only names the
+  experiment; it does not fix how "new" books are simulated. Reading a teammate's already-working
+  implementation and reusing its exact split (rather than, say, picking a different percentage or
+  simulating "new" differently) is what makes the resulting CSVs directly comparable across languages
+  in the report, which is the whole stated purpose of the shared CSV format in the first place.
+- **`list_book_ids()` added to `Datalake`, not computed by reading the control layer's own files.**
+  SPEC section 3 frames incremental detection as a property of the datalake *layout itself*
+  ("later stages... can focus only on the most recent folders instead of scanning the entire
+  datalake"), independent of whatever external bookkeeping a control layer happens to keep; using
+  `ControlLog` here instead would have measured `ControlLog`'s hash-set performance (already
+  known-cheap, Entry 23) rather than anything specific to `book`/`range`/`time`, and would have given
+  every layout an identical, uninteresting result.
+- **`collect_body_header_pairs` factored out rather than duplicated between `range` and `time`.** Both
+  layouts store files the same way (`"<id>.body.txt"`/`"<id>.header.txt"` directly inside a folder);
+  only how many folders deep they walk to reach one differs. Sharing the filename-parsing logic means a
+  future bug fix (e.g. a malformed filename edge case) only needs to happen once.
+- **The detected set is checked for correctness on every repetition, not just assumed.** A subtly wrong
+  `list_book_ids()` (e.g. missing a layout's deepest directory level) would otherwise produce a
+  plausible-looking but meaningless timing number instead of a visible failure — the same reasoning
+  Java's own `require(...)` check already applied.
+
+---
+
+## Entry 34 – datalake_recovery, and a generalized measure_elapsed_ms (2026-10-01)
+
+### What was done
+- `measure_elapsed_ms` gained a `(setup, operation, warmup_runs, measured_runs)` overload: `setup()`
+  runs untimed before every single repetition (both warmup and measured), then `operation()` is timed.
+  The existing single-argument shape survives as a one-line convenience overload delegating to it with
+  an empty `setup` — no existing call site needed to change, same "grow the shape, keep the old call
+  working" habit as `tokenize`'s stopword overload (Entry 6) and `query_and`'s generic core (Entry 28).
+  2 new tests confirm `setup` runs once per repetition (not once overall) and that its state is visible
+  to `operation` on each call.
+- `collect_body_header_pairs`/`list_book_ids` (Entry 33) reused; `count_files_with_suffix(dir, suffix)`
+  added to `file_io.hpp`/`.cpp`: recursively counts files under `dir` whose name ends with `suffix`
+  (`"body.txt"` matches both `book`'s exact filename and `range`/`time`'s `"<id>.body.txt"`).
+- `include/stage1/datalake_recovery_benchmark.hpp` + `src/datalake_recovery_benchmark.cpp`:
+  `benchmark_datalake_recovery(language, books, output_dir)`, SPEC section 9's `datalake_recovery`
+  experiment, **mirroring the Java module's own "damage every 10th book" methodology** (same reasoning
+  as `datalake_incremental`, Entry 33, for comparable cross-language CSVs). Per structure: `setup()`
+  (untimed, runs before every repetition) clears the directory, writes every book, then deletes the
+  *header* file of every 10th book -- simulating a crash between `write_text_file`'s two separate calls
+  for body and header (this project has no atomic write, unlike Java's, see Entry 32's cross-language
+  comparison style). The timed `operation()` is "list what's present, rewrite whatever's missing."
+  After the loop, the function itself verifies (and throws if not true) that every book is present and
+  no structure has more `body.txt` files than books written — the same correctness guard Java's
+  `require(...)` makes. Returns 5 `elapsed` rows plus one `recovered` and one `duplicates` row per
+  structure.
+- `main.cpp`'s `benchmark` command gained `datalake_recovery`.
+- 4 new tests (2 for the new `measure_elapsed_ms` overload, 2 for the benchmark itself). Suite total:
+  148 tests.
+- Ran it for real against the 15 downloaded books (damages book index 10, the only "every 10th" with 15
+  books): all three structures recovered the one damaged book with zero lost books and zero duplicates.
+
+### Why
+- **A generic `setup`/`operation` split in `measure_elapsed_ms`, not a bespoke loop inside this one
+  benchmark.** Recovery is the first experiment where repeating the same operation seven times is not
+  automatically equivalent work (once recovered, there is nothing left to recover) — every earlier
+  experiment (`index_build`, `datalake_write`, ...) sidestepped this by rebuilding everything from
+  scratch each repetition, which recovery cannot do without re-damaging first. The split is written as
+  a reusable addition to the shared benchmark infrastructure (Entry 26) because `index_update`, still
+  to come, has the same shape (a pre-built index, then timing one incremental change), not as a
+  one-off local loop only `datalake_recovery` could use.
+- **Damage simulated by deleting the header after a normal write, not via a temp-file/rename atomic
+  write like Java's.** This project's `write_text_file`/`Datalake::write` genuinely write body and
+  header as two separate, non-atomic steps; simulating the crash this way tests *this* codebase's real
+  failure mode, rather than importing an atomic-write mechanism this project does not have just to copy
+  Java's specific technique. (Whether to add atomic writes here is a separate, open design question the
+  benchmark result does not answer by itself.)
+- **Damage and recovery methodology matched to Java's, not invented independently.** Same reasoning as
+  Entry 33: SPEC only names the experiment, not its exact simulated-failure shape; reusing the already-
+  working "every 10th book" sample keeps the resulting `recovered`/`duplicates` numbers meaningfully
+  comparable across the three language implementations in the report.
+- **The function throws on any lost book or duplicate instead of just reporting whatever it measures.**
+  A recovery experiment whose entire point is correctness should fail loudly the moment it is not
+  correct, rather than silently writing a CSV row that looks like a timing result but actually hides a
+  bug in `write`/`locate`/`list_book_ids` working together.
+
+---
+
+## Entry 35 – datalake_storage, closing the datalake benchmark block (2026-10-01)
+
+### What was done
+- `include/stage1/datalake_storage_benchmark.hpp` + `src/datalake_storage_benchmark.cpp`:
+  `benchmark_datalake_storage(language, books, output_dir)`, SPEC section 9's `datalake_storage`
+  experiment (section 3's own "storage overhead"). Not a timing experiment: for each layout, writes
+  every book once, then reports `files`, `directories`, `max_entries_per_dir` (the most populated
+  directory, root included) and `bytes` (summed logical file size) via a single recursive directory
+  walk (`std::filesystem::recursive_directory_iterator`), one `BenchmarkResult` row per metric.
+  Deliberately leaves out the Java module's fifth metric, block-size-rounded `allocated_bytes`: there is
+  no portable C++ standard-library way to query a filesystem's block size, and Java's own code already
+  calls that number "an estimate" rather than an exact figure.
+- `main.cpp`'s `benchmark` command gained `datalake_storage`. This closes all five of SPEC section 9's
+  `datalake_*` experiments.
+- 3 new tests with a small, hand-traceable 3-book corpus (1342, 84, 11): `book` gets exactly 2
+  files/1 directory per book; all three layouts report identical `bytes` (same content, different
+  organization); `range` groups 84 and 11 into one folder (`00000-00999`) and 1342 into another
+  (`01000-01999`). Suite total: 151 tests.
+- Ran it for real against the 15 downloaded books.
+
+### A result that makes the book/range/time trade-off concrete
+All three layouts: 30 files, identical byte count (6,575,252 — same content, just organized
+differently; a useful sanity check in itself). Where they differ is `max_entries_per_dir`:
+`book` = 15 (the root directory, one subdirectory per book), `range` = 18 (the most populated range
+folder, `00000-00999`, holding 9 of the 15 books), `time` = **30** — every single file, because all 15
+books were downloaded within the same hour and `time` has no way to spread a burst of downloads across
+multiple folders. This is precisely the failure mode SPEC section 3 warns about ("a very large number
+of small files can overwhelm the filesystem") showing up with real numbers, and it is `time`'s second
+documented structural weakness in this project (after `locate()`'s inability to compute a path from the
+id alone, Entry 31) — both stemming from the same root cause: `time`'s organization depends on *when*
+things happen to be written, which this project's own pipeline does in bursts, not evenly.
+
+### Why
+- **One directory walk per structure, not per metric.** `files`, `directories`, `max_entries_per_dir`
+  and `bytes` all fall out of the same single pass over every entry under the root; walking the tree
+  four separate times (once per metric) would be needlessly repeated I/O for numbers that are all
+  byproducts of the same traversal.
+- **`entries_per_dir` keyed by `parent_path()`, counting the root's own direct children too.** Matches
+  the Java module's own explicit choice ("incluida la raíz"): for the `book` layout specifically, the
+  root directory (one subdirectory per book) is very often the most populated directory in the whole
+  tree, and excluding it would hide exactly the kind of overcrowding this metric exists to catch.
+- **`allocated_bytes` left out rather than approximated with a guessed block size.** A hardcoded
+  assumption (e.g. "assume 4096-byte blocks") would silently misreport on a filesystem that does not
+  use that block size, which is worse than not reporting the number at all; Java's own version, built
+  with `Files.getFileStore(root).getBlockSize()`, has no equivalent in portable C++ without reaching for
+  platform-specific APis (`statvfs` on POSIX, `GetDiskFreeSpace` on Windows) this project has not needed
+  anywhere else — a reasonable line to draw given `bytes` (logical size) already answers "how much data"
+  and the point of `max_entries_per_dir` already covers the structural overcrowding concern.
+
+---
+
+## Entry 36 – metadata_insert, and a transaction gap this benchmark exposed (2026-10-01)
+
+### What was done
+- `include/stage1/metadata_insert_benchmark.hpp` + `src/metadata_insert_benchmark.cpp`:
+  `benchmark_metadata_insert(language, books, output_dir)`, SPEC section 9's `metadata_insert`
+  experiment (section 4's own "insertion speed"). Before each repetition (untimed, via
+  `measure_elapsed_ms`'s `setup`): deletes any previous database file and opens a fresh
+  `MetadataStore` (schema creation happens here, not in the timed part). Timed: `extract_metadata`
+  each book's header and `insert_book` it. Verifies every book is present via `find_by_id` after the
+  final repetition. `structure` is always `"sqlite"` — this project still has only one metadata
+  backend (Entry 13's reasoning for not generalizing `MetadataStore` without a second real
+  implementation still holds), unlike the Java module, which also benchmarks a `"sqlite_no_index"`
+  variant by dropping the author/title indexes. Returns 5 `elapsed` rows plus 5 derived `throughput`
+  rows (`rows_per_s`), matching the Java module's own metric shape.
+- `main.cpp`'s `benchmark` command gained `metadata_insert`.
+- 1 new test. Suite total: 152 tests.
+- Ran it for real against the 15 downloaded books' real headers.
+
+### A real gap this exposed: no transaction batching
+At `dataset_size=15`: throughput varied noisily between roughly 1,260 and 2,130 rows/s across the 5
+measured repetitions — noisy for a reason worth naming: `MetadataStore::insert_book` runs each `INSERT`
+as its own implicit SQLite transaction (no `BEGIN`/`COMMIT` wrapping multiple rows), so every single row
+pays its own commit cost. The Java module's equivalent explicitly batches rows into one transaction per
+batch (`saveAll`, `DEFAULT_BATCH_SIZE = 1000`). This project's current `MetadataStore` does not offer
+that at all. Not fixed here — this benchmark's job is to measure and report what exists, not to
+silently patch the thing being measured — but recorded as a concrete, benchmark-discovered candidate
+improvement: wrapping a batch of inserts in one transaction would very likely raise and stabilize this
+throughput number, and is exactly the kind of finding SPEC section 4's benchmarking considerations
+("insertion speed... thousands of books") exist to surface before the dataset is large enough for the
+per-row commit cost to dominate badly.
+
+### Why
+- **Opening the database (and creating its schema) happens in `setup`, not inside the timed
+  operation.** That cost is fixed and one-time per repetition regardless of how many rows get
+  inserted; including it in the timed block would inflate "insertion speed" by a cost that has nothing
+  to do with how many rows were inserted, especially visible at this project's current small sample
+  sizes.
+- **`structure` fixed to `"sqlite"` rather than inventing a second backend to compare.** Same reasoning
+  already applied in Entry 13: SPEC does not require this comparison (it is explicitly optional, per
+  the course PDF), and building a toggle for it now, with no immediate plan to add a second backend,
+  would be exactly the premature generalization that reasoning was written to avoid.
+- **Verifying every book is findable after the run, not just trusting the loop completed.** The same
+  "a benchmark about correctness should fail loudly if it is not correct" reasoning already applied to
+  `datalake_incremental`/`datalake_recovery` (Entries 33-34): a silently-broken `insert_book` would
+  otherwise still produce a plausible-looking timing number.
+- **The missing-transaction finding recorded rather than silently fixed.** Changing `MetadataStore` to
+  batch inserts is a real, separate design decision (how big a batch, whether to expose it as part of
+  the public `MetadataStore` API or only used internally by callers that know they are doing bulk
+  work) that deserves its own deliberate step, not a quick patch made only because a benchmark run
+  happened to reveal it.
+
+---
+
+## Entry 37 – Fixing the transaction gap Entry 36 found, and measuring the difference (2026-10-01)
+
+### What was done
+- `MetadataStore` gained `begin_transaction()`/`commit_transaction()`/`rollback_transaction()`
+  (`BEGIN TRANSACTION;`/`COMMIT;`/`ROLLBACK;`, reusing the existing `exec` helper). 2 new tests:
+  inserts made between `begin_transaction()` and `commit_transaction()` are visible after commit;
+  `rollback_transaction()` discards everything written since `begin_transaction()`, leaving anything
+  committed *before* it untouched.
+- `benchmark_metadata_insert`'s timed operation now wraps its whole insert loop in one transaction
+  (`begin_transaction()` ... `commit_transaction()`) instead of leaving every `insert_book()` call to
+  commit on its own. Suite total: 154 tests.
+- **Re-ran the real benchmark against the same 15 downloaded books, before and after, to measure the
+  actual difference** rather than assuming the fix helped:
+
+  | | elapsed (ms, 5 runs) | throughput (rows/s, 5 runs) |
+  |---|---|---|
+  | **Before** (Entry 36, no transaction) | 11.3, 7.6, 11.9, 7.0, 7.3 | 1326, 1965, 1263, 2131, 2051 |
+  | **After** (this entry, one transaction) | 3.3, 3.3, 3.2, 3.3, 3.3 | 4485, 4506, 4638, 4557, 4614 |
+
+  Roughly **2.5x faster on average**, and just as importantly, the measured time went from noisy
+  (7.0-11.9ms, swinging by a factor of ~1.7x run to run) to tightly consistent (3.2-3.3ms every time).
+  The noise itself is explained by what changed: 15 separate implicit commits (each paying its own,
+  somewhat variable fsync cost) became 1 commit for the whole batch.
+
+### Why
+- **Measured before and after with the same benchmark, not just reasoned that it should help.** The
+  whole point of building this benchmarking infrastructure (Entry 26 onward) is to replace "this should
+  be faster" with an actual number; fixing the gap Entry 36 found without re-running the same experiment
+  would have left the claim unverified, exactly the kind of thing this project's benchmarks exist to
+  avoid.
+- **`begin_transaction`/`commit_transaction`/`rollback_transaction` added as general `MetadataStore`
+  methods, not hidden inside the benchmark.** Transaction batching is useful to any future caller doing
+  bulk inserts (the real pipeline's indexing step currently inserts one book at a time, which does not
+  need this, but a future bulk-import path would); exposing it on `MetadataStore` itself, the same place
+  `insert_book` already lives, means the benchmark is just an ordinary caller of a real feature, not a
+  special case with its own private workaround.
+- **`rollback_transaction` included even though nothing calls it yet.** A minimal, complete
+  begin/commit/rollback surface costs one more `exec` call and avoids leaving an odd, asymmetric API
+  (commit with no way to abort) now that the mechanism exists at all; the dedicated rollback test
+  exists specifically so this is not an untested, unverified method sitting in the codebase.
+
+---
+
+## Entry 38 – metadata_query, and two query methods the indexes were waiting for (2026-10-01)
+
+### What was done
+- `MetadataStore` gained `find_by_author(author)`/`find_by_title(title)` (exact match, not substring),
+  returning every matching `StoredBook`. Both reuse a new shared `read_row`/`find_all` pair of internal
+  helpers (anonymous namespace), and `find_by_id` was refactored to use the same `read_row` instead of
+  duplicating the column-reading code. 4 new tests: multiple matches, no matches, matches share a title
+  across different authors, and exact-match semantics (`"Jane"` does not match `"Jane Austen"`).
+  **This closes a real gap**: the author/title SQLite indexes (`idx_books_author`/`idx_books_title`)
+  have existed since Entry 12, created for exactly this kind of lookup, but nothing in this project ever
+  called a query that would use them until now.
+- `include/stage1/metadata_query_benchmark.hpp` + `src/metadata_query_benchmark.cpp`:
+  `benchmark_metadata_query(language, books, output_dir, query_count=1000)`, SPEC section 9's
+  `metadata_query` experiment (section 4's own "query performance": "Find all books by a specific
+  author; or Retrieve the path of a book by its title or ID"). Mirrors the Java module's own
+  methodology: the database is populated once (untimed, via the transaction batching from Entry 37); a
+  fixed-seed (`std::mt19937(42)`) workload of `query_count` random picks (repeats allowed) feeds three
+  query types -- `find_by_id`, `find_by_author`, `find_by_title` -- each run as one timed block of the
+  whole workload per repetition, reporting both the total `elapsed` and a derived `<type>_avg`
+  (microseconds per single lookup). Every query must find at least one result (verified, throws
+  otherwise); every book must have both a title and an author, or the function throws immediately
+  (the workloads need something to query for).
+- `main.cpp`'s `benchmark` command gained `metadata_query`.
+- 2 new tests for the benchmark itself. Suite total: 160 tests.
+- Ran it for real against the 15 downloaded books' real metadata, 1000 queries per type: all three
+  types landed around 8-9 microseconds per query on average (`find_by_id` slightly faster, ~8us, than
+  the indexed-but-still-disk-backed `find_by_author`/`find_by_title`, ~9-10us) — close enough at this
+  small dataset size that the gap is not yet meaningful; worth re-measuring once the dataset is larger,
+  the same caveat already noted for every other benchmark run so far at `dataset_size=15`.
+
+### Why
+- **`find_by_author`/`find_by_title` added now, not earlier.** They had no caller until this
+  experiment needed them; building them speculatively back in Phase 3 would have been exactly the kind
+  of premature addition Entry 13 already argued against for a different part of `MetadataStore`. A
+  benchmark that needs a real capability is precisely the "second real use" signal this project has
+  used throughout (`HttpClient`, `TempDir`, `mongo_is_reachable`, `Datalake::locate`/`list_book_ids`) to
+  decide when generalizing stops being speculative.
+- **Exact match, not a substring/`LIKE` search.** SPEC section 4's own phrasing ("find all books by a
+  specific author") describes looking up a known author, not a fuzzy search; exact match is simpler,
+  faster (a plain index lookup rather than a table scan `LIKE` would often require), and is what the
+  existing index actually accelerates.
+- **The whole query-type workload timed as one block, not query-by-query.** Matches
+  `benchmark_index_query`'s own reasoning (Entry 28): a single query is too fast to time meaningfully on
+  its own (clock resolution and call overhead would dominate), so timing `query_count` of them together
+  and deriving a per-query average is the way to get a stable, meaningful number.
+- **The database populated via a transaction, not row-by-row.** Directly reuses the fix from Entry 37
+  instead of reintroducing the same one-commit-per-row cost in a different benchmark's setup step; this
+  experiment is about query cost, and an unnecessarily slow population phase would be noise in
+  comparison, not signal.
+- **Requiring every book to have a title and an author, throwing otherwise, instead of silently
+  skipping incomplete books.** A workload built by skipping some books while keeping others changes
+  `query_count`'s real size unpredictably and could silently shrink to "no author data at all" for
+  (say) a corpus where titles extract cleanly but authors do not; failing loudly surfaces a header-
+  parsing problem immediately rather than producing a quietly-smaller, misleading benchmark.
+
+---
+
+## Entry 39 – index_update reveals hierarchical is far worse than monolithic for updates (2026-10-01)
+
+### What was done
+- `include/stage1/index_update_benchmark.hpp` + `src/index_update_benchmark.cpp`:
+  `benchmark_index_update(language, books, stopwords, output_dir)`, SPEC section 9's `index_update`
+  experiment (the course PDF's "cost of adding new books to an existing index without rebuilding it
+  completely"). Mirrors the Java module's own methodology: the most recent 10% of `books` (at least
+  one, `k`) are "added"; the rest form a "base" index, built and persisted once per repetition
+  (untimed setup, via `measure_elapsed_ms`'s `setup`). The timed operation adds the `k` books one at a
+  time, each immediately followed by a full `IndexWriter::write()` call — currently the *only* kind of
+  "update" any of this project's three writers support (Entry 18/25 already documented that `write()`
+  always persists the whole current index, never incrementally). After the run, the final in-memory
+  index is checked term-by-term against building straight from every book, the same correctness
+  discipline as `datalake_incremental`/`datalake_recovery`. Returns 5 `elapsed` rows plus a derived
+  `per_book` row (`elapsed / k`) per structure.
+- `main.cpp`'s `benchmark` command gained `index_update`.
+- 2 new tests (with a tiny synthetic vocabulary, so the real-world cost below does not show up there
+  and the suite stays fast). Suite total: 162 tests.
+- Ran it for real against the 15 downloaded books (`k=1`, so each repetition adds exactly one more
+  real book to a 14-book base). Mongo skipped (no Docker on this machine).
+
+### A genuinely surprising, measured result
+`monolithic`: **~23-31ms** per update. `hierarchical`: **~3,180-4,560ms** per update — **over 100x
+slower**, the opposite of the naive expectation (and the opposite of what the Java module's own design
+achieves, per its comment: *"hierarchical sólo los ficheros de los términos del libro"*). The cause is
+architectural, not a fluke: `HierarchicalIndexWriter::write()` (Entry 19) iterates over *every* term in
+`index.entries()` and rewrites *all* of their files on every call, because it has no notion of "which
+terms actually changed since the last write" — the same `write()` means "make the whole structure match
+this index" contract every writer in this project shares (Entry 18). With a real book's vocabulary
+running into the low thousands of distinct terms, one update means thousands of individual small-file
+`write_text_file` calls (each its own `create_directories` check, open, write, close), while
+`monolithic` pays for exactly one file write regardless of vocabulary size. This is the project's
+clearest evidence yet (after Entries 31-35's smaller `time`-layout findings) that this stage's writers
+were built to answer "can the format represent three physically different layouts correctly" (which
+they do — proven by `index_build`/`index_query`'s correctness checks) rather than "is this layout
+efficient to update," which SPEC section 9 keeps as a question to measure, not assume.
+
+### Why
+- **Not fixed here, same reasoning as Entry 36's transaction gap before Entry 37 fixed it.** This
+  result exposes a real architectural limitation of `HierarchicalIndexWriter` specifically (it would
+  need to track which terms a given `add_book` call actually touched, and write only those files,
+  to behave the way SPEC section 6 frames the hierarchical layout's whole selling point — "very
+  fine-grained updates: only the file of the affected term is modified"). That is a meaningfully larger
+  change than adding a transaction call, and deserves its own deliberate step rather than a reactive
+  patch inside a benchmark-writing session; recorded here as a concrete, numbers-backed candidate for
+  future work instead.
+- **Measuring with real book text instead of a tiny synthetic vocabulary is what made this visible at
+  all.** The unit test's own tiny corpus (a couple of words per book) would never reveal this cost,
+  because the whole problem scales with vocabulary size, not book count — exactly why Entry 29's
+  decision to benchmark against real, already-downloaded books (not synthetic placeholder text) mattered
+  here specifically, beyond the general realism argument already made there.
+- **The correctness check still runs even though this entry is about timing, not correctness.** A
+  writer that is slow but still produces the right answer is a performance finding to report; a writer
+  that is slow *and* wrong would be a bug to fix first, and the two are easy to conflate without an
+  explicit check separating them.
+
+---
+
+## Entry 40 – Fixing hierarchical's update cost (Entry 39), and what the fix did and did not solve (2026-10-01)
+
+### What was done
+- `IndexWriter` gained `update_terms(index, changed_terms)`: persists only the listed terms' current
+  postings, leaving every other already-persisted term untouched. Defaults to `write(index)` (a full
+  rewrite -- always correct, not necessarily cheap), so every existing writer keeps compiling and
+  behaving exactly as before without an override.
+- `HierarchicalIndexWriter::update_terms` overridden: for each term in `changed_terms`, rewrites only
+  that term's own file -- exactly SPEC section 6's own description of this layout's advantage ("very
+  fine-grained updates: only the file of the affected term is modified"), which nothing in this project
+  actually exercised until now.
+- `MongoIndexWriter::update_terms` overridden too, for completeness and because it is cheap and
+  correct to add: `update_one` with `$set` and `upsert(true)` per changed term, instead of
+  `delete_many` + reinserting everything. Not benchmarked for real here (no Docker on this machine),
+  but has its own skippable test, same pattern as the rest of the Mongo-dependent tests.
+- `MonolithicIndexWriter` left with no override, on purpose: a single JSON file has no way to patch
+  part of itself cheaply with this project's plain-text approach, so the default (full rewrite) is
+  already the honest, correct answer for this layout -- not a missed optimization.
+- `benchmark_index_update`'s timed operation now computes the *distinct* terms of each newly added book
+  (the only terms `add_book` could possibly have changed, Entry 17) and calls `writer.update_terms(index,
+  changed_terms)` instead of `writer.write(index)`.
+- 5 new tests: `HierarchicalIndexWriter::update_terms` touches only the requested terms' files and
+  leaves everything else exactly as `write()` left it (and handles an empty term list); a skippable
+  `MongoIndexWriter::update_terms` equivalent. Suite total: 165 tests.
+- **Re-ran the real benchmark (same 15 books) before and after, to measure the actual effect:**
+
+  | structure | per-update, before (Entry 39) | per-update, after (this entry) |
+  |---|---|---|
+  | monolithic | 23.4–31.3 ms | 25.2–28.0 ms (unchanged, as expected: no override) |
+  | hierarchical | 3,178.8–4,561.7 ms | **983.3–1,169.7 ms** |
+
+### An honest reading of the result: real improvement, not a full fix
+`hierarchical` got **roughly 3-4x faster** per update, a genuine, measured win from the fix. But it is
+still **~35-45x slower than `monolithic`** at this dataset size, not close to parity. The reason is
+structural, not a remaining bug: `changed_terms` for one newly added real book is still that book's
+*own* distinct vocabulary (plausibly a couple of thousand words), and each one still costs its own
+`write_text_file` call — a `create_directories` check, an open, a write, a close. The fix removed the
+waste of touching *every other book's* terms too, but it cannot remove the fact that a layout built
+from "one small file per term" pays a per-term filesystem cost that "one JSON file" simply does not.
+This is the more precise, measured version of the architectural trade-off SPEC section 6 already
+describes in words ("A very large number of small files can overwhelm the filesystem, reducing
+performance") — now with a before/after number attached to both the problem and the fix's real,
+partial effect on it.
+
+### Why
+- **A new interface method with a safe default, not a breaking signature change to `write()`.** Every
+  other benchmark and every existing test that calls `write()` needed zero changes; `update_terms` is
+  purely additive, and a writer that does not override it is still fully correct (just not faster),
+  which is exactly the same "grow the shape, never break an existing caller" discipline already applied
+  to `tokenize`, `query_and`, and `Datalake`'s own `locate()`/`list_book_ids()` additions.
+- **`MonolithicIndexWriter` deliberately left without an override.** Giving every writer a "pretend
+  incremental" method by, say, having monolithic's default secretly still rewrite the whole file under
+  a different method name would not be an optimization, just the same cost with a misleading name;
+  leaving it on the honest default makes the real difference between layouts visible in the benchmark
+  results instead of hidden behind an API that implies all three writers now update cheaply.
+- **Re-measuring instead of assuming the fix worked, same discipline as Entry 37's transaction fix.**
+  The obvious, appealing story ("hierarchical only touches what changed, so it must now be about as fast
+  as monolithic") turned out to be wrong in degree, and only a real before/after run caught that. Writing
+  this nuance into the DEVLOG rather than just the headline "3-4x faster" is what keeps this log useful
+  for the report: both the improvement and its real limit are facts worth knowing before deciding
+  whether this structure is good enough for the group's final choice.
+
+---
+
+## Entry 41 – index_memory, measured without a garbage collector to lean on (2026-10-01)
+
+### What was done
+- `include/stage1/index_memory_benchmark.hpp` + `src/index_memory_benchmark.cpp`:
+  `benchmark_index_memory(language, books, stopwords, output_dir)`, SPEC section 9's `index_memory`
+  experiment. C++ has no equivalent to the Java module's `Runtime.totalMemory()/freeMemory()`-after-GC
+  estimate, since there is no garbage collector or heap-size introspection API; the closest honest
+  substitute is the operating system's own **peak resident set size** (`getrusage`'s `ru_maxrss`,
+  POSIX — available on both macOS and Linux, this project's only targets), measured before and after
+  each step. Two measurements, both single-shot (no `measure_elapsed_ms` repetitions: RSS is a
+  point-in-time OS counter, not something warmup/averaging applies to):
+  - `in_memory_index`: building the shared `InvertedIndex` from `books` — what every structure's
+    in-memory representation starts from.
+  - `monolithic`: on top of that, re-parsing the just-written monolithic JSON file back into memory
+    (the `load_monolithic` step `benchmark_index_query`, Entry 28, already does for real queries).
+  `hierarchical` and `mongo` are deliberately **not** measured: neither has an equivalent "loaded into
+  this process" state in this project's design — hierarchical reads small per-term files on demand with
+  nothing kept resident across queries, and mongo's data lives in the database server's own process,
+  not this one (the same limitation the Java module's own comment notes for its client-only view).
+- `ru_maxrss`'s platform-dependent unit handled explicitly: bytes on macOS, kilobytes on Linux
+  (`#if defined(__APPLE__)`).
+- Deltas clamped to zero (`std::max<long>(0, after - before)`), documented as meaning "this step did
+  not push the peak any higher than an earlier, larger step already had" rather than a meaningless
+  negative number — `ru_maxrss` is a **monotonic peak for the whole process**, not a per-object
+  counter, so later, smaller steps can legitimately measure as zero if an earlier step already set a
+  higher peak. This single-process ordering caveat is this benchmark's own honest limitation,
+  documented in the header rather than hidden, the same way Java's own file documents its GC
+  estimate's imprecision.
+- `main.cpp`'s `benchmark` command gained `index_memory`.
+- 1 new test (checks row shape, not specific magnitudes — RSS numbers are inherently
+  platform/allocator-dependent and would make a unit test flaky if asserted precisely). Suite total:
+  166 tests.
+- Ran it for real against the 15 downloaded books: building `in_memory_index` grew the peak by
+  **~12.86 MB**; re-parsing the monolithic JSON added **~5.24 MB** more — both plausible, non-zero,
+  real numbers for a modest real-text corpus, not noise.
+
+### Why
+- **Peak RSS instead of trying to emulate Java's GC-based estimate.** Forcing an artificial "GC-like"
+  moment in C++ (there is nothing to force — allocations are freed deterministically by destructors,
+  not by a collector) would be inventing a C++ concept that does not exist just to mirror Java's
+  method; using the OS's own, real memory accounting is the more honest choice for this language,
+  even though it is a different kind of estimate with its own caveats (monotonic peak, process-wide)
+  rather than Java's (heap after a *requested*, not guaranteed, GC).
+- **`hierarchical`/`mongo` left unmeasured rather than reported as a misleading `0`.** Writing a `0`
+  bytes row for them would read as "this structure uses no memory," which is not what is actually true
+  (it uses *no resident, cached, in-process* memory, because its whole design never loads anything
+  persistent into this process) — a meaningfully different, more informative statement than a bare
+  zero, and worth the reader's attention rather than silently averaged into a comparison table.
+- **Two measurements sharing one process, with the ordering caveat documented, instead of forking a
+  fresh process per measurement for cleaner isolation.** A `fork()`-per-structure design would give more
+  accurate, order-independent numbers, but introduces real complexity (coordinating with GoogleTest's
+  own process model, file descriptor handling across the fork) for a benchmark whose own purpose is
+  already an *estimate* by nature, in every language's version of it; the honest, documented caveat is a
+  smaller, more proportionate cost than the added design risk.
+
+---
+
+## Entry 42 – index_disk, the last of the 12 SPEC section 9 experiments (2026-10-01)
+
+### What was done
+- `include/stage1/index_disk_benchmark.hpp` + `src/index_disk_benchmark.cpp`:
+  `benchmark_index_disk(language, books, stopwords, output_dir)`, SPEC section 9's `index_disk`
+  experiment (the course PDF's own "Memory and disk usage"). Builds the index once, writes it through
+  `monolithic` and `hierarchical`, and reports per structure: `bytes` (total file size on disk,
+  recursive), `files` (file count), and `terms`/`postings` — the index's *logical* size, identical
+  across structures by construction (same vocabulary, same postings; the two are read from the same
+  `InvertedIndex` object, so there is nothing to independently verify here, unlike experiments comparing
+  two separately-built structures). `mongo` deliberately left out: its real disk footprint needs
+  MongoDB's own `collStats` command, whose numeric BSON fields vary in type across driver/server
+  versions and need careful handling this machine (no Docker) cannot verify — same "don't ship what
+  can't be checked now" discipline already used for `allocated_bytes` (Entry 35) and the Mongo gaps in
+  Entries 28/41.
+- `main.cpp`'s `benchmark` command gained `index_disk`. **This is the 12th and last of SPEC section 9's
+  experiments** — every one of `datalake_write`, `datalake_lookup`, `datalake_incremental`,
+  `datalake_recovery`, `datalake_storage`, `metadata_insert`, `metadata_query`, `index_build`,
+  `index_query`, `index_update`, `index_memory`, `index_disk` now has a working, tested, real-run
+  implementation in this module.
+- 1 new test (checks `monolithic`/`hierarchical` agree on `terms`/`postings`, and that `hierarchical`'s
+  file count equals the term count while `monolithic`'s stays at 1). Suite total: 167 tests.
+- Ran it for real against the 15 downloaded books.
+
+### A result that mirrors index_update's finding, in the opposite direction
+`monolithic`: 738,543 bytes in 1 file. `hierarchical`: 356,666 bytes across 30,396 files (one per
+term, matching `terms` exactly) — **less than half the disk space**, despite needing tens of thousands
+of files. The reason is the inverse of Entry 39/40's finding: JSON repeats each term as a quoted string
+key plus structural punctuation (`"term":[...]," `) for every single entry, while hierarchical's files
+contain *only* the postings, one bare integer per line — the term itself is never written inside a
+file, it is the filename. So the very same "one small file per term" design that made `hierarchical`
+dramatically more expensive to *update* (Entry 39) is what makes it meaningfully cheaper to *store*.
+Both entries 39/40 and this one measure real, opposite-direction consequences of the same structural
+choice, which is precisely the kind of trade-off SPEC section 6 asks the report to discuss — now with
+numbers on both sides of it, from the same 15-book dataset.
+
+### Why
+- **`terms`/`postings` reported once per structure even though they are always identical.** Having them
+  sit in the same CSV, next to each structure's very different `bytes`/`files`, is what makes "same
+  logical data, different physical cost" directly visible without needing to cross-reference a separate
+  table — the exact point Java's own version of this experiment makes with the same two metrics.
+- **No repetitions, no timing.** `index_disk`, like `datalake_storage` (Entry 35) and `index_memory`
+  (Entry 41), measures a static property of a finished structure, not an operation's duration;
+  `measure_elapsed_ms`'s warmup/averaging methodology has nothing to apply to here.
+- **Mongo skipped rather than half-implemented.** A `collStats`-based number that might silently read as
+  `0` or throw on a BSON type mismatch this environment cannot exercise would be worse than an honest
+  gap — the same reasoning already applied twice this session (`allocated_bytes`, `index_memory`'s
+  Mongo row) kept consistent a third time, rather than making an exception just to say every experiment
+  covers all three structures.
+
+## Entry 43 – Splitting main.cpp: argv parsing vs. command wiring (2026-10-01)
+
+### What was done
+- `src/main.cpp` (201 lines) split in two, with no behavior change:
+  - `src/main.cpp` (45 lines): only parses `argv`, validates `<N>`, prints usage, catches any escaping
+    exception as `[fatal]`, and dispatches to one of the two commands below.
+  - `include/stage1/cli_commands.hpp` + `src/cli_commands.cpp`: `run_pipeline_command(steps)` and
+    `run_benchmark_command(experiment)`, the former `run_pipeline`/`run_benchmark` moved verbatim
+    (wiring of the concrete components, the in-memory index rebuild on startup, the 12-way benchmark
+    dispatch, CSV output). Only two mechanical changes: they now live in `namespace stage1` instead of
+    an anonymous namespace (they must have external linkage to be callable from another translation
+    unit, `main.cpp`), which also drops every `stage1::` prefix; `describe()` stays file-local in
+    `cli_commands.cpp`, `print_usage()` stays file-local in `main.cpp`.
+- `CMakeLists.txt`: `src/cli_commands.cpp` added to the `search_engine_stage1` executable target, not to
+  `stage1_core`.
+
+### Verification
+Rebuilt with no warnings; all 167 tests pass (the usual 3 Mongo tests skipped, no Docker here). The
+binary still prints usage and exits 1 with no arguments and with `pipeline 0`, exactly as before.
+
+### Why
+- **Two jobs, two files.** `main.cpp` had grown from Entry 25's thin wiring into CLI parsing plus two
+  full commands plus a 12-branch benchmark dispatch, one branch added per experiment (Entries 29-42).
+  Separating "what did the user type?" from "what does each command assemble and run?" means adding a
+  command (e.g. a future `search`/`status`, like Java's) touches the dispatch in one place and the
+  wiring in the other, instead of growing one long file in both directions.
+- **Same shape as the Java module.** Java separates a thin `Main.java` (reads the command, prints the
+  result) from `SearchEngine.java` (the only place the pieces get connected). Keeping the two
+  implementations' entry points recognizably parallel helps whoever compares them, the grader included
+  (the same reason Entry 25 gave for mirroring Java's `pipeline <N>` CLI shape).
+- **`cli_commands.cpp` belongs to the executable, not `stage1_core`.** It is the only code that reads
+  `STAGE1_SHARED_DIR`/`STAGE1_DATA_DIR`/`STAGE1_BENCHMARKS_DIR`, and those are `PRIVATE` compile
+  definitions of the executable target (Entry 25): where *this binary's* `shared/`, `data/` and
+  `benchmarks/` directories are is a decision of the program, not of the reusable library the tests
+  also link. Put in `stage1_core`, the file would not even compile (the macros are not defined for that
+  target); left out of every target (the state right after the split), `main.cpp` would compile fine
+  against the header's declarations but the link would fail on the missing definitions.
+- **A pure move, not a redesign.** Keeping the function bodies byte-for-byte equivalent makes the diff
+  trivially checkable against the previous `main.cpp`, and the unchanged 167-test suite plus identical
+  CLI behavior is enough evidence that nothing changed.
+
+### Honest difference from Java (not fixed here)
+Java's `SearchEngine` is built from an `AppConfig` and is also what its end-to-end test assembles (with
+a fake `BookSource`), so the program and the test exercise the very same wiring. `cli_commands.cpp` is
+still untested: it lives in the executable and reads compile-time directories, so no test links it. The
+C++ equivalent of Java's tested assembly remains `run_pipeline_step` in `stage1_core`, covered by
+`tests/pipeline_test.cpp` (Entry 25); the untested part is only the concrete-type wiring and the
+benchmark dispatch. Making it testable would mean passing the three directories in as parameters so the
+file could move into `stage1_core`, a possible later improvement, deliberately left out of a
+behavior-preserving split.
+
+## Entry 44 – `search` and `status` commands: querying the persisted index from the binary (2026-10-01)
+
+### What was done
+- `include/stage1/index_readers.hpp` + `src/index_readers.cpp` (in `stage1_core`):
+  `monolithic_postings_fetcher(path)` and `hierarchical_postings_fetcher(root)`, the readers that used
+  to be private helpers inside `index_query_benchmark.cpp` (Entry 28), moved out unchanged so `search`
+  can reuse them. Each returns the postings-fetcher function `query_and` already accepts, the same shape
+  as the existing `mongo_postings_fetcher`. One behavior change: the monolithic reader now throws
+  `cannot open index file for reading: <path>` when the file is missing, instead of letting
+  `nlohmann::json::parse` fail with an unhelpful "unexpected end of input". `index_query_benchmark.cpp`
+  now calls the shared readers.
+- `ControlLog::ids()`: every recorded id, ascending, each once (a sorted copy of the internal
+  `unordered_set`, whose iteration order is unspecified). Until now the class could only answer
+  `contains(id)`, which is enough for the pipeline but not for counting or listing.
+- `search_engine_stage1 status` (`run_status_command`): dataset size (`shared/book_ids.txt`), how many
+  ids the control logs record as downloaded and as indexed, and which are downloaded but not indexed yet
+  (`std::set_difference` over the two sorted `ids()` lists). It counts what the logs hold, like Java's
+  `control.downloaded().size()`, not only ids still in the current dataset.
+- `search_engine_stage1 search <words...>` (`run_search_command`): tokenizes the query with the same
+  tokenizer and stopwords as indexing, runs `query_and` against the monolithic index `pipeline` wrote
+  (read with `monolithic_postings_fetcher`, never by re-reading the books), and prints each match's id
+  plus its title from `MetadataStore`. `main.cpp` joins every word after `search`, so
+  `search whale island` and `search "whale island"` are the same query.
+- `kIndexPath` in `cli_commands.cpp`: one constant for `data/datamarts/inverted_index.json`, used by
+  both `pipeline`'s `MonolithicIndexWriter` and `search`'s reader, so they cannot drift apart.
+- Tests: 4 for the readers (each one reads back what its writer wrote, unknown term gives empty
+  postings, missing monolithic file throws, and AND queries through both readers equal the in-memory
+  index's answers) and 1 for `ids()` (plus an `ids().empty()` check on a fresh log). Suite total: 172.
+
+### Verification (real data, 15 books)
+- `status` with nothing downloaded: 0 / 0 / 0. After `pipeline 5` (an odd step count, chosen on
+  purpose): downloaded 3, indexed 2, pending 1 (book 11). The next `pipeline` run's first action was
+  `indexed book 11`, so it resumed the pending work before downloading anything new. It then finished
+  all 15 books in ~18 s. Final `status`: 15 / 15 / 0.
+- `search` on every query in `shared/queries.txt`. Matches: adventure 9, island 9, love 13, ship sea 9,
+  king queen 8, monster creature 6, whale 4, detective crime 4, war peace 9, mother father 11.
+- **Independent cross-check: 10/10 identical.** For each query, a shell script listed the books whose
+  `body.txt` contains every term as a whole `[A-Za-z0-9]+` run, case-insensitively (SPEC section 5's
+  token definition), using plain `grep` instead of any project code. Its result matched `search`'s
+  exactly for all 10 queries. One pitfall worth recording for anyone repeating this: in this shell
+  `grep` resolved to `ugrep -I`, which silently skips files it considers binary, and under `LC_ALL=C`
+  some books' UTF-8 curly quotes made them look binary (0 hits for `love`). `/usr/bin/grep -a` was used
+  instead. A `grep -w` check would also have been subtly wrong: it treats `_` as part of a word, while
+  the tokenizer splits on it (Gutenberg marks italics as `_word_`).
+- Tokenization of the query itself: `search "The WHALE, and the Island!"` searches `whale island`
+  (case, punctuation and stopwords handled exactly like the books). A query of only stopwords prints a
+  "no searchable terms" message and exits 0. A missing index prints "run `pipeline <N>` first" and
+  exits 1. `search` with no words prints usage.
+
+### Why
+- **Querying is graded, and the binary could not query.** The assignment's evaluation criteria give 30%
+  to "proper functioning of downloading, indexing, and querying modules". `query_and` existed and was
+  tested (Entry 22), but only the tests and the `index_query` benchmark could reach it. Someone running
+  this module's binary could download and index, but not search. Java already had `search`/`status`.
+- **Read the persisted index, don't rebuild it.** `pipeline` rebuilds its in-memory index from the
+  books' bodies at startup (Entry 25's known cost). Doing the same for every single `search` would
+  re-tokenize the whole collection per query. Reading the monolithic file instead also shows that what
+  the pipeline writes to the datamart is actually usable for search, which is the point of a datamart.
+  The readers already existed (Entry 28), so the cost was moving them, not writing new parsing code.
+- **Readers in `stage1_core`, commands in the executable.** The readers take their path as a parameter,
+  so they are reusable and testable with a `TempDir`, unlike `cli_commands.cpp`, which reads
+  compile-time directory macros (Entry 43).
+- **`ids()` returns a sorted copy, not a reference to the internal set.** Callers cannot modify the
+  log behind `mark()`'s back, the internal container stays an implementation detail, and the sort makes
+  the output deterministic and directly usable by `std::set_difference`, which requires sorted input.
+- **Exit codes distinguish "nothing to search" (0) from "cannot search" (1)**, so a script chaining
+  commands can tell a valid empty result from a missing index.
+- **`status` stays read-only in intent.** Its only side effect is `ControlLog` creating an empty
+  `data/control/` the first time, documented in the header rather than worked around.
+
+### Known gaps, deliberately left
+- `search` only reads the **monolithic** index, because that is what `pipeline` writes (Entry 25's
+  default). Switching `pipeline` to another `IndexWriter` means switching `search`'s reader too, which is
+  why both sit next to `kIndexPath`'s comment.
+- Cosmetic: the header line shows the tokenized terms as typed, so `search whale whale island` prints
+  `whale whale island` (the result itself is right: `query_and` de-duplicates).
+- `cli_commands.cpp` is still untested as a whole (Entry 43). The new logic it calls (`ids()`, the
+  readers, `query_and`) is unit-tested, and the commands were verified by the real run above.
+- The root `README.md`'s C/C++ section is still the group's original template (`cd c/`, "GCC and
+  Make", the binary run with no arguments). It is a shared group file, so fixing it is left to a group
+  decision rather than changed unilaterally from this module.
+
+## Entry 45 – Module folders mirroring the Java package layout (2026-10-02)
+
+### What was done
+`include/stage1/`, `src/` and `tests/` were each split into the same module subfolders as the Java
+module's packages (`java/stage1/src/main/java/es/ulpgc/bigdata/...`):
+
+| C++ folder | Java package | Contents |
+|---|---|---|
+| *(root)* | `Main`, `SearchEngine`, `EndToEndTest` | `main.cpp`, `cli_commands`, `smoke_test` |
+| `crawler/` | `crawler` | `book_source`, `book_splitter`, `gutenberg_client`, `http_client`, `curl_http_client`, `download_result` |
+| `datalake/` | `datalake` | `datalake` (interface), `book_based_`, `range_based_`, `time_based_datalake` |
+| `datamart/index/` | `datamart.index` | `inverted_index`, `tokenizer`, `stopwords`, `index_writer`, the three writers, `index_readers` |
+| `datamart/metadata/` | `datamart.metadata` | `metadata` (≈ `MetadataParser`), `metadata_store` (≈ `SqliteMetadataRepository`) |
+| `control/` | `control` | `control_log` (≈ `ControlFiles`), `book_id_list`, `pipeline` (≈ `PipelineController`) |
+| `query/` | `query` | `query_engine` (≈ `SearchService`) |
+| `benchmark/` | `benchmark` | `benchmark` (timer + CSV), `sample_books` (≈ `BenchmarkBooks`), `query_list`, the 12 experiments |
+| `util/` | *(none)* | `file_io`, `text_utils` |
+
+`tests/fakes/` and `tests/support/` are unchanged.
+
+Strictly mechanical, in two steps: `crawler/` first as a worked example, then every other module.
+- 110 files moved with `git mv`, so each file keeps its history (`git log --follow`).
+- 226 `#include "stage1/<name>.hpp"` lines rewritten to `"stage1/<module>/<name>.hpp"`.
+- Source paths updated in both `CMakeLists.txt`.
+- One new line in `tests/CMakeLists.txt`: `target_include_directories(stage1_tests PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR})`. Without it, a test moved into a subfolder can no longer find
+  `"fakes/..."`/`"support/..."`: a quoted include is first searched next to the including file, which
+  is now `tests/crawler/` rather than `tests/` (confirmed by building without it first:
+  `'fakes/fake_http_client.hpp' file not found`).
+- No logic, name, comment or namespace changed. The diff contains nothing but `#include` lines and
+  CMake paths.
+
+### Verification
+- A dry run of the move list (checking that only `cli_commands.hpp`, `main.cpp`, `cli_commands.cpp`
+  and `smoke_test.cpp` would stay at the roots) before moving anything.
+- After moving: no flat `"stage1/<name>.hpp"` include left except the root-level `cli_commands.hpp`.
+- An existence check of every CMake source path: 72 listed, 72 `.cpp` files on disk, 0 missing. This
+  check caught a slip in the move script, which had missed the last entry of each source list because
+  it carries the closing `)` on the same line. It was fixed by hand.
+- Clean rebuild, all 172 tests pass, and `status`/`search whale island` give the same output as before.
+
+### What the folders now make visible
+Counting cross-module `#include`s gives a layered graph with no cycles:
+```
+util               -> (nothing)
+crawler, datalake,
+datamart/index,
+datamart/metadata  -> util
+query              -> datamart/index
+control            -> crawler, datalake, datamart/index, datamart/metadata, util
+benchmark          -> control, datalake, datamart/index, datamart/metadata, query, util
+(root: CLI)        -> everything
+```
+This is the assignment's architecture, now readable from the folder tree alone. The datalake and the
+two datamarts are independent of each other. The control layer is the only module that orchestrates
+them (crawler → datalake → metadata → index). Search needs nothing but the index. The same graph is a
+ready-made diagram for the report's "System architecture" section.
+
+### Why
+- **Same shape as the Java module.** Someone comparing the three implementations (the grader
+  included) finds the same responsibilities under the same names in each one. The flat folder of
+  ~40 headers gave no hint of the datalake/datamart/control architecture at all.
+- **"Code quality (20%): structure, modularity"** is an explicit grading criterion, and module folders
+  are the most direct evidence of modularity.
+- **C++ conventions kept where they differ from Java's.** The split is `include/` + `src/` + `tests/`
+  mirroring each other, not Maven's `src/main/java` + `src/test/java`, which is a Maven convention
+  rather than part of the module design.
+
+### Alternatives considered and rejected
+- **Wrapping everything in `cpp/stage1/`** (like `java/stage1/`, `python/stage_1/`). It would require
+  editing the group's root `.gitignore` (`cpp/build/`, `cpp/data/`, `cpp/benchmarks/work/`). Worse,
+  `.gitignore` ignores every `*.csv` and re-includes only `!cpp/benchmarks/results/*.csv`, so the 12
+  committed result CSVs would silently become ignored at the new path. It would also change CMake's
+  `../shared` paths and need a full rebuild and new local editor settings.
+- **`model/` and `config/` folders.** Java's `model` classes have C++ equivalents that live next to
+  their logic (`BookMetadata` in `metadata.hpp`, `StoredBook` in `metadata_store.hpp`), and splitting
+  them out would change code, which this restructure deliberately did not. There is no `config/`
+  equivalent: this module's configuration is CMake compile definitions, not a config class.
+- **Namespaces per module** (`stage1::crawler`, ...), the closest C++ analogue of Java packages. It
+  would touch nearly every file's code, not just its location. It is a possible later step, kept
+  separate so that this change stays purely mechanical.
+- **Smaller placement calls.**
+  - `download_result` went to `crawler/`, not to a one-file `model/`, because only the crawler uses it.
+  - `stopwords` went next to `tokenizer`, as Java's `Tokenizer.fromStopwordsFile` does.
+  - `query_list` went to `benchmark/`, since it loads the benchmark query workload and nothing else
+    uses it.
+  - `util/` is new because `file_io`/`text_utils` are used by almost every module, whereas Java keeps
+    such helpers inside each class.
+
+## Entry 46 – A user guide for the module: `cpp/README.md` (2026-10-02)
+
+### What was done
+Added `cpp/README.md`, a short user guide covering:
+- requirements, and where each one comes from on macOS;
+- building and testing (`make`, `make test`);
+- the four CLI commands (`pipeline`, `search`, `status`, `benchmark`): what each does, whether it
+  needs the network, and what it writes;
+- a quick start with real output;
+- the layout of `data/`, mapped to the datalake, datamarts and control layer, plus three commands to
+  check the CLI's answers against the files themselves;
+- a by-hand test of resuming after an interruption;
+- a table of edge cases with their exit codes;
+- practical notes: benchmarks overwrite committed CSVs, zsh quoting, `make run ARGS=...`, starting
+  over.
+
+Every non-destructive command in it was run before committing and produces exactly the output the
+guide shows. The resume scenario was already verified for real in Entry 44.
+
+### Why
+- **The "how" had no home.** How to use the module was scattered across Entries 25, 29, 43 and 44,
+  and the DEVLOG is the wrong place to collect it. The DEVLOG records *why* decisions were taken and is
+  append-only, whereas a usage guide must be edited in place whenever a command changes.
+- **A module README, not the group README.** The root `README.md` belongs to the whole group (and its
+  C/C++ section is still the original template, see Entry 44). `cpp/README.md` lives entirely in this
+  module, so it can be kept accurate without touching shared files. The group can later link to it,
+  as the root README already intends to do for `java/README.md`.
+- **The assignment asks for it.** The repository must "include a README.md with detailed setup and
+  execution instructions", and instructors must be able to try the pipeline quickly.
+- **Commands safe to paste into zsh.** No inline `#` comments (interactive zsh may pass them on as
+  arguments), and single quotes for literal queries (`!"` inside double quotes leaves zsh at a
+  `dquote>` prompt). Both pitfalls actually happened while testing the CLI by hand.

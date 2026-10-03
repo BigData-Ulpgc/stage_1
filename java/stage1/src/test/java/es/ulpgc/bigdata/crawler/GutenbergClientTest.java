@@ -1,12 +1,13 @@
 package es.ulpgc.bigdata.crawler;
 
 import org.junit.jupiter.api.Test;
+import java.time.Duration;
 import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.*;
 
 class GutenbergClientTest {
 
-    private final GutenbergClient client = new GutenbergClient();
+    private final GutenbergClient client = new GutenbergClient(Duration.ofSeconds(10), Duration.ofSeconds(15));
 
     @Test
     void descargaUnLibroConocido() {

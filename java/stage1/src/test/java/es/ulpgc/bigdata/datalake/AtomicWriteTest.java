@@ -12,7 +12,7 @@ import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/** Tests de AbstractFileDatalake.writeAtomically, sin ningún datalake concreto. */
+/** Tests of AbstractFileDatalake.writeAtomically, without any concrete datalake. */
 class AtomicWriteTest {
 
     @TempDir Path tmp;
@@ -64,7 +64,7 @@ class AtomicWriteTest {
 
     @Test
     void siFallaElMovimientoNoDejaTmpNiTocaElDestino() throws IOException {
-        // El destino es una carpeta con contenido: el movimiento final tiene que fallar.
+        // The target is a folder with content: the final move has to fail.
         Path target = tmp.resolve("1342.body.txt");
         Files.createDirectories(target);
         Files.writeString(target.resolve("dentro.txt"), "x");

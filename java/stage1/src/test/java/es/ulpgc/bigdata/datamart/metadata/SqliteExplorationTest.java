@@ -18,8 +18,8 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Reto 14: SQLite "a mano" con JDBC, sin repositorio todavía.
- * Cada test abre la base, hace algo y la cierra, como haría un programa real.
+ * Challenge 14: SQLite "by hand" with JDBC, no repository yet.
+ * Each test opens the database, does something and closes it, as a real program would.
  */
 class SqliteExplorationTest {
 
@@ -33,7 +33,7 @@ class SqliteExplorationTest {
         return DriverManager.getConnection(SqliteSchema.jdbcUrl(tmp.resolve("metadata.db")));
     }
 
-    /** Conexión con el esquema ya creado. */
+    /** Connection with the schema already created. */
     private Connection openWithSchema() throws SQLException {
         Connection c = open();
         SqliteSchema.create(c);
@@ -64,19 +64,19 @@ class SqliteExplorationTest {
     }
 
     // ------------------------------------------------------------------
-    // Criterio: cerrar, reabrir y recuperar la fila
+    // Criterion: close, reopen and retrieve the row
     // ------------------------------------------------------------------
 
     @Test
     void laFilaSobreviveAlCerrarYReabrir() throws SQLException {
-        // 1ª "ejecución del programa": crea, inserta y cierra.
+        // 1st "program run": creates, inserts and closes.
         try (Connection c = openWithSchema();
              PreparedStatement ps = c.prepareStatement(INSERT_BOOK)) {
             insert(ps, 1342, "Pride and Prejudice", "Jane Austen");
         }
         assertTrue(Files.exists(tmp.resolve("metadata.db")), "la base es un fichero en disco");
 
-        // 2ª "ejecución": conexión nueva, mismo fichero.
+        // 2nd "run": new connection, same file.
         try (Connection c = open();
              PreparedStatement ps = c.prepareStatement(
                      "SELECT title, author, language, release_date, body_path, header_path "
@@ -101,20 +101,20 @@ class SqliteExplorationTest {
              PreparedStatement ps = c.prepareStatement(INSERT_BOOK)) {
             insert(ps, 1342, "Pride and Prejudice", "Jane Austen");
         }
-        try (Connection c = openWithSchema()) {        // CREATE ... IF NOT EXISTS otra vez
+        try (Connection c = openWithSchema()) {        // CREATE ... IF NOT EXISTS again
             assertEquals(1, count(c));
         }
     }
 
     // ------------------------------------------------------------------
-    // Criterio: qué protege PreparedStatement y por qué es reutilizable
+    // Criterion: what PreparedStatement protects and why it is reusable
     // ------------------------------------------------------------------
 
     @Test
     void concatenarSqlSeRompeConUnApostrofe() throws SQLException {
         String title = "Tom's Adventures";
         try (Connection c = openWithSchema(); Statement st = c.createStatement()) {
-            // MAL: el ' del título cierra la cadena SQL antes de tiempo.
+            // WRONG: the ' in the title closes the SQL string too early.
             String sql = "INSERT INTO books (book_id, title) VALUES (1, '" + title + "')";
             assertThrows(SQLException.class, () -> st.executeUpdate(sql));
         }
@@ -131,21 +131,21 @@ class SqliteExplorationTest {
                 ps.setInt(1, 1);
                 try (ResultSet rs = ps.executeQuery()) {
                     assertTrue(rs.next());
-                    assertEquals(malicious, rs.getString("title"));      // guardado literalmente
+                    assertEquals(malicious, rs.getString("title"));      // stored literally
                     assertEquals("Tom's Mother", rs.getString("author"));
                 }
             }
-            assertEquals(1, count(c));                                   // la tabla sigue ahí
+            assertEquals(1, count(c));                                   // the table is still there
         }
     }
 
     @Test
     void unMismoPreparedStatementSirveParaMuchasFilas() throws SQLException {
         try (Connection c = openWithSchema();
-             PreparedStatement ps = c.prepareStatement(INSERT_BOOK)) {  // se compila UNA vez
+             PreparedStatement ps = c.prepareStatement(INSERT_BOOK)) {  // compiled ONCE
             insert(ps, 84, "Frankenstein", "Mary Shelley");
             insert(ps, 158, "Emma", "Jane Austen");
-            insert(ps, 1342, "Pride and Prejudice", "Jane Austen");     // sólo cambian los valores
+            insert(ps, 1342, "Pride and Prejudice", "Jane Austen");     // only the values change
             assertEquals(3, count(c));
         }
     }
@@ -170,7 +170,7 @@ class SqliteExplorationTest {
     }
 
     // ------------------------------------------------------------------
-    // Pregunta: ¿qué aporta una PRIMARY KEY?
+    // Question: what does a PRIMARY KEY bring?
     // ------------------------------------------------------------------
 
     @Test
@@ -187,7 +187,7 @@ class SqliteExplorationTest {
     }
 
     // ------------------------------------------------------------------
-    // Índices: existen y SQLite los usa
+    // Indexes: they exist and SQLite uses them
     // ------------------------------------------------------------------
 
     @Test
@@ -204,7 +204,7 @@ class SqliteExplorationTest {
         assertEquals(List.of("idx_books_author", "idx_books_title"), indexes);
     }
 
-    /** Pregunta a SQLite cómo ejecutaría una consulta, sin ejecutarla. */
+    /** Asks SQLite how it would run a query, without running it. */
     private String queryPlan(Connection c, String sql) throws SQLException {
         StringBuilder plan = new StringBuilder();
         try (Statement st = c.createStatement();
@@ -219,15 +219,15 @@ class SqliteExplorationTest {
     @Test
     void sqliteUsaLosIndicesSoloCuandoPuede() throws SQLException {
         try (Connection c = openWithSchema()) {
-            // Buscar por id: va directo por la clave primaria.
+            // Search by id: goes straight through the primary key.
             assertTrue(queryPlan(c, "SELECT * FROM books WHERE book_id = 1342")
                     .contains("USING INTEGER PRIMARY KEY"));
 
-            // Igualdad por autor: usa idx_books_author.
+            // Equality by author: uses idx_books_author.
             assertTrue(queryPlan(c, "SELECT * FROM books WHERE author = 'Jane Austen'")
                     .contains("USING INDEX idx_books_author"));
 
-            // LIKE con % al principio: no puede usar el índice y recorre toda la tabla.
+            // LIKE with a leading %: it cannot use the index and scans the whole table.
             String likePlan = queryPlan(c, "SELECT * FROM books WHERE author LIKE '%austen%'");
             assertTrue(likePlan.contains("SCAN books"), likePlan);
             assertFalse(likePlan.contains("idx_books_author"), likePlan);

@@ -2,7 +2,7 @@
 
 #include <chrono>
 
-#include "stage1/time_based_datalake.hpp"
+#include "stage1/datalake/time_based_datalake.hpp"
 
 namespace stage1::testing {
 

@@ -19,16 +19,16 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * MetadataRepository sobre un fichero SQLite (shared/SPEC.md: tabla books).
+ * MetadataRepository on top of a SQLite file (shared/SPEC.md: books table).
  *
- * Mantiene UNA conexión abierta desde el constructor hasta close().
- * No es seguro usarlo desde varios hilos a la vez.
+ * It keeps ONE connection open from the constructor until close().
+ * It is not safe to use from several threads at once.
  */
 public class SqliteMetadataRepository implements MetadataRepository {
 
     /**
-     * Upsert: inserta la fila, y si ese book_id ya existe, actualiza sus columnas.
-     * "excluded" es la fila que se intentaba insertar.
+     * Upsert: inserts the row, and if that book_id already exists, updates its columns.
+     * "excluded" is the row that was being inserted.
      */
     private static final String UPSERT = """
             INSERT INTO books (book_id, title, author, language, release_date, body_path, header_path)
@@ -55,7 +55,7 @@ public class SqliteMetadataRepository implements MetadataRepository {
         try {
             Path parent = dbFile.toAbsolutePath().getParent();
             if (parent != null) {
-                Files.createDirectories(parent);        // p. ej. data/datamarts/
+                Files.createDirectories(parent);        // e.g. data/datamarts/
             }
         } catch (IOException e) {
             throw new UncheckedIOException("No se pudo crear la carpeta de " + dbFile, e);
@@ -69,7 +69,7 @@ public class SqliteMetadataRepository implements MetadataRepository {
     }
 
     // ------------------------------------------------------------------
-    // Escritura
+    // Writing
     // ------------------------------------------------------------------
 
     @Override
@@ -77,7 +77,7 @@ public class SqliteMetadataRepository implements MetadataRepository {
         Objects.requireNonNull(metadata, "metadata");
         try (PreparedStatement ps = connection.prepareStatement(UPSERT)) {
             bind(ps, metadata);
-            ps.executeUpdate();                          // autocommit: se confirma al momento
+            ps.executeUpdate();                          // autocommit: committed immediately
         } catch (SQLException e) {
             throw new MetadataRepositoryException("No se pudo guardar el libro " + metadata.bookId(), e);
         }
@@ -90,26 +90,26 @@ public class SqliteMetadataRepository implements MetadataRepository {
             return;
         }
         try {
-            connection.setAutoCommit(false);             // abre UNA transacción
+            connection.setAutoCommit(false);             // opens ONE transaction
             try (PreparedStatement ps = connection.prepareStatement(UPSERT)) {
                 for (BookMetadata metadata : batch) {
                     bind(ps, Objects.requireNonNull(metadata, "elemento null en el lote"));
-                    ps.addBatch();                       // se acumula, aún no se envía
+                    ps.addBatch();                       // accumulated, not sent yet
                 }
-                ps.executeBatch();                       // se envían todas las filas
-                connection.commit();                     // UN solo commit para todo el lote
+                ps.executeBatch();                       // all the rows are sent
+                connection.commit();                     // ONE single commit for the whole batch
             } catch (SQLException | RuntimeException e) {
-                connection.rollback();                   // todo o nada
+                connection.rollback();                   // all or nothing
                 throw e;
             } finally {
-                connection.setAutoCommit(true);          // save() vuelve a confirmar al momento
+                connection.setAutoCommit(true);          // save() commits immediately again
             }
         } catch (SQLException e) {
             throw new MetadataRepositoryException("No se pudo guardar el lote de " + batch.size() + " libros", e);
         }
     }
 
-    /** Rellena los 7 huecos del UPSERT, en el orden de sus columnas. */
+    /** Fills the 7 placeholders of the UPSERT, in the order of its columns. */
     private static void bind(PreparedStatement ps, BookMetadata m) throws SQLException {
         ps.setInt(1, m.bookId());
         setNullableString(ps, 2, m.title());
@@ -129,7 +129,7 @@ public class SqliteMetadataRepository implements MetadataRepository {
     }
 
     // ------------------------------------------------------------------
-    // Lectura
+    // Reading
     // ------------------------------------------------------------------
 
     @Override
@@ -141,7 +141,7 @@ public class SqliteMetadataRepository implements MetadataRepository {
     @Override
     public List<BookMetadata> findByAuthor(String author) {
         if (author == null) {
-            return List.of();                            // "= NULL" nunca coincide en SQL
+            return List.of();                            // "= NULL" never matches in SQL
         }
         return query(FIND_BY_AUTHOR, ps -> ps.setString(1, author));
     }
@@ -168,7 +168,7 @@ public class SqliteMetadataRepository implements MetadataRepository {
     @Override
     public void clear() {
         try (Statement st = connection.createStatement()) {
-            st.executeUpdate("DELETE FROM books");       // vacía la tabla; esquema e índices se quedan
+            st.executeUpdate("DELETE FROM books");       // empties the table; schema and indexes stay
         } catch (SQLException e) {
             throw new MetadataRepositoryException("No se pudo vaciar la tabla books", e);
         }
@@ -184,16 +184,16 @@ public class SqliteMetadataRepository implements MetadataRepository {
     }
 
     // ------------------------------------------------------------------
-    // Auxiliares de lectura
+    // Reading helpers
     // ------------------------------------------------------------------
 
-    /** Rellena los huecos de una consulta; puede lanzar SQLException. */
+    /** Fills the placeholders of a query; may throw SQLException. */
     @FunctionalInterface
     private interface Binder {
         void bind(PreparedStatement ps) throws SQLException;
     }
 
-    /** Ejecuta una SELECT y convierte cada fila en un BookMetadata, en orden. */
+    /** Runs a SELECT and turns each row into a BookMetadata, in order. */
     private List<BookMetadata> query(String sql, Binder binder) {
         try (PreparedStatement ps = connection.prepareStatement(sql)) {
             binder.bind(ps);

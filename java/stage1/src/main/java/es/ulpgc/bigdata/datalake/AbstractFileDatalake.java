@@ -17,19 +17,19 @@ import static java.nio.file.StandardCopyOption.ATOMIC_MOVE;
 import static java.nio.file.StandardCopyOption.REPLACE_EXISTING;
 
 /**
- * Lo que comparten los datalakes basados en ficheros (book, range, time).
- * Cada subclase sólo decide DÓNDE va cada libro; CÓMO se escribe y QUÉ
- * cuenta como libro guardado se define aquí, una sola vez.
+ * What the file-based datalakes (book, range, time) have in common.
+ * Each subclass only decides WHERE each book goes; HOW it is written and WHAT
+ * counts as a saved book is defined here, only once.
  *
- * Definición de "libro guardado": header y body existen como ficheros
- * regulares con su nombre definitivo. Un .tmp nunca cuenta.
+ * Definition of "saved book": header and body exist as regular
+ * files with their final name. A .tmp never counts.
  */
 public abstract class AbstractFileDatalake implements Datalake {
 
-    /** Sufijo de los ficheros a medio escribir. */
+    /** Suffix of half-written files. */
     static final String TMP_SUFFIX = ".tmp";
 
-    /** Id que save() podría haber escrito: "0" o sin ceros delante, máx. 9 dígitos. */
+    /** Id that save() could have written: "0" or no leading zeros, max. 9 digits. */
     private static final Pattern CANONICAL_ID = Pattern.compile("0|[1-9][0-9]{0,8}");
 
     protected final Path root;
@@ -39,13 +39,13 @@ public abstract class AbstractFileDatalake implements Datalake {
     }
 
     // ------------------------------------------------------------------
-    // Escritura
+    // Writing
     // ------------------------------------------------------------------
 
     /**
-     * Guarda un libro en las rutas indicadas por la subclase.
-     * Header primero y body después: un libro sólo "existe" cuando ambos
-     * están en su sitio, así que un corte a mitad deja un libro NO guardado.
+     * Saves a book in the paths given by the subclass.
+     * Header first and body afterwards: a book only "exists" when both
+     * are in place, so a crash halfway leaves a NOT saved book.
      */
     protected BookLocation writeBook(RawBook book, Path header, Path body) {
         Objects.requireNonNull(book, "book");
@@ -64,8 +64,8 @@ public abstract class AbstractFileDatalake implements Datalake {
     }
 
     /**
-     * Escribe content en target sin que nadie pueda ver nunca un target a medias:
-     * crear directorio -> escribir target.tmp -> mover target.tmp a target.
+     * Writes content to target without anyone ever being able to see a half-written target:
+     * create directory -> write target.tmp -> move target.tmp to target.
      */
     static void writeAtomically(Path target, String content) throws IOException {
         Files.createDirectories(target.getParent());
@@ -75,21 +75,21 @@ public abstract class AbstractFileDatalake implements Datalake {
             try {
                 Files.move(tmp, target, ATOMIC_MOVE, REPLACE_EXISTING);
             } catch (AtomicMoveNotSupportedException e) {
-                // El sistema de ficheros no garantiza atomicidad: seguimos,
-                // pero el hueco en el que target puede verse a medias ya no es cero.
+                // The file system does not guarantee atomicity: we carry on,
+                // but the window in which target can be seen half-written is no longer zero.
                 Files.move(tmp, target, REPLACE_EXISTING);
             }
         } catch (IOException e) {
-            Files.deleteIfExists(tmp);   // no dejar basura si algo falla
+            Files.deleteIfExists(tmp);   // do not leave garbage if something fails
             throw e;
         }
     }
 
     // ------------------------------------------------------------------
-    // Lectura
+    // Reading
     // ------------------------------------------------------------------
 
-    /** Única definición de "libro guardado", usada por locate y listBookIds. */
+    /** The only definition of "saved book", used by locate and listBookIds. */
     protected static boolean isCompleteBook(Path header, Path body) {
         return Files.isRegularFile(header) && Files.isRegularFile(body);
     }

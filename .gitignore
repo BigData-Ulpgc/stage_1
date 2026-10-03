@@ -56,9 +56,20 @@ compile_commands.json
 *.dylib
 *.dSYM/
 cpp/data/
+cpp/benchmarks/work/
+!cpp/benchmarks/results/*.csv
 
 # ---- Datos del Proyecto y Bases de Datos (¡CRÍTICO!) ----
 data/
 *.db
 *.sqlite
 *.sqlite3
+
+# ---- Datos generados por la implementación Java ----
+java/stage1/data/
+java/stage1/benchmarks/work/
+!java/stage1/benchmarks/results/*.csv
+
+
+# ---- Material de vídeo (solo local) ----
+video/

@@ -19,11 +19,11 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
- * Necesita un MongoDB arrancado (docker compose up -d). Si no lo hay, estos tests
- * se SALTAN en vez de fallar, para que "mvn test" funcione sin Docker.
+ * Needs a running MongoDB (docker compose up -d). If there is none, these tests
+ * are SKIPPED instead of failing, so that "mvn test" works without Docker.
  *
- * Dirección: variable de entorno MONGO_URI, o mongodb://localhost:27017.
- * Usa la base "search_engine_test" y una colección nueva por test: nunca toca el índice real.
+ * Address: MONGO_URI environment variable, or mongodb://localhost:27017.
+ * Uses the "search_engine_test" database and a new collection per test: it never touches the real index.
  */
 class MongoInvertedIndexTest {
 
@@ -35,10 +35,10 @@ class MongoInvertedIndexTest {
 
     private String collectionName;
     private MongoInvertedIndex index;
-    private MongoClient rawClient;                       // para mirar lo que hay de verdad en Mongo
+    private MongoClient rawClient;                       // to look at what is really in Mongo
     private MongoCollection<Document> raw;
 
-    /** ¿Responde Mongo? Se pregunta una vez y se recuerda. */
+    /** Does Mongo answer? It is asked once and remembered. */
     private static synchronized boolean mongoAvailable() {
         if (available == null) {
             MongoClientSettings quick = MongoClientSettings.builder()
@@ -67,7 +67,7 @@ class MongoInvertedIndexTest {
     @AfterEach
     void tearDown() {
         if (index != null) {
-            index.clear();                               // no dejar colecciones de prueba
+            index.clear();                               // do not leave test collections behind
             index.close();
         }
         if (rawClient != null) {
@@ -90,18 +90,18 @@ class MongoInvertedIndexTest {
         return doc == null ? null : doc.getList("postings", Object.class);
     }
 
-    // --- Criterios del reto --------------------------------------------------
+    // --- Challenge criteria --------------------------------------------------
 
     @Test
     void indexarDosVecesNoDuplicaIds() {
         index.addDocument(10, Set.of("boat"));
-        index.addDocument(10, Set.of("boat"));               // dos veces en el mismo lote
+        index.addDocument(10, Set.of("boat"));               // twice in the same batch
         index.flush();
-        index.addDocument(10, Set.of("boat"));               // y otra en un lote posterior
+        index.addDocument(10, Set.of("boat"));               // and once more in a later batch
         index.flush();
 
         assertEquals(List.of(10), index.postings("boat"));
-        assertEquals(1, storedArray("boat").size());          // también en Mongo, no sólo al leer
+        assertEquals(1, storedArray("boat").size());          // also in Mongo, not only when reading
         assertEquals(1, raw.countDocuments(new Document("term", "boat")));
     }
 
@@ -111,7 +111,7 @@ class MongoInvertedIndexTest {
         index.flush();
         index.close();
 
-        index = open();                                       // "otra ejecución del programa"
+        index = open();                                       // "another run of the program"
 
         assertEquals(List.of(10, 20), index.postings("boat"));
         assertEquals(List.of(10, 30), index.postings("red"));
@@ -124,19 +124,19 @@ class MongoInvertedIndexTest {
         index.flush();
         assertTrue(index.diskUsageBytes() > 0);
 
-        index.clear();                                        // "siguiente repetición del benchmark"
+        index.clear();                                        // "next benchmark repetition"
 
         assertEquals(List.of(), index.postings("boat"));
         assertEquals(0, index.diskUsageBytes());
         assertEquals(0, raw.countDocuments());
 
-        addPaperBooks(index);                                 // la segunda repetición funciona igual
+        addPaperBooks(index);                                 // the second repetition works the same
         index.flush();
         assertEquals(List.of(10, 20), index.postings("boat"));
         assertTrue(hasUniqueIndexOnTerm(), "clear debe dejar el índice único recreado al volver a escribir");
     }
 
-    // --- Estructura en Mongo --------------------------------------------------------
+    // --- Structure in Mongo ---------------------------------------------------------
 
     private boolean hasUniqueIndexOnTerm() {
         for (Document idx : raw.listIndexes().into(new ArrayList<>())) {
@@ -176,11 +176,11 @@ class MongoInvertedIndexTest {
         index.addDocument(10, Set.of("red"));
         index.flush();
 
-        assertEquals(List.of(30, 10), storedArray("red"));    // así queda en Mongo
-        assertEquals(List.of(10, 30), index.postings("red"));  // así lo devuelve el índice
+        assertEquals(List.of(30, 10), storedArray("red"));    // this is how it ends up in Mongo
+        assertEquals(List.of(10, 30), index.postings("red"));  // this is how the index returns it
     }
 
-    // --- addDocument acumula hasta flush -----------------------------------------
+    // --- addDocument accumulates until flush -------------------------------------
 
     @Test
     void loAnadidoSeVeAntesDelFlushPeroNoLlegaAMongoSinEl() {
@@ -201,7 +201,7 @@ class MongoInvertedIndexTest {
         addPaperBooks(index);
         index.flush();
         assertEquals(List.of(), index.postings("whale"));
-        assertEquals(List.of(), index.postings("Boat"));      // Mongo distingue mayúsculas
+        assertEquals(List.of(), index.postings("Boat"));      // Mongo is case-sensitive
     }
 
     @Test

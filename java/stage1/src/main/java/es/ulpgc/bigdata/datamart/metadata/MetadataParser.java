@@ -8,20 +8,20 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Extrae los metadatos de un header de Project Gutenberg (shared/SPEC.md).
+ * Extracts the metadata from a Project Gutenberg header (shared/SPEC.md).
  *
- * Reglas del contrato común (iguales en Java, Python y C):
- *  - se busca la PRIMERA línea que empieza por "Title:", "Author:", ...;
- *  - sólo cuenta la primera línea del valor;
- *  - se recortan los espacios; un campo ausente o vacío es null;
- *  - en release_date se descarta lo que va entre corchetes: "[eBook #1342]".
+ * Rules of the common contract (the same in Java, Python and C):
+ *  - the FIRST line starting with "Title:", "Author:", ... is searched for;
+ *  - only the first line of the value counts;
+ *  - spaces are trimmed; a missing or empty field is null;
+ *  - in release_date whatever is between brackets is discarded: "[eBook #1342]".
  *
- * No lee ficheros ni guarda nada: recibe texto y devuelve un BookMetadata.
+ * It does not read files or save anything: it receives text and returns a BookMetadata.
  */
 public class MetadataParser {
 
-    // Las regex del SPEC, compiladas una sola vez al cargar la clase.
-    // MULTILINE: ^ y $ significan principio y fin de CADA LÍNEA, no del texto entero.
+    // The SPEC regexes, compiled only once when the class is loaded.
+    // MULTILINE: ^ and $ mean start and end of EACH LINE, not of the whole text.
     private static final Pattern TITLE =
             Pattern.compile("^Title:\\s*(.+)$", Pattern.MULTILINE);
     private static final Pattern AUTHOR =
@@ -32,8 +32,8 @@ public class MetadataParser {
             Pattern.compile("^Language:\\s*(.+)$", Pattern.MULTILINE);
 
     /**
-     * @param location de dónde salen el id y las rutas (lo devolvió el datalake)
-     * @param header   contenido del header.txt de ese libro
+     * @param location where the id and the paths come from (returned by the datalake)
+     * @param header   content of that book's header.txt
      */
     public BookMetadata parse(BookLocation location, String header) {
         Objects.requireNonNull(location, "location");
@@ -51,12 +51,12 @@ public class MetadataParser {
                 location.headerPath());
     }
 
-    /** CRLF (Windows) -> LF, para que ningún \r acabe dentro de un valor. */
+    /** CRLF (Windows) -> LF, so that no \r ends up inside a value. */
     static String normalizeLineEndings(String text) {
         return text.replace("\r\n", "\n");
     }
 
-    /** Grupo 1 de la primera coincidencia, recortado; null si no hay o queda vacío. */
+    /** Group 1 of the first match, trimmed; null if there is none or it ends up empty. */
     static String firstMatch(Pattern pattern, String text) {
         Matcher m = pattern.matcher(text);
         if (!m.find()) {

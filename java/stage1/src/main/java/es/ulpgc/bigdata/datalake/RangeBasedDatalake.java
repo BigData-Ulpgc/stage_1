@@ -16,10 +16,10 @@ import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
- * Datalake organizado por rangos de 1000 ids (shared/SPEC.md, sección 3):
- *   <root>/<INI>-<FIN>/<ID>.header.txt
- *   <root>/<INI>-<FIN>/<ID>.body.txt
- * con INI = (ID / 1000) * 1000 y FIN = INI + 999, ambos con 5 dígitos.
+ * Datalake organised by ranges of 1000 ids (shared/SPEC.md, section 3):
+ *   <root>/<START>-<END>/<ID>.header.txt
+ *   <root>/<START>-<END>/<ID>.body.txt
+ * with START = (ID / 1000) * 1000 and END = START + 999, both with 5 digits.
  */
 public class RangeBasedDatalake extends AbstractFileDatalake {
 
@@ -37,7 +37,7 @@ public class RangeBasedDatalake extends AbstractFileDatalake {
         return "range";
     }
 
-    /** id -> nombre de la carpeta de su rango. */
+    /** id -> name of the folder of its range. */
     static String rangeFolder(int id) {
         if (id < 0) {
             throw new IllegalArgumentException("book_id negativo: " + id);
@@ -98,7 +98,7 @@ public class RangeBasedDatalake extends AbstractFileDatalake {
             for (Path file : (Iterable<Path>) files::iterator) {
                 Integer id = parseIdWithSuffix(file.getFileName().toString(), BODY_SUFFIX);
                 if (id != null
-                        && rangeFolder(id).equals(dirName)                 // en su rango
+                        && rangeFolder(id).equals(dirName)                 // in its range
                         && isCompleteBook(rangeDir.resolve(id + HEADER_SUFFIX), file)) {
                     ids.add(id);
                 }

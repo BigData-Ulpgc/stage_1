@@ -49,29 +49,57 @@ target_compile_options(stage1_deps INTERFACE -Wall -Wextra -Wpedantic)
 
 # ---- Core library: all the project logic; shared by the executable and the tests ----
 add_library(stage1_core
-  src/tokenizer.cpp
-  src/stopwords.cpp
-  src/book_splitter.cpp
-  src/curl_http_client.cpp
-  src/gutenberg_client.cpp
-  src/metadata.cpp
-  src/metadata_store.cpp
-  src/file_io.cpp
-  src/book_based_datalake.cpp
-  src/range_based_datalake.cpp
-  src/time_based_datalake.cpp
-  src/inverted_index.cpp
-  src/monolithic_index_writer.cpp
-  src/hierarchical_index_writer.cpp
-  src/mongo_index_writer.cpp
-  src/query_engine.cpp
-  src/control_log.cpp
-  src/book_id_list.cpp)
+  src/datamart/index/tokenizer.cpp
+  src/datamart/index/stopwords.cpp
+  src/crawler/book_splitter.cpp
+  src/crawler/curl_http_client.cpp
+  src/crawler/gutenberg_client.cpp
+  src/datamart/metadata/metadata.cpp
+  src/datamart/metadata/metadata_store.cpp
+  src/util/file_io.cpp
+  src/datalake/book_based_datalake.cpp
+  src/datalake/range_based_datalake.cpp
+  src/datalake/time_based_datalake.cpp
+  src/datamart/index/inverted_index.cpp
+  src/datamart/index/monolithic_index_writer.cpp
+  src/datamart/index/hierarchical_index_writer.cpp
+  src/datamart/index/mongo_index_writer.cpp
+  src/query/query_engine.cpp
+  src/datamart/index/index_readers.cpp
+  src/control/control_log.cpp
+  src/control/book_id_list.cpp
+  src/control/pipeline.cpp
+  src/benchmark/benchmark.cpp
+  src/benchmark/sample_books.cpp
+  src/benchmark/index_build_benchmark.cpp
+  src/benchmark/query_list.cpp
+  src/benchmark/index_query_benchmark.cpp
+  src/benchmark/datalake_write_benchmark.cpp
+  src/benchmark/datalake_lookup_benchmark.cpp
+  src/benchmark/datalake_incremental_benchmark.cpp
+  src/benchmark/datalake_recovery_benchmark.cpp
+  src/benchmark/datalake_storage_benchmark.cpp
+  src/benchmark/metadata_insert_benchmark.cpp
+  src/benchmark/metadata_query_benchmark.cpp
+  src/benchmark/index_update_benchmark.cpp
+  src/benchmark/index_memory_benchmark.cpp
+  src/benchmark/index_disk_benchmark.cpp)
 target_link_libraries(stage1_core PUBLIC stage1_deps)
 
 # ---- Executable ----
-add_executable(search_engine_stage1 src/main.cpp)
+# cli_commands.cpp belongs here, not in stage1_core: it is the only code that
+# reads the directory macros below, which only this target defines.
+add_executable(search_engine_stage1
+  src/main.cpp
+  src/cli_commands.cpp)
 target_link_libraries(search_engine_stage1 PRIVATE stage1_core)
+# Lets cli_commands.cpp find shared/ and its own data/ directory regardless of
+# the working directory it is launched from (same pattern as the tests' own
+# STAGE1_SHARED_DIR, see tests/CMakeLists.txt).
+target_compile_definitions(search_engine_stage1 PRIVATE
+  STAGE1_SHARED_DIR="${CMAKE_SOURCE_DIR}/../shared"
+  STAGE1_DATA_DIR="${CMAKE_SOURCE_DIR}/data"
+  STAGE1_BENCHMARKS_DIR="${CMAKE_SOURCE_DIR}/benchmarks")
 
 # ---- Tests ----
 enable_testing()

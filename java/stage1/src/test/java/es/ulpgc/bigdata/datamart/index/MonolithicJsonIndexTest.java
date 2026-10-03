@@ -23,7 +23,7 @@ class MonolithicJsonIndexTest {
 
     @BeforeEach
     void setUp() {
-        jsonFile = tmp.resolve("datamarts/inverted_index.json");   // la carpeta aún no existe
+        jsonFile = tmp.resolve("datamarts/inverted_index.json");   // the folder does not exist yet
     }
 
     private MonolithicJsonIndex open() {
@@ -40,7 +40,7 @@ class MonolithicJsonIndexTest {
         return Files.readString(jsonFile, StandardCharsets.UTF_8);
     }
 
-    // --- Criterios del reto --------------------------------------------------
+    // --- Challenge criteria --------------------------------------------------
 
     @Test
     void cerrarYReabrirConservaLosPostings() {
@@ -60,13 +60,13 @@ class MonolithicJsonIndexTest {
     @Test
     void elJsonTieneUnaClavePorTerminoYListasOrdenadas() throws IOException {
         try (MonolithicJsonIndex index = open()) {
-            index.addDocument(30, Set.of("red", "island"));   // desordenados a propósito
+            index.addDocument(30, Set.of("red", "island"));   // unsorted on purpose
             index.addDocument(20, Set.of("blue", "boat", "sails", "fast"));
             index.addDocument(10, Set.of("red", "boat", "sails"));
             index.flush();
         }
 
-        // Exactamente el Apéndice A: términos en orden alfabético, ids ascendentes.
+        // Exactly Appendix A: terms in alphabetical order, ascending ids.
         assertEquals("{\"blue\":[20],\"boat\":[10,20],\"fast\":[20],"
                 + "\"island\":[30],\"red\":[10,30],\"sails\":[10,20]}", json());
     }
@@ -77,15 +77,15 @@ class MonolithicJsonIndexTest {
             index.addDocument(10, Set.of("red", "boat"));
             index.flush();
         }
-        try (MonolithicJsonIndex index = open()) {          // otra ejecución del programa
+        try (MonolithicJsonIndex index = open()) {          // another run of the program
             index.addDocument(20, Set.of("boat", "blue"));
             index.flush();
         }
 
         try (MonolithicJsonIndex reopened = open()) {
-            assertEquals(List.of(10), reopened.postings("red"));       // del primer flush
-            assertEquals(List.of(10, 20), reopened.postings("boat"));  // mezcla de los dos
-            assertEquals(List.of(20), reopened.postings("blue"));      // del segundo
+            assertEquals(List.of(10), reopened.postings("red"));       // from the first flush
+            assertEquals(List.of(10, 20), reopened.postings("boat"));  // mix of both
+            assertEquals(List.of(20), reopened.postings("blue"));      // from the second
         }
     }
 
@@ -95,8 +95,8 @@ class MonolithicJsonIndexTest {
     void sinFlushNadaLlegaAlDisco() {
         try (MonolithicJsonIndex index = open()) {
             addPaperBooks(index);
-            assertEquals(List.of(10, 20), index.postings("boat"));      // en memoria sí
-        }                                                               // close NO hace flush
+            assertEquals(List.of(10, 20), index.postings("boat"));      // in memory, yes
+        }                                                               // close does NOT flush
 
         assertFalse(Files.exists(jsonFile));
         try (MonolithicJsonIndex reopened = open()) {
@@ -121,20 +121,20 @@ class MonolithicJsonIndexTest {
         try (MonolithicJsonIndex index = open()) {
             addPaperBooks(index);
             index.flush();
-            Files.writeString(jsonFile, "{\"marca\":[1]}");            // si se reescribe, desaparece
+            Files.writeString(jsonFile, "{\"marca\":[1]}");            // if it is rewritten, it disappears
 
-            index.addDocument(10, Set.of("red"));                      // el 10 ya estaba en red
+            index.addDocument(10, Set.of("red"));                      // 10 was already in red
             index.flush();
 
             assertEquals("{\"marca\":[1]}", json());
         }
     }
 
-    // --- Carga ----------------------------------------------------------------
+    // --- Loading --------------------------------------------------------------
 
     @Test
     void cargaUnJsonDesordenadoConEspaciosYDuplicados() throws IOException {
-        // Así podría escribirlo otro programa (por ejemplo, json.dump de Python con indent).
+        // This is how another program could write it (for example, Python's json.dump with indent).
         Files.createDirectories(jsonFile.getParent());
         Files.writeString(jsonFile, """
                 {
@@ -152,13 +152,13 @@ class MonolithicJsonIndexTest {
     @Test
     void unJsonCorruptoNoSeSustituyePorUnIndiceVacio() throws IOException {
         Files.createDirectories(jsonFile.getParent());
-        Files.writeString(jsonFile, "{\"boat\":[10,20");               // cortado a mitad
+        Files.writeString(jsonFile, "{\"boat\":[10,20");               // cut halfway
 
         assertThrows(UncheckedIOException.class, this::open);
-        assertEquals("{\"boat\":[10,20", json());                      // el fichero sigue intacto
+        assertEquals("{\"boat\":[10,20", json());                      // the file is still intact
     }
 
-    // --- clear y tamaño ---------------------------------------------------------
+    // --- clear and size ---------------------------------------------------------
 
     @Test
     void clearBorraMemoriaYFichero() {

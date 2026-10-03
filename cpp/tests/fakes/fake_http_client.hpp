@@ -4,7 +4,7 @@
 #include <utility>
 #include <vector>
 
-#include "stage1/http_client.hpp"
+#include "stage1/crawler/http_client.hpp"
 
 namespace stage1::testing {
 

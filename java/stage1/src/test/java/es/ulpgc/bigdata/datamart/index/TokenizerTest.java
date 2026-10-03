@@ -14,14 +14,14 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class TokenizerTest {
 
-    /** Un subconjunto de shared/stopwords.txt, suficiente para los tests. */
+    /** A subset of shared/stopwords.txt, enough for the tests. */
     private final Tokenizer tokenizer = new Tokenizer(Set.of("the", "and", "of", "in", "is"));
 
     private List<String> tokens(String text) {
         return tokenizer.tokenize(text);
     }
 
-    // --- Criterios del reto --------------------------------------------------
+    // --- Challenge criteria --------------------------------------------------
 
     @Test
     void boatBoatDaDosTokensPeroUnSoloTermino() {
@@ -31,11 +31,11 @@ class TokenizerTest {
 
     @Test
     void losAcentosYLaEnieSonSeparadores() {
-        // é, ï, ñ no son A-Z/a-z/0-9: cortan la palabra en dos.
+        // é, ï, ñ are not A-Z/a-z/0-9: they cut the word in two.
         assertEquals(List.of("caf", "na", "ve", "se", "or"), tokens("café naïve señor"));
     }
 
-    // --- Los casos que pide la misión ---------------------------------------
+    // --- The cases the mission asks for -------------------------------------
 
     @Test
     void mayusculasPasanAMinusculas() {
@@ -49,18 +49,18 @@ class TokenizerTest {
 
     @Test
     void losApostrofesSeparanYLoQueQuedaCortoSeDescarta() {
-        // "don't" -> "don" + "t"; "Mary's" -> "mary" + "s"; "t" y "s" miden 1.
+        // "don't" -> "don" + "t"; "Mary's" -> "mary" + "s"; "t" and "s" have length 1.
         assertEquals(List.of("don", "mary", "cat"), tokens("don't Mary's cat"));
     }
 
     @Test
     void elApostrofeTipograficoDeGutenbergTambienSepara() {
-        assertEquals(List.of("don", "wait"), tokens("don\u2019t\u2014wait"));   // ’ y —
+        assertEquals(List.of("don", "wait"), tokens("don\u2019t\u2014wait"));   // ’ and —
     }
 
     @Test
     void losNumerosSonTokensYSeMezclanConLetras() {
-        // "2" mide 1 y se descarta; "3rd" y "abc123def" son un solo token cada uno.
+        // "2" has length 1 and is discarded; "3rd" and "abc123def" are a single token each.
         assertEquals(List.of("1813", "3rd", "abc123def"), tokens("1813, 2... 3rd abc123def"));
     }
 
@@ -74,7 +74,7 @@ class TokenizerTest {
         assertEquals(List.of("cat", "hat"), tokens("The cat AND THE hat"));
     }
 
-    // --- Bordes -------------------------------------------------------------
+    // --- Edge cases ---------------------------------------------------------
 
     @Test
     void textoVacioOSoloSeparadoresNoDaTokens() {
@@ -89,13 +89,13 @@ class TokenizerTest {
 
     @Test
     void losDigitosNoAsciiSonSeparadores() {
-        // Character.isDigit('٣') es true; el contrato sólo acepta 0-9.
+        // Character.isDigit('٣') is true; the contract only accepts 0-9.
         assertEquals(List.of(), tokens("\u0663\u0664"));
     }
 
     @Test
     void noDependeDelIdiomaDelOrdenador() {
-        // En turco, "TITLE".toLowerCase() da "tıtle" (i sin punto).
+        // In Turkish, "TITLE".toLowerCase() gives "tıtle" (dotless i).
         Locale original = Locale.getDefault();
         try {
             Locale.setDefault(Locale.forLanguageTag("tr"));
@@ -126,7 +126,7 @@ class TokenizerTest {
         assertThrows(UnsupportedOperationException.class, () -> tokenizer.uniqueTerms("red boat").add("x"));
     }
 
-    // --- Fichero de stopwords -----------------------------------------------
+    // --- Stopwords file -----------------------------------------------------
 
     @TempDir Path tmp;
 
@@ -138,6 +138,6 @@ class TokenizerTest {
         Tokenizer t = Tokenizer.fromStopwordsFile(file);
 
         assertEquals(List.of("cat", "hat"), t.tokenize("The cat and the hat of"));
-        assertEquals(List.of("comentario"), t.tokenize("# comentario"));   // sólo es comentario en el fichero
+        assertEquals(List.of("comentario"), t.tokenize("# comentario"));   // it is only a comment in the file
     }
 }

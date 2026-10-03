@@ -14,17 +14,17 @@ import java.util.stream.Stream;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Tests que cualquier InvertedIndex debe pasar, se guarde como se guarde.
- * Cada test se ejecuta una vez por implementación.
+ * Tests that any InvertedIndex must pass, however it is stored.
+ * Each test runs once per implementation.
  */
 class InvertedIndexContractTest {
 
     @TempDir Path tmp;
 
     /**
-     * Implementaciones a probar: nombre esperado + receta para crear una vacía.
-     * La receta recibe una carpeta temporal para los índices que usan disco.
-     * Añade aquí una línea en los retos 19 (monolithic), 22 (hierarchical) y 23 (mongo).
+     * Implementations to test: expected name + recipe to create an empty one.
+     * The recipe receives a temporary folder for the indexes that use disk.
+     * Add a line here in challenges 19 (monolithic), 22 (hierarchical) and 23 (mongo).
      */
     static Stream<Arguments> indexes() {
         return Stream.of(
@@ -39,7 +39,7 @@ class InvertedIndexContractTest {
         return factory.apply(tmp);
     }
 
-    /** Los tres libros del ejercicio en papel, ya tokenizados. */
+    /** The three books of the paper exercise, already tokenized. */
     private static void addPaperBooks(InvertedIndex index) {
         index.addDocument(10, Set.of("red", "boat", "sails"));
         index.addDocument(20, Set.of("blue", "boat", "sails", "fast"));
@@ -47,15 +47,15 @@ class InvertedIndexContractTest {
     }
 
     /**
-     * Una "búsqueda" que sólo conoce la interfaz: no sabe si el índice es
-     * memoria, JSON o Mongo. El buscador de verdad llega en el reto 20.
+     * A "search" that only knows the interface: it does not know whether the index is
+     * memory, JSON or Mongo. The real search engine arrives in challenge 20.
      */
     private static List<Integer> searchAnd(InvertedIndex index, String a, String b) {
         List<Integer> second = index.postings(b);
         return index.postings(a).stream().filter(second::contains).toList();
     }
 
-    // --- Identidad ----------------------------------------------------------
+    // --- Identity -----------------------------------------------------------
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("indexes")
@@ -65,7 +65,7 @@ class InvertedIndexContractTest {
         }
     }
 
-    // --- addDocument y postings --------------------------------------------
+    // --- addDocument and postings ------------------------------------------
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("indexes")
@@ -73,7 +73,7 @@ class InvertedIndexContractTest {
         try (InvertedIndex index = create(factory)) {
             index.addDocument(30, Set.of("red"));
             index.addDocument(10, Set.of("red"));
-            index.addDocument(10, Set.of("red"));            // otra vez el mismo libro
+            index.addDocument(10, Set.of("red"));            // the same book again
 
             assertEquals(List.of(10, 30), index.postings("red"));
         }
@@ -103,7 +103,7 @@ class InvertedIndexContractTest {
     @MethodSource("indexes")
     void seVeLoAnadidoAntesDelFlush(String name, Function<Path, InvertedIndex> factory) {
         try (InvertedIndex index = create(factory)) {
-            addPaperBooks(index);                            // sin flush
+            addPaperBooks(index);                            // without flush
             assertEquals(List.of(10, 20), index.postings("boat"));
         }
     }
@@ -116,7 +116,7 @@ class InvertedIndexContractTest {
         try (InvertedIndex index = create(factory)) {
             addPaperBooks(index);
             index.flush();
-            index.flush();                                   // dos veces seguidas: sin efectos raros
+            index.flush();                                   // twice in a row: no strange effects
 
             assertEquals(List.of(10, 20), index.postings("boat"));
             assertEquals(List.of(10, 30), index.postings("red"));
@@ -152,7 +152,7 @@ class InvertedIndexContractTest {
             assertEquals(List.of(), index.postings("boat"));
             assertEquals(0, index.diskUsageBytes());
 
-            index.addDocument(99, Set.of("boat"));           // se puede volver a usar
+            index.addDocument(99, Set.of("boat"));           // it can be used again
             assertEquals(List.of(99), index.postings("boat"));
         }
     }
@@ -166,7 +166,7 @@ class InvertedIndexContractTest {
             List<Integer> first = index.postings("boat");
             long firstSize = index.diskUsageBytes();
 
-            index.clear();                                   // "siguiente repetición del benchmark"
+            index.clear();                                   // "next benchmark repetition"
             addPaperBooks(index);
             index.flush();
 
@@ -188,7 +188,7 @@ class InvertedIndexContractTest {
         }
     }
 
-    // --- Búsqueda que sólo conoce la interfaz -------------------------------
+    // --- Search that only knows the interface -------------------------------
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("indexes")

@@ -1,0 +1,3 @@
+language,experiment,structure,dataset_size,repetition,metric,value,unit
+cpp,index_memory,in_memory_index,15,1,rss_delta,12861440.000,bytes
+cpp,index_memory,monolithic,15,1,rss_delta,5242880.000,bytes

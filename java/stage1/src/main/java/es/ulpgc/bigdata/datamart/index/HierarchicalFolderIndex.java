@@ -23,22 +23,22 @@ import static java.nio.file.StandardCopyOption.ATOMIC_MOVE;
 import static java.nio.file.StandardCopyOption.REPLACE_EXISTING;
 
 /**
- * Índice invertido con un fichero por término (shared/SPEC.md, sección 6):
+ * Inverted index with one file per term (shared/SPEC.md, section 6):
  *
  *   <root>/B/boat.txt      10
  *                          20
- *   <root>/1/1813.txt      84      (términos que empiezan por dígito: carpeta del dígito)
+ *   <root>/1/1813.txt      84      (terms starting with a digit: folder of that digit)
  *
- * Carpeta = primer carácter del término en mayúscula; los dígitos no cambian.
- * Cada fichero: un id por línea, ordenados y sin repetir.
+ * Folder = first character of the term in uppercase; digits do not change.
+ * Each file: one id per line, sorted and without repetitions.
  *
- * addDocument ACUMULA en memoria; flush escribe sólo los ficheros de los términos
- * que han cambiado, cada uno con temporal + mover. postings lee sólo el fichero
- * del término pedido y le suma lo pendiente.
+ * addDocument ACCUMULATES in memory; flush writes only the files of the terms
+ * that have changed, each one with temp file + move. postings reads only the file
+ * of the requested term and adds what is pending.
  */
 public class HierarchicalFolderIndex implements InvertedIndex {
 
-    /** Lo que produce el Tokenizer: sólo a-z y 0-9. */
+    /** What the Tokenizer produces: only a-z and 0-9. */
     private static final Pattern VALID_TERM = Pattern.compile("[a-z0-9]+");
 
     private static final String EXTENSION = ".txt";
@@ -46,7 +46,7 @@ public class HierarchicalFolderIndex implements InvertedIndex {
 
     private final Path root;
 
-    /** Ids añadidos desde el último flush, por término. */
+    /** Ids added since the last flush, per term. */
     private final Map<String, SortedSet<Integer>> pending = new HashMap<>();
 
     public HierarchicalFolderIndex(Path root) {
@@ -59,7 +59,7 @@ public class HierarchicalFolderIndex implements InvertedIndex {
     }
 
     // ------------------------------------------------------------------
-    // Dónde vive cada término
+    // Where each term lives
     // ------------------------------------------------------------------
 
     /** "adventure" -> <root>/A/adventure.txt ; "1813" -> <root>/1/1813.txt */
@@ -80,27 +80,27 @@ public class HierarchicalFolderIndex implements InvertedIndex {
     }
 
     // ------------------------------------------------------------------
-    // addDocument y postings
+    // addDocument and postings
     // ------------------------------------------------------------------
 
-    /** Sólo en memoria: no toca el disco hasta flush. */
+    /** Only in memory: does not touch the disk until flush. */
     @Override
     public void addDocument(int bookId, Set<String> terms) {
         if (bookId < 0) {
             throw new IllegalArgumentException("book_id negativo: " + bookId);
         }
         Objects.requireNonNull(terms, "terms");
-        terms.forEach(HierarchicalFolderIndex::requireValidTerm);   // todos válidos antes de tocar nada
+        terms.forEach(HierarchicalFolderIndex::requireValidTerm);   // all valid before touching anything
         for (String term : terms) {
             pending.computeIfAbsent(term, t -> new TreeSet<>()).add(bookId);
         }
     }
 
-    /** Lee SÓLO el fichero de este término y le suma lo que aún no se ha guardado. */
+    /** Reads ONLY this term's file and adds what has not been saved yet. */
     @Override
     public List<Integer> postings(String term) {
         if (!isValidTerm(term)) {
-            return List.of();                 // "Boat" no es un término (y en Windows/Mac encontraría boat.txt)
+            return List.of();                 // "Boat" is not a term (and on Windows/Mac it would find boat.txt)
         }
         SortedSet<Integer> ids = readIds(termFile(term));
         SortedSet<Integer> notYetSaved = pending.get(term);
@@ -111,26 +111,26 @@ public class HierarchicalFolderIndex implements InvertedIndex {
     }
 
     // ------------------------------------------------------------------
-    // Persistencia
+    // Persistence
     // ------------------------------------------------------------------
 
     /**
-     * Por cada término con cambios: leer su fichero, unir los ids nuevos y, si algo
-     * cambió, reescribir SÓLO ese fichero (temporal + mover). El resto no se toca.
+     * For each term with changes: read its file, merge the new ids and, if something
+     * changed, rewrite ONLY that file (temp file + move). The rest is not touched.
      */
     @Override
     public void flush() {
         for (Map.Entry<String, SortedSet<Integer>> entry : pending.entrySet()) {
             Path file = termFile(entry.getKey());
             SortedSet<Integer> ids = readIds(file);
-            if (ids.addAll(entry.getValue())) {          // false: todos los ids ya estaban
+            if (ids.addAll(entry.getValue())) {          // false: all the ids were already there
                 writeIds(file, ids);
             }
         }
         pending.clear();
     }
 
-    /** Borra memoria pendiente y la carpeta entera del índice. */
+    /** Deletes pending memory and the whole index folder. */
     @Override
     public void clear() {
         pending.clear();
@@ -138,7 +138,7 @@ public class HierarchicalFolderIndex implements InvertedIndex {
             return;
         }
         try (Stream<Path> all = Files.walk(root)) {
-            List<Path> paths = all.sorted(Comparator.reverseOrder()).toList();   // hijos antes que padres
+            List<Path> paths = all.sorted(Comparator.reverseOrder()).toList();   // children before parents
             for (Path p : paths) {
                 Files.delete(p);
             }
@@ -147,7 +147,7 @@ public class HierarchicalFolderIndex implements InvertedIndex {
         }
     }
 
-    /** Suma del tamaño de todos los ficheros de términos. */
+    /** Sum of the size of all the term files. */
     @Override
     public long diskUsageBytes() {
         if (!Files.exists(root)) {
@@ -166,16 +166,16 @@ public class HierarchicalFolderIndex implements InvertedIndex {
         }
     }
 
-    /** Nada abierto entre llamadas. No hace flush: lo decide quien usa el índice. */
+    /** Nothing open between calls. It does not flush: whoever uses the index decides that. */
     @Override
     public void close() {
     }
 
     // ------------------------------------------------------------------
-    // Lectura y escritura de un fichero de término
+    // Reading and writing a term file
     // ------------------------------------------------------------------
 
-    /** Ids del fichero, ordenados y sin repetir; vacío si el fichero no existe. */
+    /** Ids of the file, sorted and without repetitions; empty if the file does not exist. */
     private static SortedSet<Integer> readIds(Path file) {
         SortedSet<Integer> ids = new TreeSet<>();
         if (!Files.exists(file)) {
@@ -184,7 +184,7 @@ public class HierarchicalFolderIndex implements InvertedIndex {
         try {
             for (String line : Files.readAllLines(file, StandardCharsets.UTF_8)) {
                 String trimmed = line.strip();
-                if (!trimmed.isEmpty()) {                  // tolera el salto de línea final
+                if (!trimmed.isEmpty()) {                  // tolerates the trailing line break
                     ids.add(Integer.parseInt(trimmed));
                 }
             }
@@ -192,13 +192,13 @@ public class HierarchicalFolderIndex implements InvertedIndex {
         } catch (IOException e) {
             throw new UncheckedIOException("No se pudo leer " + file, e);
         } catch (NumberFormatException e) {
-            // Igual que el JSON: un fichero corrupto no se trata como vacío,
-            // porque el siguiente flush lo sobrescribiría y se perderían sus ids.
+            // Same as the JSON: a corrupt file is not treated as empty,
+            // because the next flush would overwrite it and its ids would be lost.
             throw new UncheckedIOException(new IOException("Fichero de término corrupto: " + file, e));
         }
     }
 
-    /** Un id por línea, con temporal + mover (reto 11). */
+    /** One id per line, with temp file + move (challenge 11). */
     private static void writeIds(Path file, SortedSet<Integer> ids) {
         Path tmp = file.resolveSibling(file.getFileName() + TMP_SUFFIX);
         StringBuilder content = new StringBuilder();
@@ -217,15 +217,15 @@ public class HierarchicalFolderIndex implements InvertedIndex {
             try {
                 Files.deleteIfExists(tmp);
             } catch (IOException ignored) {
-                // lo importante es el error original
+                // what matters is the original error
             }
             throw new UncheckedIOException("No se pudo escribir " + file, e);
         }
     }
 
-    // --- Fuera del contrato: útil para tests ---
+    // --- Outside the contract: useful for tests ---
 
-    /** Todos los ficheros de términos en disco (para tests y experimentos). */
+    /** All the term files on disk (for tests and experiments). */
     List<Path> termFiles() {
         if (!Files.exists(root)) {
             return List.of();

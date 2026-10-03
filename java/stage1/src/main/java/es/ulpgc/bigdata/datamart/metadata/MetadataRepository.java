@@ -6,14 +6,14 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Almacén de metadatos de libros. El resto del sistema sólo conoce esta interfaz:
- * no sabe si detrás hay SQLite, otra base de datos o memoria.
+ * Store of book metadata. The rest of the system only knows this interface:
+ * it does not know whether there is SQLite, another database or memory behind it.
  *
- * Reglas que toda implementación debe cumplir (y que el benchmark da por hechas):
- *  - save/saveAll son idempotentes: guardar otra vez un book_id lo actualiza.
- *  - saveAll es todo o nada: si falla una fila, no se guarda ninguna.
- *  - findByAuthor/findByTitle buscan por igualdad exacta y devuelven
- *    los resultados ordenados por book_id.
+ * Rules every implementation must follow (and the benchmark takes for granted):
+ *  - save/saveAll are idempotent: saving a book_id again updates it.
+ *  - saveAll is all or nothing: if one row fails, none is saved.
+ *  - findByAuthor/findByTitle search by exact equality and return
+ *    the results sorted by book_id.
  */
 public interface MetadataRepository extends AutoCloseable {
 
@@ -31,7 +31,7 @@ public interface MetadataRepository extends AutoCloseable {
 
     void clear();
 
-    /** Sin "throws Exception": cerrar el repositorio no obliga a capturar nada. */
+    /** Without "throws Exception": closing the repository does not force catching anything. */
     @Override
     void close();
 }
