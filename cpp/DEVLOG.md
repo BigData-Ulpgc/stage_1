@@ -2743,3 +2743,67 @@ Suite total: 178.
 - **Still not identical:** the machines differ (this Mac with APFS against Java's Linux run with
   NVMe). That may explain why hierarchical queries, dominated by file opens, are somewhat slower
   here. It is the still-open point about running every language on one machine.
+
+## Entry 56 – Parity with Java, step A: `index_build`, `index_update` and `index_disk` under Java's conditions (2026-10-03)
+
+### What was done
+The user's goal is that every C++ benchmark runs under the same conditions as the Java module, at the
+code level (what is timed, the data, the sizes, the repetitions, the verification, the metrics). The
+machine is out of scope. Java's `IndexBenchmark` was read and its rules were ported.
+- **New `benchmark/index_benchmark_support`** (shared by all five index experiments), ported from
+  Java:
+  - `TokenizedBook` and `tokenize_all`: every book is tokenized once, to its distinct terms, before
+    anything is timed (Java's `tokenizeAll`);
+  - `build_index`;
+  - `verify_index`. A written structure must match the in-memory index built from the same books, on
+    the postings of every query term and of the first 20 sorted terms of the first and last book, and
+    on the answer of every query. A mismatch throws (Java's `verify`).
+- **`index_build`**:
+  - the tokenizer was **inside** the timed part, and no longer is;
+  - the structure's storage is emptied in the untimed reset;
+  - the written structure is verified after measuring;
+  - new `throughput` rows (books_per_s, with Java's 0.001 ms floor);
+  - rows are in Java's order: 5 `elapsed`, then 5 `throughput`.
+- **`index_update`**:
+  - the tokenizer is no longer timed;
+  - the *written* structure is now verified against all N books (before, only the in-memory index
+    was checked);
+  - rows are in Java's order (5 `elapsed`, then 5 `per_book`);
+  - its header comment, stale since Entry 40 ("a full write() per book"), now describes
+    `update_terms`.
+- **`index_disk`**:
+  - new `allocated_bytes`, with Java's own estimate: `allocated_bytes(root)` in `benchmark.hpp` rounds
+    every file up to whole filesystem blocks (`statvfs`) and counts one block per directory, root
+    included;
+  - rows in Java's order (`bytes`, `files`, `allocated_bytes`, `terms`, `postings`);
+  - each structure is verified before it is measured.
+- **`index_query` and `index_memory`** now use the shared module. `index_memory` also verifies every
+  opened structure.
+- All five index benchmarks take the query workload (`shared/queries.txt`) for the verification, as
+  Java's `IndexBenchmark` does. Suite total: 184.
+
+### Verification on the 200 real books
+- **`index_disk` matches Java's `results/real/` exactly** at N=50, 100 and 200 for `bytes` (the
+  monolithic JSON included, byte for byte), `files`, `terms` and `postings`. `allocated_bytes`
+  differs by exactly 1 block (monolithic) and 2 blocks (hierarchical). Java's structures sit one or
+  two folders deeper (`<dir>/datamarts/inverted_index...`), and its estimate counts one block per
+  folder. That is an artefact of the path, about 0.0015%.
+- **`index_build`** (median of 5 runs; Java from its report):
+
+| | N=50 | N=100 | N=200 | N=200 before this entry |
+|---|---|---|---|---|
+| monolithic | 158 ms | 579 ms | **936 ms** (Java 1,686) | 2,567 ms |
+| hierarchical | 11,052 ms | 16,343 ms | **21,608 ms** (Java 11,339) | 23,566 ms |
+
+  Taking the tokenizer out of the timing, as Java does, cut the monolithic build at N=200 from
+  2.6 s to 0.9 s. Most of that cost was tokenizing, not indexing.
+- `index_update` was stopped half-way at the user's request, in order to add MongoDB first. It runs
+  in the official run.
+
+### An implementation observation (not a condition, so not changed here)
+The hierarchical build remains about twice Java's time. Besides the different filesystem, one likely
+cause is in this module's own code: `write_text_file` calls `create_directories` for **every** file,
+129,356 times for the N=200 index, although there are only ~36 letter folders. It is noted as a
+possible optimisation of the implementation. That is exactly what the comparison measures, so it is
+not something to hide or adjust in the benchmark.
+

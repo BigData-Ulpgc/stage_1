@@ -8,15 +8,14 @@
 #error "index_memory needs malloc statistics: macOS or glibc (Linux) only"
 #endif
 
-#include <algorithm>
 #include <functional>
 
+#include "stage1/benchmark/index_benchmark_support.hpp"
 #include "stage1/datamart/index/hierarchical_index_writer.hpp"
 #include "stage1/datamart/index/index_readers.hpp"
 #include "stage1/datamart/index/inverted_index.hpp"
 #include "stage1/datamart/index/mongo_index_writer.hpp"
 #include "stage1/datamart/index/monolithic_index_writer.hpp"
-#include "stage1/datamart/index/tokenizer.hpp"
 
 namespace stage1 {
 
@@ -41,36 +40,26 @@ double heap_in_use_bytes() {
 
 std::vector<BenchmarkResult> benchmark_index_memory(const std::string& language,
                                                       const std::vector<SampleBook>& books,
+                                                      const std::vector<std::string>& queries,
                                                       const std::unordered_set<std::string>& stopwords,
                                                       const std::filesystem::path& output_dir) {
     const int dataset_size = static_cast<int>(books.size());
 
-    // Tokenized once, before any measurement (Java's tokenizeAll), keeping only
-    // each book's distinct terms: all an index ever stores of a book.
-    std::vector<std::vector<std::string>> book_terms;
-    book_terms.reserve(books.size());
-    for (const auto& book : books) {
-        auto terms = tokenize(book.body, stopwords);
-        std::sort(terms.begin(), terms.end());
-        terms.erase(std::unique(terms.begin(), terms.end()), terms.end());
-        book_terms.push_back(std::move(terms));
-    }
+    const auto tokenized = tokenize_all(books, stopwords);  // before anything is measured
 
     std::vector<BenchmarkResult> results;
     const auto measure = [&](const std::string& structure, IndexWriter& writer, const std::function<Postings()>& open) {
         double after_build = 0;
         {
             const double before = heap_in_use_bytes();
-            InvertedIndex index;
-            for (std::size_t i = 0; i < books.size(); ++i) {
-                index.add_book(books[i].book_id, book_terms[i]);
-            }
+            const InvertedIndex index = build_index(tokenized);
             writer.write(index);
             after_build = heap_in_use_bytes() - before;  // `index` is still alive here
         }
         const double before_open = heap_in_use_bytes();
         const Postings opened = open();
         const double after_open = heap_in_use_bytes() - before_open;  // `opened` is still alive here
+        verify_index(opened, tokenized, queries, stopwords, structure + " index_memory");
 
         results.push_back(BenchmarkResult{language, "index_memory", structure, dataset_size, 1, "heap_after_build",
                                            after_build, "bytes"});

@@ -18,6 +18,7 @@ std::vector<SampleBook> make_corpus(int count) {
 }
 
 const std::unordered_set<std::string> kStopwords = {"the"};
+const std::vector<std::string> kQueries = {"whale", "word1", "whale word20"};
 
 }  // namespace
 
@@ -25,7 +26,7 @@ TEST(BenchmarkIndexUpdate, ProducesFiveElapsedAndFivePerBookRowsForEachStructure
     TempDir root("stage1_index_update_benchmark_test");
     auto corpus = make_corpus(20);  // k = 2 added books
 
-    auto results = benchmark_index_update("cpp", corpus, kStopwords, root.path());
+    auto results = benchmark_index_update("cpp", corpus, kQueries, kStopwords, root.path());
 
     int monolithic_elapsed = 0, monolithic_per_book = 0, hierarchical_elapsed = 0, hierarchical_per_book = 0;
     for (const auto& result : results) {
@@ -47,5 +48,5 @@ TEST(BenchmarkIndexUpdate, ProducesFiveElapsedAndFivePerBookRowsForEachStructure
 
 TEST(BenchmarkIndexUpdate, ThrowsWithFewerThanTwoBooks) {
     TempDir root("stage1_index_update_benchmark_test_small");
-    EXPECT_THROW(benchmark_index_update("cpp", {make_corpus(1)[0]}, kStopwords, root.path()), std::invalid_argument);
+    EXPECT_THROW(benchmark_index_update("cpp", {make_corpus(1)[0]}, kQueries, kStopwords, root.path()), std::invalid_argument);
 }

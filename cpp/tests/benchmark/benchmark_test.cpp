@@ -6,6 +6,7 @@
 #include "stage1/benchmark/benchmark.hpp"
 #include "support/temp_dir.hpp"
 
+using stage1::allocated_bytes;
 using stage1::BenchmarkResult;
 using stage1::measure_elapsed_ms;
 using stage1::testing::TempDir;
@@ -53,6 +54,18 @@ TEST(WriteBenchmarkResults, CreatesMissingParentDirectories) {
     write_benchmark_results(path, {});
 
     EXPECT_TRUE(std::filesystem::exists(path));
+}
+
+TEST(AllocatedBytes, RoundsEveryFileUpToWholeBlocksAndCountsOneBlockPerDirectory) {
+    TempDir root("stage1_benchmark_test_allocated");
+    const long long block = allocated_bytes(root.path());  // an empty directory: exactly one block
+
+    std::filesystem::create_directories(root.path() / "sub");
+    std::ofstream(root.path() / "tiny.txt") << "x";                                    // 1 byte -> 1 block
+    std::ofstream(root.path() / "sub" / "bigger.txt") << std::string(block + 1, 'y');  // block+1 -> 2 blocks
+
+    // root + sub (2 directories) + 1 block + 2 blocks
+    EXPECT_EQ(allocated_bytes(root.path()), 5 * block);
 }
 
 TEST(MeasureElapsedMs, ReturnsExactlyTheMeasuredRunCount) {

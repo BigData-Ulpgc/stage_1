@@ -69,20 +69,22 @@ constexpr std::array<std::size_t, 3> kIndexSizes = {50, 100, 200};
 std::vector<BenchmarkResult> run_index_experiment(const std::string& experiment, const std::vector<SampleBook>& books,
                                                   const std::unordered_set<std::string>& stopwords,
                                                   const std::filesystem::path& work_dir) {
+    // Every index experiment verifies the structures it measured against the
+    // shared query workload, as the Java module does.
+    const auto queries = load_queries(kSharedDir / "queries.txt");
     if (experiment == "index_build") {
-        return benchmark_index_build("cpp", books, stopwords, work_dir);
+        return benchmark_index_build("cpp", books, queries, stopwords, work_dir);
     }
     if (experiment == "index_query") {
-        const auto queries = load_queries(kSharedDir / "queries.txt");
         return benchmark_index_query("cpp", books, queries, stopwords, work_dir);
     }
     if (experiment == "index_update") {
-        return benchmark_index_update("cpp", books, stopwords, work_dir);
+        return benchmark_index_update("cpp", books, queries, stopwords, work_dir);
     }
     if (experiment == "index_memory") {
-        return benchmark_index_memory("cpp", books, stopwords, work_dir);
+        return benchmark_index_memory("cpp", books, queries, stopwords, work_dir);
     }
-    return benchmark_index_disk("cpp", books, stopwords, work_dir);
+    return benchmark_index_disk("cpp", books, queries, stopwords, work_dir);
 }
 
 // Reports what a step actually did, not just what it decided to do: a failed

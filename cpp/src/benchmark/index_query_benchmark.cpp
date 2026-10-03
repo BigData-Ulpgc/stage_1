@@ -4,6 +4,7 @@
 #include <functional>
 #include <stdexcept>
 
+#include "stage1/benchmark/index_benchmark_support.hpp"
 #include "stage1/datamart/index/hierarchical_index_writer.hpp"
 #include "stage1/datamart/index/index_readers.hpp"
 #include "stage1/datamart/index/inverted_index.hpp"
@@ -17,20 +18,6 @@ namespace stage1 {
 namespace {
 
 using Postings = std::function<std::vector<int>(const std::string&)>;
-
-// Java's verify step: every query must get, through the opened structure, the
-// same answer as through the in-memory index it was written from. A benchmark
-// that measures a structure giving wrong answers fails instead of reporting.
-void verify(const std::string& structure, const Postings& postings, const InvertedIndex& reference,
-            const std::vector<std::string>& queries, const std::unordered_set<std::string>& stopwords) {
-    for (const auto& query_text : queries) {
-        const auto terms = tokenize(query_text, stopwords);
-        if (query_and(postings, terms) != query_and(reference, terms)) {
-            throw std::runtime_error("index_query: " + structure + " answers \"" + query_text +
-                                     "\" differently from the in-memory index");
-        }
-    }
-}
 
 void run_and_record(const std::string& language, const std::string& structure, int dataset_size,
                      const std::vector<std::string>& queries, const std::unordered_set<std::string>& stopwords,
@@ -72,12 +59,9 @@ std::vector<BenchmarkResult> benchmark_index_query(const std::string& language, 
                                                      const std::filesystem::path& index_dir, int query_rounds) {
     const int dataset_size = static_cast<int>(books.size());
 
-    // Untimed: build once, write every structure, keep the in-memory index as
-    // the reference the opened structures are verified against.
-    InvertedIndex index;
-    for (const auto& book : books) {
-        index.add_book(book.book_id, tokenize(book.body, stopwords));
-    }
+    // Untimed: tokenize and build once, write every structure.
+    const auto tokenized = tokenize_all(books, stopwords);
+    const InvertedIndex index = build_index(tokenized);
     const auto monolithic_path = index_dir / "monolithic" / "inverted_index.json";
     const auto hierarchical_path = index_dir / "hierarchical" / "inverted_index";
     MonolithicIndexWriter(monolithic_path).write(index);
@@ -85,7 +69,7 @@ std::vector<BenchmarkResult> benchmark_index_query(const std::string& language, 
 
     std::vector<BenchmarkResult> results;
     const auto measure = [&](const std::string& structure, const Postings& opened) {
-        verify(structure, opened, index, queries, stopwords);
+        verify_index(opened, tokenized, queries, stopwords, structure + " index_query");
         run_and_record(language, structure, dataset_size, queries, stopwords, opened, query_rounds, results);
     };
     measure("monolithic", monolithic_postings_fetcher(monolithic_path));  // opened once, outside the timing

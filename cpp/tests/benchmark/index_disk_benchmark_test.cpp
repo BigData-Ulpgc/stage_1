@@ -14,13 +14,14 @@ const std::vector<SampleBook> kCorpus = {
     {84, "the boat sails to the island.", ""},
 };
 const std::unordered_set<std::string> kStopwords = {"the", "to", "near"};
+const std::vector<std::string> kQueries = {"whale island", "boat"};
 
 }  // namespace
 
 TEST(BenchmarkIndexDisk, MonolithicAndHierarchicalAgreeOnTermsAndPostings) {
     TempDir root("stage1_index_disk_benchmark_test");
 
-    auto results = benchmark_index_disk("cpp", kCorpus, kStopwords, root.path());
+    auto results = benchmark_index_disk("cpp", kCorpus, kQueries, kStopwords, root.path());
 
     double monolithic_terms = -1, hierarchical_terms = -1;
     double monolithic_postings = -1, hierarchical_postings = -1;
@@ -52,4 +53,22 @@ TEST(BenchmarkIndexDisk, MonolithicAndHierarchicalAgreeOnTermsAndPostings) {
     EXPECT_EQ(hierarchical_files, monolithic_terms);
     EXPECT_GT(monolithic_bytes, 0.0);
     EXPECT_GT(hierarchical_bytes, 0.0);
+}
+
+TEST(BenchmarkIndexDisk, ReportsJavasFiveMetricsInJavasOrder) {
+    TempDir root("stage1_index_disk_benchmark_test_order");
+
+    auto results = benchmark_index_disk("cpp", kCorpus, kQueries, kStopwords, root.path());
+
+    std::vector<std::string> hierarchical_metrics;
+    double bytes = 0, allocated = 0;
+    for (const auto& r : results) {
+        if (r.structure != "hierarchical") continue;
+        hierarchical_metrics.push_back(r.metric);
+        if (r.metric == "bytes") bytes = r.value;
+        if (r.metric == "allocated_bytes") allocated = r.value;
+    }
+    EXPECT_EQ(hierarchical_metrics,
+              (std::vector<std::string>{"bytes", "files", "allocated_bytes", "terms", "postings"}));
+    EXPECT_GT(allocated, bytes);  // a handful of tiny files still reserve whole blocks each
 }

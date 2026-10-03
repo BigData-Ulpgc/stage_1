@@ -17,13 +17,14 @@ const std::vector<SampleBook> kCorpus = {
     {84, "the boat sails to the island.", ""},
 };
 const std::unordered_set<std::string> kStopwords = {"the", "to", "near"};
+const std::vector<std::string> kQueries = {"whale island", "boat"};
 
 }  // namespace
 
 TEST(BenchmarkIndexMemory, ReportsHeapAfterBuildAndAfterOpenPerStructureLikeTheJavaModule) {
     TempDir root("stage1_index_memory_benchmark_test");
 
-    auto results = benchmark_index_memory("cpp", kCorpus, kStopwords, root.path());
+    auto results = benchmark_index_memory("cpp", kCorpus, kQueries, kStopwords, root.path());
 
     std::map<std::string, double> value;  // "structure/metric" -> bytes
     for (const auto& result : results) {

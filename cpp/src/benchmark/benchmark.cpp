@@ -1,8 +1,12 @@
 #include "stage1/benchmark/benchmark.hpp"
 
+#include <sys/statvfs.h>
+
 #include <chrono>
 #include <iomanip>
 #include <sstream>
+#include <stdexcept>
+#include <string>
 
 #include "stage1/util/file_io.hpp"
 
@@ -24,6 +28,21 @@ void write_benchmark_results(const std::filesystem::path& path, const std::vecto
     // identifiers ("cpp", "index_build", "monolithic", "ms", ...), never text
     // from an external source (like a book title) that could contain a comma.
     write_text_file(path, out.str());
+}
+
+long long allocated_bytes(const std::filesystem::path& root) {
+    struct statvfs filesystem{};
+    if (statvfs(root.c_str(), &filesystem) != 0) {
+        throw std::runtime_error("cannot query the filesystem of " + root.string());
+    }
+    const long long block = static_cast<long long>(filesystem.f_frsize != 0 ? filesystem.f_frsize : filesystem.f_bsize);
+    const auto in_blocks = [block](long long size) { return (size + block - 1) / block * block; };
+
+    long long total = in_blocks(1);  // `root` itself is a directory: one block
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(root)) {
+        total += in_blocks(entry.is_directory() ? 1 : static_cast<long long>(entry.file_size()));
+    }
+    return total;
 }
 
 std::vector<double> measure_elapsed_ms(const std::function<void()>& setup, const std::function<void()>& operation,

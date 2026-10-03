@@ -25,6 +25,13 @@ struct BenchmarkResult {
 // (language, experiment), e.g. benchmarks/results/cpp_index_build.csv.
 void write_benchmark_results(const std::filesystem::path& path, const std::vector<BenchmarkResult>& results);
 
+// Disk space reserved for everything under `root` (root included), with the
+// Java module's own estimate (DatalakeBenchmark.allocatedBytes): every file
+// takes its size rounded up to whole filesystem blocks, every directory one
+// block. Thousands of small files reserve far more than their bytes add up
+// to. Throws std::runtime_error if the filesystem cannot be queried.
+long long allocated_bytes(const std::filesystem::path& root);
+
 // Runs, once per repetition (`warmup_runs` discarded, then `measured_runs`
 // measured): `setup()` untimed, then `operation()` timed with a steady clock.
 // Useful when every repetition must start from the same prepared state (e.g.

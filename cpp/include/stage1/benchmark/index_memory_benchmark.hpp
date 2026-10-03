@@ -26,7 +26,8 @@ namespace stage1 {
 // Measure: the bytes the allocator reports in use, before and after each step
 // (macOS malloc_zone_statistics, Linux glibc mallinfo2), the C++ counterpart of
 // the JVM heap Java reads after a GC (DEVLOG Entries 54-55). The books are
-// tokenized before any measurement, as Java's tokenizeAll does.
+// tokenized before any measurement (tokenize_all), and each opened structure
+// is checked with verify_index against `queries` afterwards, as Java does.
 //
 // One real difference from Java, reported as is: Java's hierarchical and mongo
 // backends write postings through and keep almost nothing in memory, while
@@ -35,6 +36,7 @@ namespace stage1 {
 // all three structures here.
 std::vector<BenchmarkResult> benchmark_index_memory(const std::string& language,
                                                       const std::vector<SampleBook>& books,
+                                                      const std::vector<std::string>& queries,
                                                       const std::unordered_set<std::string>& stopwords,
                                                       const std::filesystem::path& output_dir);
 

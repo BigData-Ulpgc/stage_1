@@ -24,6 +24,7 @@ add_executable(stage1_tests
   control/book_id_list_test.cpp
   control/pipeline_test.cpp
   benchmark/benchmark_test.cpp
+  benchmark/index_benchmark_support_test.cpp
   benchmark/sample_books_test.cpp
   benchmark/index_build_benchmark_test.cpp
   benchmark/query_list_test.cpp

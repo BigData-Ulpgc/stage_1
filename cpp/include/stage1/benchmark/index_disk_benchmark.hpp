@@ -10,19 +10,21 @@
 
 namespace stage1 {
 
-// SPEC section 9's "index_disk" experiment (the course PDF's own "Memory and
-// disk usage"): for `monolithic` and `hierarchical`, builds the index once
-// and writes it, then reports `bytes` (total file size on disk) and `files`
-// (file count). Also reports `terms` and `postings` -- the index's *logical*
-// size, identical for every structure by construction (same vocabulary, same
-// postings), making it easy to see in the same CSV that only the physical
-// representation differs, not the data. `mongo` is left out: reading its real
-// disk usage needs MongoDB's own `collStats` command, whose numeric BSON
-// types need careful, untested-here handling (this machine has no Docker to
-// verify it against), the same "don't ship what can't be verified now"
-// discipline already applied elsewhere (e.g. `allocated_bytes`, Entry 35).
-// No timing involved; no repetitions.
+// SPEC section 9's "index_disk" experiment (the course PDF's "Memory and disk
+// usage"), under the same conditions as the Java module's IndexBenchmark.disk,
+// for monolithic and hierarchical:
+//  - Every book is tokenized once (tokenize_all); the index is built, written,
+//    and checked with verify_index against `queries` (a mismatch throws).
+//  - Rows per structure, in Java's order:
+//      bytes            total size of the structure's files
+//      files            number of files
+//      allocated_bytes  disk space those files and folders reserve, with
+//                       Java's estimate (allocated_bytes in benchmark.hpp)
+//      terms, postings  the index's logical size, the same for every structure
+// `mongo` is left out (Entry 42): its disk usage needs MongoDB's collStats,
+// which this machine (no Docker) cannot verify. No timing, no repetitions.
 std::vector<BenchmarkResult> benchmark_index_disk(const std::string& language, const std::vector<SampleBook>& books,
+                                                    const std::vector<std::string>& queries,
                                                     const std::unordered_set<std::string>& stopwords,
                                                     const std::filesystem::path& output_dir);
 
