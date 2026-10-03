@@ -19,37 +19,37 @@ std::vector<SampleBook> make_corpus(int count) {
 
 }  // namespace
 
-TEST(BenchmarkDatalakeRecovery, RecoversEveryDamagedBookWithNoLossOrDuplicates) {
+TEST(BenchmarkDatalakeRecovery, RecoversEveryDamagedBookWithRowsInJavasOrder) {
     TempDir root("stage1_datalake_recovery_benchmark_test");
-    auto corpus = make_corpus(20);  // every 10th -> books 10 and 20 get damaged
 
-    // Must not throw: the function itself verifies no books were lost and no
-    // duplicate body files were left behind after recovery.
-    auto results = benchmark_datalake_recovery("cpp", corpus, root.path());
+    // Positions 0 and 10 are damaged: books 1 and 11. Must not throw: the
+    // function itself checks that nothing was lost or duplicated.
+    const auto results = benchmark_datalake_recovery("cpp", make_corpus(20), root.path());
 
-    int book_elapsed_rows = 0;
-    bool saw_book_recovered = false;
-    for (const auto& result : results) {
-        EXPECT_EQ(result.language, "cpp");
-        EXPECT_EQ(result.experiment, "datalake_recovery");
-        EXPECT_EQ(result.dataset_size, 20);
-        if (result.structure == "book" && result.metric == "elapsed") {
-            ++book_elapsed_rows;
-            EXPECT_GE(result.value, 0.0);
+    ASSERT_EQ(results.size(), 24u);  // 3 structures x (5 elapsed + recovered + lost + duplicates)
+    const std::vector<std::string> structures = {"book", "range", "time"};
+    for (std::size_t s = 0; s < structures.size(); ++s) {
+        for (int i = 0; i < 5; ++i) {
+            EXPECT_EQ(results[s * 8 + i].structure, structures[s]);
+            EXPECT_EQ(results[s * 8 + i].metric, "elapsed");
+            EXPECT_EQ(results[s * 8 + i].repetition, i + 1);
         }
-        if (result.structure == "book" && result.metric == "recovered") {
-            saw_book_recovered = true;
-            EXPECT_EQ(result.value, 2.0);  // books 10 and 20
-        }
-        if (result.metric == "duplicates") {
-            EXPECT_EQ(result.value, 0.0);
-        }
+        EXPECT_EQ(results[s * 8 + 5].metric, "recovered");
+        EXPECT_EQ(results[s * 8 + 5].value, 2.0);
+        EXPECT_EQ(results[s * 8 + 6].metric, "lost");
+        EXPECT_EQ(results[s * 8 + 6].value, 0.0);
+        EXPECT_EQ(results[s * 8 + 7].metric, "duplicates");
+        EXPECT_EQ(results[s * 8 + 7].value, 0.0);
+        EXPECT_EQ(results[s * 8 + 7].unit, "books");
+        EXPECT_EQ(results[s * 8 + 7].repetition, 1);
     }
-    EXPECT_EQ(book_elapsed_rows, 5);
-    EXPECT_TRUE(saw_book_recovered);
 }
 
-TEST(BenchmarkDatalakeRecovery, ThrowsWithFewerThanTenBooks) {
+TEST(BenchmarkDatalakeRecovery, DamagesTheFirstBookEvenWithFewerThanTenBooks) {
     TempDir root("stage1_datalake_recovery_benchmark_test_small");
-    EXPECT_THROW(benchmark_datalake_recovery("cpp", make_corpus(9), root.path()), std::invalid_argument);
+
+    const auto results = benchmark_datalake_recovery("cpp", make_corpus(9), root.path());
+
+    EXPECT_EQ(results[5].metric, "recovered");
+    EXPECT_EQ(results[5].value, 1.0);  // position 0 only, as in Java
 }

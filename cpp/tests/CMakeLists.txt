@@ -24,6 +24,8 @@ add_executable(stage1_tests
   control/book_id_list_test.cpp
   control/pipeline_test.cpp
   benchmark/benchmark_test.cpp
+  benchmark/simulated_clock_test.cpp
+  benchmark/datalake_benchmark_support_test.cpp
   benchmark/index_benchmark_support_test.cpp
   benchmark/java_random_test.cpp
   benchmark/sample_books_test.cpp

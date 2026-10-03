@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "stage1/benchmark/datalake_storage_benchmark.hpp"
+#include "stage1/util/file_io.hpp"
 #include "support/temp_dir.hpp"
 
 using stage1::benchmark_datalake_storage;
@@ -64,4 +65,56 @@ TEST(BenchmarkDatalakeStorage, RangeLayoutGroupsAllThreeBooksInOneFolderHere) {
 
     EXPECT_EQ(metric_value(results, "range", "files"), 6.0);
     EXPECT_EQ(metric_value(results, "range", "directories"), 2.0);
+}
+
+TEST(BenchmarkDatalakeStorage, TimeLayoutFollowsTheSimulatedClockOfTenBooksPerHour) {
+    TempDir root("stage1_datalake_storage_benchmark_test_time");
+    std::vector<SampleBook> books;
+    for (int id = 1; id <= 12; ++id) {
+        books.push_back(SampleBook{id, "body", "header"});
+    }
+
+    const auto results = benchmark_datalake_storage("cpp", books, root.path());
+
+    // 20260101 with 00 (books 1-10, 20 files) and 01 (books 11-12, 4 files).
+    EXPECT_EQ(metric_value(results, "time", "directories"), 3.0);
+    EXPECT_EQ(metric_value(results, "time", "max_entries_per_dir"), 20.0);
+}
+
+TEST(BenchmarkDatalakeStorage, GivesFiveMetricsPerStructureInJavasOrder) {
+    TempDir root("stage1_datalake_storage_benchmark_test_order");
+
+    const auto results = benchmark_datalake_storage("cpp", kCorpus, root.path());
+
+    const std::vector<std::string> structures = {"book", "range", "time"};
+    const std::vector<std::string> metrics = {"files", "directories", "max_entries_per_dir", "bytes",
+                                              "allocated_bytes"};
+    ASSERT_EQ(results.size(), structures.size() * metrics.size());
+    for (std::size_t s = 0; s < structures.size(); ++s) {
+        for (std::size_t m = 0; m < metrics.size(); ++m) {
+            EXPECT_EQ(results[s * metrics.size() + m].structure, structures[s]);
+            EXPECT_EQ(results[s * metrics.size() + m].metric, metrics[m]);
+        }
+    }
+}
+
+TEST(BenchmarkDatalakeStorage, AllocatedBytesAreWholeBlocksAndAtLeastTheBytes) {
+    TempDir root("stage1_datalake_storage_benchmark_test_allocated");
+
+    const auto results = benchmark_datalake_storage("cpp", kCorpus, root.path());
+
+    for (const std::string structure : {"book", "range", "time"}) {
+        const double allocated = metric_value(results, structure, "allocated_bytes");
+        EXPECT_GE(allocated, metric_value(results, structure, "bytes"));
+        EXPECT_EQ(static_cast<long long>(allocated) % 512, 0) << structure;  // a multiple of any block size
+    }
+}
+
+TEST(BenchmarkDatalakeStorage, StartsFromAnEmptyFolderWhateverAnEarlierRunLeft) {
+    TempDir root("stage1_datalake_storage_benchmark_test_leftovers");
+    stage1::write_text_file(root.path() / "book" / "999" / "body.txt", "from an earlier run");
+
+    const auto results = benchmark_datalake_storage("cpp", kCorpus, root.path());
+
+    EXPECT_EQ(metric_value(results, "book", "directories"), 3.0);  // the 3 books, not 999
 }

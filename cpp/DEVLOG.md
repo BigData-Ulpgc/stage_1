@@ -2935,3 +2935,100 @@ WiredTiger compresses and fills its pages differently in each case.
   rows for the metadata.
 - This supersedes the last point of Entry 59, which kept these files until steps C and D. Their
   replacements will come from those steps, written under SPEC 10.4's `real/` and `synthetic/`.
+
+---
+
+## Entry 61 – Parity with Java, step C: the five datalake experiments under Java's conditions (2026-10-03)
+
+### What was done
+The five datalake benchmarks were rewritten after reading the Java module's `DatalakeBenchmark`, so
+that both languages time the same operations on the same data and report the same metrics in the
+same order.
+
+- **`SimulatedClock`** (new, `benchmark/simulated_clock.hpp`), a port of Java's
+  `SimulatedClock.tenBooksPerHour()`. It starts on 1 January 2026 at 00:00 and moves 6 minutes each
+  time it is read, so each hour folder of the `time` layout gets 10 books. With the real clock the
+  200 books were all written in under a second, into a single hour folder. The start is *local*
+  midnight (built with `mktime`), because `time_folder_name` uses local time (SPEC section 3). The
+  folders are therefore `20260101/00` to `20260101/19` on any machine, the same names Java gets
+  with its UTC clock. `now()` is `const` in the `Clock` contract, so the moving time point is
+  `mutable`.
+- **`datalake_benchmark_support`** (new), the counterpart of Entry 56's `index_benchmark_support`:
+  - `kDatalakeStructures` holds `book`, `range`, `time`, in the order of Java's
+    `DatalakeFactory.NAMES`.
+  - `fresh_datalake(structure, dir)` is Java's `freshDatalake`: it deletes the folder and creates an
+    empty datalake, with a new simulated clock for `time`, so every repetition builds the same tree.
+    The `time` datalake owns its clock. A private base class holds the clock and is listed first,
+    so it is constructed before `TimeBasedDatalake` stores a reference to it, and destroyed after.
+    Callers just get a `std::unique_ptr<Datalake>`.
+  - `elapsed_rows` and `derived_rows` are Java's `derived()`: one derived row per measured
+    repetition, with times under 0.001 ms counted as 0.001 ms.
+- **Per experiment**, everything taken from Java:
+
+| Experiment | Untimed setup | Timed | New rows |
+|---|---|---|---|
+| `datalake_write` | empty datalake **every repetition** (before: none, it overwrote) | write every book | `throughput` (books_per_s) |
+| `datalake_lookup` | write every book once | `locate()` of every id, **in Java's order**: sorted ids shuffled with `JavaRandom(42)` (Entry 57's first use); found books counted and checked | `per_lookup` (us) |
+| `datalake_incremental` | empty datalake, known then fresh books, **every repetition** (before: once) | `list_book_ids()` minus the known ids, into an ordered set (Java's `TreeSet`) | `detected` (books) |
+| `datalake_recovery` | save all, then the crash on positions **0, 10, 20…** (before: 9, 19, 29…), by **renaming the body to `body.txt.tmp`** (before: deleting the header), as Java's `interruptBeforeBodyMove` | list, save the missing books again, **count** them (before: the count was hardcoded) | `lost` (books) |
+| `datalake_storage` | empty datalake first (before: none, so leftovers from earlier runs were counted) | nothing, it measures size | `allocated_bytes` with Entry 56's `allocated_bytes()` |
+
+- Rows now come in Java's order: per structure, the 5 `elapsed` rows, then the derived rows.
+- The old "at least 10 books" guard of `recovery` is gone. Since damage starts at position 0, any
+  non-empty list damages at least one book, as in Java.
+- 11 new tests and 6 rewritten ones (205 in total, 7 Mongo ones skipped without a server). They cover the
+  clock (10 writes per hour folder), `fresh_datalake` (empties the folder, a new `time` datalake
+  starts again at hour 00, unknown structure), the derived rows, and each experiment's rows and order.
+  `storage` also gets a test for the simulated hour folders, one for leftovers from an earlier run,
+  and one for `allocated_bytes` (whole blocks, at least `bytes`).
+
+### Verification on the 200 real books (against Java's `results/real/`)
+`datalake_storage` matches Java **exactly, every metric of every structure**:
+
+| Structure | files | directories | max_entries_per_dir | bytes | allocated_bytes |
+|---|---|---|---|---|---|
+| book | 400 | 200 | 200 | 128,980,349 | 130,883,584 |
+| range | 400 | 47 | 220 | 128,980,349 | 130,256,896 |
+| time | 400 | 21 | 20 | 128,980,349 | 130,150,400 |
+
+This shows that both languages store byte-identical books. It also shows that the simulated clock
+builds the same tree: 1 day folder with 20 hour folders.
+
+Times (median of the 5 runs; Java's figures come from its own machine):
+
+| Experiment | book (C++ / Java) | range (C++ / Java) | time (C++ / Java) |
+|---|---|---|---|
+| write, ms | 228.4 / 194.0 | 191.6 / 198.8 | 186.8 / 210.9 |
+| lookup, us per lookup | 2.5 / 3.3 | 2.9 / 8.3 | 0.07 / 94.5 |
+| incremental, ms | 0.98 / 1.24 | 1.66 / 2.58 | 1.16 / 2.08 |
+| recovery, ms | 19.1 / 23.8 | 22.3 / 25.2 | 20.0 / 19.8 |
+
+`detected` is 20 everywhere, and `recovered`/`lost`/`duplicates` are 20/0/0 everywhere, in both
+languages. All five CSVs have exactly Java's row order.
+
+### Design differences left as they are (they are what is being compared)
+- **`time` lookup** (Entries 31 and 32): this module's `locate()` is a hash map of what the same
+  instance wrote, while Java scans the day and hour folders on disk. Hence 0.07 us against 94.5 us.
+  The C++ figure does not measure the layout, and it would not work from a new process. This is
+  the main caveat for the report's lookup comparison.
+- **Writes are not atomic here.** Java writes each file to `.tmp` and renames it, header first;
+  this module writes body then header in place, and relies on the control layer's "write first,
+  mark after" (SPEC section 8). That rename is why Java's recovery leaves no `.tmp` behind in `book`
+  and `range`: saving the book again overwrites the leftover `body.txt.tmp` and renames it. Here the
+  20 leftovers stay; they were counted after the run. They don't change any reported metric
+  (`duplicates` counts only complete `body.txt` files), but the folder holds 20 more files than
+  Java's after a recovery.
+
+### Supersedes
+Entry 35's `time` figures (everything in one hour folder, the worst `max_entries_per_dir`) came
+from the real clock and a burst of writes. Under Java's simulated clock, `time` has the *smallest*
+`max_entries_per_dir` of the three (20, against 200 and 220). Entry 35's observation still holds
+for real pipeline bursts.
+
+### Also found
+- `SystemClock` no longer has a production caller. The five datalake benchmarks were its only
+  users, and they now use `SimulatedClock`; the `pipeline` command uses the book layout. Only
+  `time_based_datalake_test.cpp` uses it now. It was kept: it is the clock SPEC section 3 asks for
+  in a real `time` datalake. Whether to remove it is the user's decision.
+- `ctest -j 8` makes 5 `Pipeline` tests fail: they share temporary folder names and are not safe to
+  run in parallel. Run sequentially (as `make test` does), all 205 pass. Not fixed here.

@@ -1,35 +1,28 @@
 #include "stage1/benchmark/datalake_lookup_benchmark.hpp"
 
-#include "stage1/datalake/book_based_datalake.hpp"
-#include "stage1/datalake/range_based_datalake.hpp"
-#include "stage1/datalake/time_based_datalake.hpp"
+#include <algorithm>
+#include <stdexcept>
+
+#include "stage1/benchmark/datalake_benchmark_support.hpp"
+#include "stage1/benchmark/java_random.hpp"
 
 namespace stage1 {
 
 namespace {
 
-// Writes every book through `datalake` once (untimed: this experiment
-// measures locate(), not write()), then times calling locate() for every
-// book id, once per measure_elapsed_ms repetition, appending one
-// BenchmarkResult per measured run.
-void run_and_record(const std::string& language, const std::string& structure, const std::vector<SampleBook>& books,
-                     Datalake& datalake, std::vector<BenchmarkResult>& results) {
+// Java's shuffledIds: the distinct ids in ascending order, then
+// Collections.shuffle with new Random(42). Every structure looks the books up
+// in this same order, the same order Java uses.
+std::vector<int> shuffled_ids(const std::vector<SampleBook>& books) {
+    std::vector<int> ids;
     for (const auto& book : books) {
-        datalake.write(book.book_id, book.header, book.body);
+        ids.push_back(book.book_id);
     }
-
-    const auto elapsed = measure_elapsed_ms([&] {
-        for (const auto& book : books) {
-            datalake.locate(book.book_id);
-        }
-    });
-
-    const int dataset_size = static_cast<int>(books.size());
-    int repetition = 1;
-    for (double ms : elapsed) {
-        results.push_back(
-            BenchmarkResult{language, "datalake_lookup", structure, dataset_size, repetition++, "elapsed", ms, "ms"});
-    }
+    std::sort(ids.begin(), ids.end());
+    ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+    JavaRandom random(42);
+    java_shuffle(ids, random);
+    return ids;
 }
 
 }  // namespace
@@ -37,18 +30,36 @@ void run_and_record(const std::string& language, const std::string& structure, c
 std::vector<BenchmarkResult> benchmark_datalake_lookup(const std::string& language,
                                                          const std::vector<SampleBook>& books,
                                                          const std::filesystem::path& output_dir) {
+    const auto ids = shuffled_ids(books);
+    const int dataset_size = static_cast<int>(books.size());
     std::vector<BenchmarkResult> results;
 
-    BookBasedDatalake book_datalake(output_dir / "book");
-    run_and_record(language, "book", books, book_datalake, results);
+    for (const auto& structure : kDatalakeStructures) {
+        // Written once, untimed: this experiment measures locate(), not write().
+        const auto datalake = fresh_datalake(structure, output_dir / structure);
+        for (const auto& book : books) {
+            datalake->write(book.book_id, book.header, book.body);
+        }
 
-    RangeBasedDatalake range_datalake(output_dir / "range");
-    run_and_record(language, "range", books, range_datalake, results);
+        std::size_t found = 0;
+        const auto elapsed_ms = measure_elapsed_ms([&] { found = 0; },
+                                                   [&] {
+                                                       for (int id : ids) {
+                                                           if (datalake->locate(id)) {
+                                                               ++found;  // uses the result, as Java does
+                                                           }
+                                                       }
+                                                   });
+        if (found != ids.size()) {
+            throw std::runtime_error(structure + ": locate did not find every book");
+        }
 
-    SystemClock clock;
-    TimeBasedDatalake time_datalake(output_dir / "time", clock);
-    run_and_record(language, "time", books, time_datalake, results);
-
+        const auto elapsed = elapsed_rows(language, "datalake_lookup", structure, dataset_size, elapsed_ms);
+        const auto per_lookup =
+            derived_rows(elapsed, "per_lookup", "us", [&](double ms) { return ms * 1000.0 / ids.size(); });
+        results.insert(results.end(), elapsed.begin(), elapsed.end());
+        results.insert(results.end(), per_lookup.begin(), per_lookup.end());
+    }
     return results;
 }
 

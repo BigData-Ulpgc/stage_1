@@ -9,19 +9,16 @@
 
 namespace stage1 {
 
-// SPEC section 9's "datalake_recovery" experiment (section 3's own "recovery
-// behavior"): simulates a crash by writing every book, then deleting the
-// header file of every 10th one -- exactly the gap "write first, mark after"
-// (DEVLOG, before Phase 8) is meant to catch, since write_text_file writes a
-// book's body and header as two separate steps, not atomically. Before each
-// repetition (untimed), the damage is freshly reintroduced; only "find what
-// is missing and rewrite it" is timed, `measure_elapsed_ms`'s default 2+5
-// repetitions. Mirrors the Java module's own damage-every-10th-book
-// methodology. Throws if, after the final repetition, any book is still
-// missing or any structure ends up with more body files than books (lost or
-// duplicated data). Requires at least 10 books (so "every 10th" damages at
-// least one). Returns, per structure: 5 "elapsed" rows plus one "recovered"
-// and one "duplicates" row (both in "books").
+// SPEC section 9's "datalake_recovery" experiment, as the Java module's
+// DatalakeBenchmark.recovery runs it. In the untimed setup of every
+// repetition, every book is saved and then the crash is simulated on the books
+// at positions 0, 10, 20, ...: each one's body is renamed to body.txt.tmp, what
+// a process that died before its final rename would leave. The timed part
+// finds the missing books with list_book_ids() and saves them again. Throws
+// if, in the final state, a damaged book was not saved again, or any book is
+// lost or has more than one complete body. Rows per structure, in Java's
+// order: 5 "elapsed" (ms), then one "recovered", "lost" and "duplicates" row
+// (books).
 std::vector<BenchmarkResult> benchmark_datalake_recovery(const std::string& language,
                                                            const std::vector<SampleBook>& books,
                                                            const std::filesystem::path& output_dir);

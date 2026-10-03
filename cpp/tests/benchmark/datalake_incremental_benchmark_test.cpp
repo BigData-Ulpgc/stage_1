@@ -9,37 +9,43 @@ using stage1::testing::TempDir;
 
 namespace {
 
-const std::vector<SampleBook> kCorpus = {
-    {1, "body 1", "header 1"}, {2, "body 2", "header 2"}, {3, "body 3", "header 3"},
-    {4, "body 4", "header 4"}, {5, "body 5", "header 5"}, {6, "body 6", "header 6"},
-    {7, "body 7", "header 7"}, {8, "body 8", "header 8"}, {9, "body 9", "header 9"},
-    {10, "body 10", "header 10"},
-};
+std::vector<SampleBook> make_corpus(int count) {
+    std::vector<SampleBook> books;
+    for (int i = 1; i <= count; ++i) {
+        books.push_back(SampleBook{i, "body " + std::to_string(i), "header " + std::to_string(i)});
+    }
+    return books;
+}
 
 }  // namespace
 
-TEST(BenchmarkDatalakeIncremental, ProducesFiveMeasuredRowsForEachOfTheThreeStructures) {
+TEST(BenchmarkDatalakeIncremental, GivesFiveElapsedThenFiveDetectedRowsPerStructureInJavasOrder) {
     TempDir root("stage1_datalake_incremental_benchmark_test");
 
-    auto results = benchmark_datalake_incremental("cpp", kCorpus, root.path());
+    // 20 books: the last 10% (books 19 and 20) are the fresh ones.
+    const auto results = benchmark_datalake_incremental("cpp", make_corpus(20), root.path());
 
-    int book_rows = 0, range_rows = 0, time_rows = 0;
-    for (const auto& result : results) {
-        EXPECT_EQ(result.language, "cpp");
-        EXPECT_EQ(result.experiment, "datalake_incremental");
-        EXPECT_EQ(result.dataset_size, 10);
-        EXPECT_EQ(result.unit, "ms");
-        EXPECT_GE(result.value, 0.0);
-        if (result.structure == "book") ++book_rows;
-        if (result.structure == "range") ++range_rows;
-        if (result.structure == "time") ++time_rows;
+    ASSERT_EQ(results.size(), 30u);  // 3 structures x (5 elapsed + 5 detected)
+    const std::vector<std::string> structures = {"book", "range", "time"};
+    for (std::size_t s = 0; s < structures.size(); ++s) {
+        for (int i = 0; i < 5; ++i) {
+            const auto& elapsed = results[s * 10 + i];
+            const auto& detected = results[s * 10 + 5 + i];
+            EXPECT_EQ(elapsed.experiment, "datalake_incremental");
+            EXPECT_EQ(elapsed.structure, structures[s]);
+            EXPECT_EQ(elapsed.dataset_size, 20);
+            EXPECT_EQ(elapsed.metric, "elapsed");
+            EXPECT_EQ(elapsed.repetition, i + 1);
+            EXPECT_EQ(detected.structure, structures[s]);
+            EXPECT_EQ(detected.metric, "detected");
+            EXPECT_EQ(detected.unit, "books");
+            EXPECT_EQ(detected.repetition, i + 1);
+            EXPECT_EQ(detected.value, 2.0);
+        }
     }
-    EXPECT_EQ(book_rows, 5);
-    EXPECT_EQ(range_rows, 5);
-    EXPECT_EQ(time_rows, 5);
 }
 
 TEST(BenchmarkDatalakeIncremental, ThrowsWithFewerThanTwoBooks) {
     TempDir root("stage1_datalake_incremental_benchmark_test_small");
-    EXPECT_THROW(benchmark_datalake_incremental("cpp", {kCorpus[0]}, root.path()), std::invalid_argument);
+    EXPECT_THROW(benchmark_datalake_incremental("cpp", make_corpus(1), root.path()), std::invalid_argument);
 }

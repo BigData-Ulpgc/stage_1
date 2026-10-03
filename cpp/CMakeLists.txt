@@ -71,6 +71,8 @@ add_library(stage1_core
   src/control/book_id_list.cpp
   src/control/pipeline.cpp
   src/benchmark/benchmark.cpp
+  src/benchmark/simulated_clock.cpp
+  src/benchmark/datalake_benchmark_support.cpp
   src/benchmark/index_benchmark_support.cpp
   src/benchmark/java_random.cpp
   src/benchmark/sample_books.cpp

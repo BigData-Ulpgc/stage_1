@@ -9,14 +9,15 @@
 
 namespace stage1 {
 
-// SPEC section 9's "datalake_lookup" experiment (section 3's own "lookup
-// cost"): for each of the three required layouts, first writes every book in
-// `books` (untimed setup), then times calling locate() for every book id,
-// `measure_elapsed_ms`'s default 2+5 repetitions. For `time`, locate() only
-// ever finds books through the *same* Datalake instance that wrote them (see
-// TimeBasedDatalake::locate), so this experiment, by construction, cannot
-// show the "fresh process, nothing remembered" case -- see DEVLOG. Returns 5
-// BenchmarkResult rows per structure.
+// SPEC section 9's "datalake_lookup" experiment, as the Java module's
+// DatalakeBenchmark.lookup runs it: for each layout, writes every book once
+// (untimed), then times locate() for every id, in a fixed "random" order
+// (Java's Collections.shuffle with seed 42, reproduced by JavaRandom), 2
+// warmups + 5 measured. Throws if a book is not found. For "time", locate()
+// only finds books through the instance that wrote them (see
+// TimeBasedDatalake::locate), while Java's scans the disk: a design
+// difference, see DEVLOG Entries 31 and 61. Rows per structure, in Java's
+// order: 5 "elapsed" (ms), then 5 "per_lookup" (us).
 std::vector<BenchmarkResult> benchmark_datalake_lookup(const std::string& language,
                                                          const std::vector<SampleBook>& books,
                                                          const std::filesystem::path& output_dir);
