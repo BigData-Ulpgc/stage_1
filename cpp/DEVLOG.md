@@ -2486,3 +2486,49 @@ The real data was moved aside, and every HTTP(S) request was sent to a closed lo
   hierarchical index during a 500-book run. Nothing like it happened here at 129k files. If it ever
   does, `write()` throws with that message, and that branch's mitigation (retrying the removal) is
   the fix to bring in.
+
+## Entry 51 – The pipeline reports what a step actually did, and stops at the first failure (2026-10-03)
+
+### What was done
+- `include/stage1/control/pipeline.hpp`: `run_pipeline_step` now returns a `StepResult`, made of the
+  `ControlDecision` it acted on, `completed`, and `failure` (why it did not complete). Java's
+  `StepResult` plays the same role. It used to return the bare decision.
+- `src/control/pipeline.cpp`: `perform_download` and `perform_indexing` return the reason they could
+  not finish, or an empty string when they did. The possible reasons are the fetch's own error (for
+  example "Couldn't connect to server" or "HTTP 404"), "no START/END markers, book discarded (SPEC
+  section 2)", and "no metadata row for it". The marking rules are unchanged: a book is marked only
+  after its work fully succeeded.
+- `src/cli_commands.cpp`: `describe` prints `could not download/index book X: <reason>` (to stderr) for
+  an incomplete step, instead of `downloaded book X`. The loop **stops at the first failed step** with
+  exit code 1, after printing `stopping; run pipeline again to retry`.
+- `tests/control/pipeline_test.cpp`: the 5 existing tests now also check `completed` and `failure`,
+  and a new test covers indexing a book that has no metadata row. Suite total: 177.
+- `cpp/README.md`: one row in the edge-case table for an unreachable Project Gutenberg.
+
+### Verification (real run)
+The 200-book `data/` was moved aside and HTTP(S) was sent to a closed local port, the same scenario as
+Entry 49.
+- Before this change, `pipeline 3` printed `downloaded book 1342` three times while nothing was
+  downloaded.
+- It now prints `could not download book 1342: Couldn't connect to server`, then `stopping; run
+  pipeline again to retry`, and exits 1. `status` still says 0 downloaded.
+- `pipeline 30 --offline` is unaffected (15/15, exit 0). The real data was restored afterwards.
+
+### Why
+- **The message must describe the outcome, not the intention.** A pipeline log is what someone reads
+  to know what happened. "downloaded book 1342" for a download that failed is worse than no message.
+  The control layer itself was always right, since the book was never marked; only the report was
+  wrong.
+- **Stopping instead of looping.** A failed book stays unmarked, and `next_control_action` always
+  picks the first unmarked candidate (indexing first). The very next step would therefore choose the
+  same book and, with the network still down, fail the same way: `pipeline 400` would print 400
+  identical failures. Stopping prints the failure once, and the non-zero exit code lets a script tell
+  a run that made no progress from one that finished.
+
+### Known limitation, not addressed here
+A book that can **never** succeed, such as one served without START/END markers, is discarded without
+being marked, exactly as SPEC section 2 requires. It is then chosen again on every run, so every run
+now stops at it, and the books after it in `book_ids.txt` are never reached. The old loop had the same
+problem, only hidden behind misleading messages. None of the 200 current books is affected, since all
+were checked to have both markers. If one ever is, the fix belongs in the shared contract (for example
+a "discarded" control file), not in one implementation.

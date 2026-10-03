@@ -60,7 +60,15 @@ const std::filesystem::path kBenchmarksDir = STAGE1_BENCHMARKS_DIR;
 // apart. Swapping pipeline's index format means swapping search's reader too.
 const std::filesystem::path kIndexPath = kDataDir / "datamarts" / "inverted_index.json";
 
-void describe(const ControlDecision& decision) {
+// Reports what a step actually did, not just what it decided to do: a failed
+// download used to be printed as "downloaded book X" (DEVLOG Entry 49).
+void describe(const StepResult& step) {
+    const ControlDecision& decision = step.decision;
+    if (!step.completed) {
+        const char* verb = decision.action == ControlAction::DownloadBook ? "download" : "index";
+        std::cerr << "[pipeline] could not " << verb << " book " << decision.book_id << ": " << step.failure << "\n";
+        return;
+    }
     switch (decision.action) {
         case ControlAction::DownloadBook:
             std::cout << "[pipeline] downloaded book " << decision.book_id << "\n";
@@ -119,10 +127,17 @@ int run_pipeline_command(int steps, bool offline) {
     }
 
     for (int step = 0; step < steps; ++step) {
-        const auto decision = run_pipeline_step(candidate_ids, downloaded, indexed, source, datalake, metadata,
-                                                 index, index_writer, stopwords);
-        describe(decision);
-        if (decision.action == ControlAction::Nothing) {
+        const auto step_result = run_pipeline_step(candidate_ids, downloaded, indexed, source, datalake, metadata,
+                                                    index, index_writer, stopwords);
+        describe(step_result);
+        if (!step_result.completed) {
+            // The book stays unmarked, so the control layer would choose it
+            // again on the very next step: looping on would only repeat the
+            // same failure. Stop, and let a later run retry it.
+            std::cerr << "[pipeline] stopping; run `pipeline` again to retry\n";
+            return 1;
+        }
+        if (step_result.decision.action == ControlAction::Nothing) {
             break;  // dataset fully processed: no point looping further
         }
     }

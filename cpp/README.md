@@ -154,6 +154,7 @@ $B status x ; echo $?
 | `search xyzzy` | `0 book(s) matching all of: xyzzy`, exit code 0 |
 | `status x` | usage message, exit code 1 |
 | `search` before any `pipeline` run | `no index found ... run pipeline <N> first`, exit code 1 |
+| `pipeline <N>` when Project Gutenberg cannot be reached | `could not download book <ID>: <reason>`, then `stopping; run pipeline again to retry`, exit code 1. The book stays unmarked, so the next run retries it |
 
 ## 7. Good to know
 
