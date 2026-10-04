@@ -73,19 +73,21 @@ Running `$B` with no arguments, or with wrong ones, prints this usage and exits 
 ### Choosing the structures
 
 `pipeline` and `search` use one datalake structure and one inverted index, chosen in
-[`config.properties`](../config.properties) (same keys and defaults as the Java module):
+[`config.properties`](../config.properties). The keys are the Java module's, and so is the choice:
+`book` and `monolithic`, the most efficient structures in the benchmarks ([`MODULE_REPORT.md`](MODULE_REPORT.md),
+"Chosen structures", explains why).
 
-| Key | Values | Default |
-|---|---|---|
-| `datalake.structure` | `book`, `range`, `time` (SPEC section 3) | `time` |
-| `index.structure` | `monolithic`, `hierarchical`, `mongo` (SPEC section 6) | `monolithic` |
+| Key | Values | Selected in `config.properties` | Without the file |
+|---|---|---|---|
+| `datalake.structure` | `book`, `range`, `time` (SPEC section 3) | `book` | `time` |
+| `index.structure` | `monolithic`, `hierarchical`, `mongo` (SPEC section 6) | `monolithic` | `monolithic` |
 
 To change one for a single run without editing the file, put `-Dkey=value` before the command:
 
 ```bash
 $B -Dindex.structure=hierarchical pipeline 400
 $B -Dindex.structure=hierarchical search whale island
-$B -Ddatalake.structure=book config
+$B -Ddatalake.structure=time config
 ```
 
 - `pipeline` and `search` must use the same index: `search` reads the index it is told to, so if the
@@ -234,6 +236,6 @@ $B status x ; echo $?
   `pipeline 5`.
 - **Starting over.** `rm -rf data` deletes all downloaded books and the indexes. The next `pipeline`
   run downloads everything again.
-- **Checking the offline output.** After `$B -Ddatalake.structure=book pipeline 30 --offline` on an
-  empty `data/`, the datalake is byte-identical to the sample's expected output:
+- **Checking the offline output.** After `$B pipeline 30 --offline` on an empty `data/`, with the
+  selected `book` layout, the datalake is byte-identical to the sample's expected output:
   `diff -r data/datalake/book ../sample_dataset/book` prints nothing.

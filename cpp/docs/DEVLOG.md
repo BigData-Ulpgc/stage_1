@@ -84,6 +84,7 @@ Conventions for the whole module:
 - [Entry 68 – The pipeline's datalake and index chosen in `config.properties`, as in Java (2026-10-04)](#entry-68--the-pipelines-datalake-and-index-chosen-in-configproperties-as-in-java-2026-10-04)
 - [Entry 69 – The root README's C++ parts brought up to date (2026-10-04)](#entry-69--the-root-readmes-c-parts-brought-up-to-date-2026-10-04)
 - [Entry 70 – The module's documentation gathered in `cpp/docs/`, with a report for readers (2026-10-04)](#entry-70--the-modules-documentation-gathered-in-cppdocs-with-a-report-for-readers-2026-10-04)
+- [Entry 71 – `book` + `monolithic` chosen from the benchmarks, the same choice as Java (2026-10-04)](#entry-71--book--monolithic-chosen-from-the-benchmarks-the-same-choice-as-java-2026-10-04)
 
 ---
 
@@ -3555,3 +3556,59 @@ The documentation had grown to a 3,400-line log and a 200-line guide in the modu
 nothing that summarised the module for someone grading it. Three files in one folder, each named
 after what it is, let each reader start where they need to: the instructor with the report, a user
 with the guide, and a reviewer who wants the full reasoning with the log.
+
+---
+
+## Entry 71 – `book` + `monolithic` chosen from the benchmarks, the same choice as Java (2026-10-04)
+
+### What was done
+- `cpp/config.properties` now selects **`datalake.structure = book`** and **`index.structure =
+  monolithic`**, with the reasons in a comment. Without the file, the defaults are still Java's code
+  defaults (`time`, `monolithic`).
+- **An inconsistency in the root README was fixed.** The Java module had just switched its
+  `config.properties` to `book` + `monolithic`, also from its benchmarks, and the README's Java
+  section said so. The C++ section, though, still claimed "the same keys and defaults as Java:
+  `time`". It now lists the selected structures the same way the Java section does and links to
+  this module's report.
+- `docs/USER_GUIDE.md` (section 3) shows the selected value and the default without the file, side
+  by side. Its offline check no longer needs `-Ddatalake.structure=book`.
+- `docs/MODULE_REPORT.md` and the report's online version gain a **Chosen structures** section. The
+  design decision row and "How to run it" were updated, and the open question about the final
+  structure was removed from the limitations.
+
+### Why `book`
+The C++ benchmarks on the 200 real books:
+- `book` has the fastest lookup that survives a restart: 2.5 µs per book, against 2.9 µs for
+  `range`. `time` cannot compute a folder from an id. Its C++ 0.07 µs comes from the in-memory map
+  of Entry 31, which a new process does not have, and Java's durable scan costs 94.5 µs.
+- It also has the fastest detection of new books (0.98 ms, against 1.16 and 1.66) and the fastest
+  recovery (19.1 ms, against 20.0 and 22.3).
+- Its one loss is writing all the books: 228 ms, against 192 for `range` and 187 for `time`. The
+  bytes are identical, and `book` reserves 0.6% more disk.
+- `range` remains the better layout for a far larger collection: `book` adds one root folder per
+  book, while `range` caps each folder at 1,000 books.
+
+### Why `monolithic`
+- It has the fastest queries: 1.4 µs, against 22.0 for `hierarchical` and 314.6 for `mongo`.
+- It is the fastest to build (1.8 s, against 6.5 and 3.4 s).
+- It is the cheapest to update at 200 books: 300 ms per book, against 482 and 922.
+
+Its costs grow with the index:
+
+| Measure | N=50 | N=100 | N=200 |
+|---|---|---|---|
+| `monolithic`: add a book | 93 ms | 165 ms | 300 ms |
+| `hierarchical`: add a book | 330 ms | 386 ms | 482 ms |
+| `monolithic`: memory after opening | 16.3 MB | 28.2 MB | 54.1 MB |
+
+A straight-line extrapolation from these three sizes puts the crossover at roughly 700 books, where
+`hierarchical` becomes the cheaper one to update. `hierarchical` is the C++ module's next structure
+rather than `mongo`, because it beats `mongo` on both queries and updates. Java's report proposes
+`mongo` from about 2,000 books, from its own figures.
+
+### Verified
+- `config` shows `book` / `monolithic`.
+- `pipeline 1` uses `datalake=book index=monolithic` and finds nothing left to do, since the 200
+  books already sit in `data/datalake/book`.
+- `search whale island` returns the same 28 books.
+- `-Ddatalake.structure=time config` still overrides the file.

@@ -203,9 +203,14 @@ B=./build/release/search_engine_stage1
 | `$B benchmark <experiment>` | Runs one of the 12 benchmark experiments (see below) |
 
 The pipeline's datalake and index are chosen in [`cpp/config.properties`](cpp/config.properties),
-with the same keys and defaults as Java: `datalake.structure` is `time` (default), `book` or `range`,
-and `index.structure` is `monolithic` (default), `hierarchical` or `mongo`. Any key can be changed for
-one run with `-Dkey=value` before the command. `pipeline` and `search` must use the same index:
+with the same keys as Java:
+
+* `datalake.structure`: `book` (selected in `config.properties`), `range` or `time`
+* `index.structure`: `monolithic` (selected in `config.properties`), `hierarchical` or `mongo`
+
+`book` and `monolithic` are also the most efficient structures in the C++ benchmarks, the same choice
+as Java's; [`cpp/docs/MODULE_REPORT.md`](cpp/docs/MODULE_REPORT.md) explains it. Any key can be changed
+for one run with `-Dkey=value` before the command. `pipeline` and `search` must use the same index:
 
 ```bash
 $B -Dindex.structure=hierarchical pipeline 400

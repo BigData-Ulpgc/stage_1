@@ -19,7 +19,7 @@ The module is one of three implementations of the same contract, [`shared/SPEC.m
 | Dataset | The 200 Gutenberg books of `shared/book_ids.txt`; a 15-book offline sample in `sample_dataset/` |
 | Command line | `pipeline`, `search`, `status`, `config`, `benchmark` |
 | Benchmarks | All 12 SPEC experiments, results in `cpp/benchmarks/results/` |
-| Documentation | `cpp/docs/`: this report, the user guide and the in-depth development log (70 entries) |
+| Documentation | `cpp/docs/`: this report, the user guide and the in-depth development log (71 entries) |
 | Repository | [github.com/BigData-Ulpgc/stage_1](https://github.com/BigData-Ulpgc/stage_1), folder `cpp/` |
 
 ## Architecture
@@ -103,7 +103,7 @@ Each decision below is recorded, with the alternatives discarded and the measure
 | Each indexed book persists only its own terms (`update_terms`) [40, 68] | Rewriting the whole index per book | The rewrite made `hierarchical` over 100 times slower than `monolithic`; updating only the changed terms was measured 3–4 times faster |
 | SQLite inserts grouped in one transaction per batch [37, 62] | One commit per row | Benchmarks showed noisy, low throughput; batching was about 2.5 times faster, and matches Java's `saveAll` |
 | `TimeBasedDatalake::locate` remembers what it wrote [31, 32] | Scanning the day/hour folders, as Java does | A path cannot be computed from the id; remembering is fast but lasts one process. Indexing reads paths from SQLite, so the pipeline is unaffected |
-| Structures chosen in `config.properties`, overridable with `-D` [68] | Hardcoded `book` + `monolithic`; per-command flags | Same keys and defaults as Java (`time`, `monolithic`); one file keeps `pipeline` and `search` on the same index |
+| `book` + `monolithic` selected in `config.properties`, overridable with `-D` [68, 71] | Hardcoded structures; per-command flags | The most efficient pair in the benchmarks (see Chosen structures) and Java's choice; one file keeps `pipeline` and `search` on the same index |
 | Index rebuilt in memory at start-up, then checked against the stored one [68] | Trusting that the stored index exists | Found by testing: 5 stale documents in the real Mongo collection made `search` answer from them |
 | Paths fixed at build time (CMake macros) | Paths relative to the working directory | The binary finds `shared/`, `data/` and `config.properties` from any folder |
 | Benchmarks reproduce Java's conditions in code [55–64] | Each language measuring its own way | Same untimed setup, same data, same random choices (`JavaRandom`), same checks: differences come from the languages, not the method |
@@ -115,7 +115,7 @@ The module was built in nine planned phases, one small step at a time: each step
 
 | Date | Milestone | What it involved |
 | --- | --- | --- |
-| 2026-10-04 | Configurable structures; documentation; final fixes | `config.properties` and `-D` overrides; stale or partial indexes rewritten at start-up; the documentation gathered in `cpp/docs/` with this report; a test that failed on Linux fixed; 20 stale files left by a merge removed |
+| 2026-10-04 | Configurable structures; documentation; final fixes | `config.properties` and `-D` overrides; stale or partial indexes rewritten at start-up; the structures selected (book and monolithic); the documentation gathered in `cpp/docs/` with this report; a test that failed on Linux fixed; 20 stale files left by a merge removed |
 | 2026-10-03 | Index results with native Docker | A teammate ran the five index experiments, MongoDB included, on a machine with native Docker |
 | 2026-10-03 | Parity with Java (steps A–D) and MongoDB | All 12 experiments rewritten under Java's conditions; `JavaRandom`; simulated clock; Mongo measured, with a bulk write that cut an index update from 3,421 to about 300 ms per book |
 | 2026-10-03 | Shared dataset (SPEC 10) | 200 books; sizes N = 50, 100, 200 taken as the lowest ids; reference term counts; `sample_dataset/` and the offline mode; two bugs found and fixed |
@@ -197,6 +197,31 @@ What the numbers show:
 - **Metadata.** The `author` and `title` indexes are what keep lookups flat. Without them, an author lookup at 100,000 rows takes 5.9 ms instead of 15 µs, about 380 times slower.
 - **Languages.** C++ wins where its own code does the work (CPU, memory, many small SQLite calls without JDBC); disk-bound work ties, because the operating system does it.
 
+## Chosen structures
+
+The module uses **`book`** for the datalake and **`monolithic`** for the index, set in `cpp/config.properties`. They are the most efficient structures in this module's benchmarks at the project's 200 books, and the same choice as the Java module's, so the group's final system is a single configuration.
+
+**Datalake: `book`.**
+
+- **Lookup:** the fastest one that survives a restart, 2.5 µs per book against 2.9 µs for `range`. `time` cannot compute a book's folder from its id: Java scans the folders (94.5 µs), and the C++ 0.07 µs comes from an in-memory map that a new process does not have.
+- **Detection and recovery:** the fastest detection of new books (0.98 ms, against 1.16 for `time` and 1.66 for `range`) and the fastest recovery (19.1 ms, against 20.0 and 22.3).
+- **Its one loss:** writing all 200 books takes 228 ms, against 192 for `range` and 187 for `time`. All three store identical bytes; `book` reserves 0.6% more disk.
+- **What would change the choice:** `book` adds one folder per book to the datalake's root (200 today). For a collection the size of the whole Gutenberg catalogue, `range` keeps the direct lookup and caps each folder at 1,000 books.
+
+**Index: `monolithic`.**
+
+- **Queries:** the fastest, 1.4 µs against 22.0 µs for `hierarchical` and 314.6 µs for `mongo`.
+- **Build and update:** the fastest to build (1.8 s, against 6.5 and 3.4 s) and the cheapest to update at this size (300 ms per book, against 482 and 922 ms).
+- **Its costs grow with the index**, as the three measured sizes show:
+
+| Measure | N = 50 | N = 100 | N = 200 |
+| --- | --- | --- | --- |
+| `monolithic`: add a book (ms) | 93 | 165 | 300 |
+| `hierarchical`: add a book (ms) | 330 | 386 | 482 |
+| `monolithic`: memory after open (MB) | 16.3 | 28.2 | 54.1 |
+
+**When to switch.** Extrapolating that trend in a straight line from three sizes, `hierarchical` becomes the cheaper index to update at roughly 700 books, and `monolithic` needs about 0.25 MB more memory per book. Past that point, `hierarchical` is the natural next structure in C++: it beats `mongo` on both queries (22 against 315 µs) and updates (482 against 922 ms). Java's report proposes `mongo` from about 2,000 books, based on Java's own figures.
+
 ## How to run it
 
 The fastest check takes about a second and needs no network: build, run the pipeline over the 15 sample books, and search.
@@ -229,7 +254,7 @@ The search answers books 76, 84 and 2701 with their titles; `make` builds in Rel
 | `$B config` | The configuration file used and the active structures |
 | `$B benchmark <experiment>` | One of the 12 SPEC experiments; writes its CSV under `benchmarks/results/` |
 
-**Choosing the structures.** `cpp/config.properties` sets `datalake.structure` (`time`, `book` or `range`) and `index.structure` (`monolithic`, `hierarchical` or `mongo`). Any key can be changed for one run, before the command:
+**Choosing the structures.** `cpp/config.properties` selects `book` for `datalake.structure` (the others are `range` and `time`) and `monolithic` for `index.structure` (the others are `hierarchical` and `mongo`). Any key can be changed for one run, before the command:
 
 ```bash
 $B -Dindex.structure=hierarchical pipeline 400
@@ -261,9 +286,7 @@ None of these affects the results reported above. Each one is documented, with i
 - **Sequential tests only.** Five pipeline tests share temporary folder names, so `ctest -j` fails them; `make test` runs sequentially.
 - **Mongo connections.** Each Mongo write opens a new client connection, where Java keeps one per index.
 - **Partial configuration.** Only Java's two structure keys were ported. Paths, the Mongo URI and HTTP timeouts are not configurable, and the download client sets no timeout.
-- **Open with the group:**
-    - which datalake and index the final system uses, to be justified in the group report (the default is `time` + `monolithic`, as in Java);
-    - whether every language stores its results in per-category subfolders, as C++ does, or flat, as Java and Python do (SPEC 10.4).
+- **Open with the group:** whether every language stores its results in per-category subfolders, as C++ does, or flat, as Java and Python do (SPEC 10.4).
 
 ## Documentation
 
@@ -273,14 +296,14 @@ The module's documentation lives in this folder, `cpp/docs/`: three files, each 
 | --- | --- | --- |
 | [`MODULE_REPORT.md`](MODULE_REPORT.md) | This report: architecture, code structure, pipeline flow, decisions, process, tests, benchmarks, how to run | Instructors and readers of the project |
 | [`USER_GUIDE.md`](USER_GUIDE.md) | How to build, test and run: requirements, commands, configuration, where data goes, checks by hand, exit codes | Anyone running the module |
-| [`DEVLOG.md`](DEVLOG.md) | The in-depth development log: 70 entries, from the first CMake file to the final version, with every decision, the alternatives discarded and the measurements behind them; it opens with an index of all entries | Reviewers who want the full reasoning |
+| [`DEVLOG.md`](DEVLOG.md) | The in-depth development log: 71 entries, from the first CMake file to the final version, with every decision, the alternatives discarded and the measurements behind them; it opens with an index of all entries | Reviewers who want the full reasoning |
 
 ## Sources
 
 Everything in this report comes from the repository's `main` branch as of 2026-10-04:
 
 - [`cpp/docs/USER_GUIDE.md`](USER_GUIDE.md): user guide (build, commands, data layout, exit codes)
-- [`cpp/docs/DEVLOG.md`](DEVLOG.md): the in-depth development log, 70 entries
+- [`cpp/docs/DEVLOG.md`](DEVLOG.md): the in-depth development log, 71 entries
 - [`shared/SPEC.md`](../../shared/SPEC.md): the contract shared by the three implementations
 - [`cpp/config.properties`](../config.properties): the active structures
 - [`cpp/benchmarks/results/`](../benchmarks/results/) and [`java/stage1/benchmarks/results/`](../../java/stage1/benchmarks/results/) (`real/` and `synthetic/`): the CSVs behind the benchmark tables
