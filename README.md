@@ -82,7 +82,7 @@ folder, and git ignores it.
 
 | | Java | Python | C++ |
 |---|---|---|---|
-| Language | JDK 17+ | Python 3.9+ | C++20 compiler (GCC or Clang) |
+| Language | JDK 17+ | Python 3.10+ | C++20 compiler (GCC or Clang) |
 | Build | Maven 3 | `pip` | CMake ≥ 3.20, Ninja, Make |
 | Libraries | Downloaded by Maven (sqlite-jdbc, Jackson, MongoDB driver, JUnit 5) | `requests`, `pymongo` | SQLite3, libcurl, mongo-cxx-driver (system); nlohmann/json and GoogleTest are downloaded by CMake |
 
@@ -159,30 +159,43 @@ The Java module has its own detailed guide in [`java/stage1/README.md`](java/sta
 are discussed in the Java report,
 [`java/stage1/docs/Stage1_Java_Report.pdf`](java/stage1/docs/Stage1_Java_Report.pdf).
 
-### 🐍 Python (`python/`)
+### 🐍 Python (`python/stage_1/`)
 
 ```bash
-cd python
-pip install -r requirements.txt
-cd stage_1/src/main/bigdata
-python main.py
+cd python/stage_1
+python -m venv venv
+source venv/bin/activate          # Windows: venv\Scripts\activate
+pip install -r ../requirements.txt pytest
+pytest src/test                   # 39 tests
 ```
 
-`main.py` goes through all the ids of `shared/book_ids.txt` in a single run. For each book that is
-not indexed yet, it downloads the book, writes it to **the three datalake structures at once**,
-stores its metadata in SQLite and adds it to **the three indexes at once** (MongoDB only if a
-server is reachable). Books already in the control layer are skipped, so running it again only
-processes what is left. The output goes to `data/` at the repository root, except the control
-files (see [Implementation status](#implementation-status)).
+Then run the command-line interface with `python -m src.main.bigdata.main <command>`:
 
-After a run, `python test_indices.py` (from the same folder) prints the size of each index and a
-few sample lookups.
-
-Unit tests (splitter, range layout, metadata parser, tokenizer), from `python/stage_1/`:
+| Command | What it does |
+|---|---|
+| `pipeline [steps]` | Processes up to `steps` books of `shared/book_ids.txt` (all of them by default). For each book not indexed yet it downloads it, writes it to **the three datalake structures at once**, stores its metadata in SQLite and adds it to **the three indexes at once** (MongoDB only if a server is reachable). Each book is flushed before it is marked as indexed, so an interrupted run resumes where it stopped. |
+| `pipeline [steps] --offline-source <dir>` | The same pipeline, reading `pg<ID>.txt` files from a local folder instead of the network |
+| `search <words...>` | AND search on the monolithic index. Prints the ids. |
+| `status` | Books in the dataset, downloaded, indexed and pending (not indexed yet). |
 
 ```bash
-python -m unittest discover -s src/test -t .
+python -m src.main.bigdata.main pipeline 200      # the whole dataset
+python -m src.main.bigdata.main search whale island
+python -m src.main.bigdata.main status
 ```
+
+Quick try, with no network:
+
+```bash
+python -m src.main.bigdata.main pipeline 15 --offline-source ../../sample_dataset/raw
+python -m src.main.bigdata.main search whale island      # 76, 84 and 2701
+```
+
+The data goes to `python/stage_1/data/`. The Python module has its own guide in
+[`python/stage_1/README.md`](python/stage_1/README.md) (where data goes, code structure,
+benchmarks). The design and the benchmark results are discussed in the Python report,
+[`python/stage_1/docs/Stage1_Python_Report.pdf`](python/stage_1/docs/Stage1_Python_Report.pdf)
+(LaTeX sources in [`python/stage_1/docs/report/`](python/stage_1/docs/report/)).
 
 ### ⚙️ C++ (`cpp/`)
 
@@ -283,16 +296,16 @@ $B benchmark index_build
 $B benchmark metadata_query
 ```
 
-**Python** (from `python/stage_1/src/main/bigdata/`):
+**Python** (from `python/stage_1/`, after `pipeline 200`). Two runs, one after the other: the
+real mode writes the 10 datalake and index CSVs to `benchmarks/results/real/`, and the synthetic mode
+writes 12 CSVs, the metadata ones included, to `benchmarks/results/synthetic/`. `verify_results`
+then checks the CSVs against the exact values of SPEC section 10:
 
 ```bash
-python benchmark/benchmark_datalake.py    # write time of the 3 datalake structures
-python benchmark/benchmark_index.py       # build time of the 3 indexes
+python -m src.main.bigdata.benchmark.benchmark_runner data/datalake/book > benchmarks/bench_real.log 2>&1
+python -m src.main.bigdata.benchmark.benchmark_runner > benchmarks/bench_synthetic.log 2>&1
+python -m src.main.bigdata.benchmark.verify_results
 ```
-
-These two scripts download their books first (outside the timed part) and write
-`data/benchmarks/datalake_benchmark.csv` and `index_benchmark.csv` at the repository root, in their
-own format.
 
 ### Committed results
 
@@ -300,33 +313,21 @@ own format.
 |---|---|
 | Java | [`java/stage1/benchmarks/results/`](java/stage1/benchmarks/results/): `real/` (datalake and index, 10 CSVs) and `synthetic/` (12 CSVs, metadata included) |
 | C++ | [`cpp/benchmarks/results/`](cpp/benchmarks/results/): `real/datalake/`, `real/index/` and `synthetic/metadata/` |
-| Python | none committed yet |
+| Python | [`python/stage_1/benchmarks/results/`](python/stage_1/benchmarks/results/): `real/` (datalake and index, 10 CSVs) and `synthetic/` (12 CSVs, metadata included), measured on Linux |
 
 Only results from runs with the sizes of SPEC section 10 are committed. The comparison of the
 implementations and storage structures is in the report submitted on the virtual campus.
 
 ## Implementation status
 
-The three implementations are at different points. As of 2026-10-03 (the Java and C++ columns, 2026-10-04):
+The three implementations are at different points. As of 2026-10-04:
 
 | | Java | Python | C++ |
 |---|---|---|---|
 | Pipeline (crawler, datalake, metadata, index, control) | ✅ | ✅ | ✅ |
 | Datalake structure | one, chosen in the configuration | the three at once | one, chosen in the configuration |
 | Index structure | one, chosen in the configuration | the three at once | one, chosen in the configuration |
-| Search command | ✅ | ❌ (`test_indices.py` only prints lookups) | ✅ |
+| Search command | ✅ | ✅ | ✅ |
 | Offline mode (`sample_dataset/raw/`) | ✅ | ✅ (`--offline-source`) | ✅ |
-| Benchmarks in the SPEC CSV format | ✅ all 12 | ❌ 2 scripts, own format | ✅ all 12 |
-| Tests | 357, all passing | 17, all passing | 232, all passing |
-
-Known issues, found while preparing this README:
-
-* **Python tokenizer:** `tokenize` splits with `\w+`, which also keeps `_` and non-ASCII letters
-  (`é`, `ñ`...). SPEC section 5 keeps only `a-z` and `0-9`, so the Python index will not match the
-  reference term counts above. The docstring already describes `[a-zA-Z0-9]+`, the correct pattern.
-* **Python paths:** the datalake, the datamarts and the benchmark CSVs go to `data/` at the
-  repository root. `ControlLayer`, however, defaults to `../data/control` relative to the working
-  directory, which ends up in `python/stage_1/src/main/data/control/` when run as shown above.
-* **Python control layer:** the monolithic index is saved only once, at the end of the run, but each
-  book is marked as indexed as soon as it is processed. If the run is interrupted, those books stay
-  marked as indexed but are missing from `inverted_index.json`.
+| Benchmarks in the SPEC CSV format | ✅ all 12 | ✅ all 12 (run on Linux) | ✅ all 12 |
+| Tests | 357, all passing | 39, all passing | 232, all passing |
