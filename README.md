@@ -208,9 +208,10 @@ $B pipeline 30 --offline
 $B search whale island      # 76, 84 and 2701
 ```
 
-The C++ module has its own detailed guide in [`cpp/README.md`](cpp/README.md) (where data goes,
-resuming after an interruption, exit codes) and a development log in
-[`cpp/DEVLOG.md`](cpp/DEVLOG.md).
+The C++ module's documentation is in [`cpp/docs/`](cpp/docs/): a user guide,
+[`USER_GUIDE.md`](cpp/docs/USER_GUIDE.md) (where data goes, resuming after an interruption, exit codes); a
+summary of the module, [`MODULE_REPORT.md`](cpp/docs/MODULE_REPORT.md); and the in-depth development log,
+[`DEVLOG.md`](cpp/docs/DEVLOG.md).
 
 ## Sample dataset
 

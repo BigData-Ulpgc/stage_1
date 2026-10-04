@@ -38,7 +38,7 @@ pipeline").
 - **Testing the whole pipeline without network:** use `raw/`. An offline run reads
   `raw/pg<ID>.txt` instead of the URL, for each id in `book_ids.txt`. Everything after the download
   (split, datalake, metadata, index, control files) stays exactly the same. The C++ module has this
-  offline mode: `pipeline <N> --offline` (see `cpp/README.md`). Java and Python do not have it yet
+  offline mode: `pipeline <N> --offline` (see `cpp/docs/USER_GUIDE.md`). Java and Python do not have it yet
   (2026-10-03).
 - **Benchmarks, or any step that starts from books already split:** use `book/`. It is a ready-made
   `book` datalake. For example, Java's `DatalakeBenchmark` and `IndexBenchmark` accept a book

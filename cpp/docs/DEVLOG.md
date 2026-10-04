@@ -1,14 +1,89 @@
 # C++ module – development log
 
-This log records **what** was done in the C++ implementation and, above all, **why**
-each decision was taken (and which alternatives were discarded). It feeds sections 3
-(architecture) and 4 (design decisions) of the final report. New entries go at the
-bottom; never rewrite history, add a correction entry instead.
+An in-depth record of how the C++ module was built, from its first CMake file (2026-09-20) to the
+final version: **what** was done at each step and, above all, **why**, with the alternatives that
+were discarded and the measurements behind each decision. It is the long-form companion of
+[`MODULE_REPORT.md`](MODULE_REPORT.md), which summarises the module for its readers, and of
+[`USER_GUIDE.md`](USER_GUIDE.md), which explains how to build and run it. New entries go at the
+bottom; history is never rewritten, and a correction is a new entry.
 
 Conventions for the whole module:
 - All code, comments, commit messages and this log are written in **English**.
-- The shared contract in `../shared/SPEC.md` is the source of truth for behaviour
+- The shared contract in `../../shared/SPEC.md` is the source of truth for behaviour
   (tokenizer, datalake layouts, index formats, CSV benchmark format).
+
+## Contents
+
+- [Entry 1 – Build environment (2026-09-20)](#entry-1--build-environment-2026-09-20)
+- [Entry 2 – Conventions and SQLite target fix (2026-09-20)](#entry-2--conventions-and-sqlite-target-fix-2026-09-20)
+- [Entry 3 – Tokenizer core (2026-09-20)](#entry-3--tokenizer-core-2026-09-20)
+- [Entry 4 – Editor setup for IntelliSense (2026-09-20)](#entry-4--editor-setup-for-intellisense-2026-09-20)
+- [Entry 5 – Stopword loading (2026-09-20)](#entry-5--stopword-loading-2026-09-20)
+- [Entry 6 – Stopword filtering inside the tokenizer (2026-09-20)](#entry-6--stopword-filtering-inside-the-tokenizer-2026-09-20)
+- [Entry 7 – Header/body split (2026-09-20)](#entry-7--headerbody-split-2026-09-20)
+- [Entry 8 – Download result type (2026-09-25)](#entry-8--download-result-type-2026-09-25)
+- [Entry 9 – Downloading books with libcurl (2026-09-27)](#entry-9--downloading-books-with-libcurl-2026-09-27)
+- [Entry 10 – Generalizing the client and the book source (2026-09-27)](#entry-10--generalizing-the-client-and-the-book-source-2026-09-27)
+- [Entry 11 – Metadata extraction with regex (2026-09-27)](#entry-11--metadata-extraction-with-regex-2026-09-27)
+- [Entry 12 – Persisting metadata into SQLite (2026-09-27)](#entry-12--persisting-metadata-into-sqlite-2026-09-27)
+- [Entry 13 – Open decision: generalizing MetadataStore (2026-09-28)](#entry-13--open-decision-generalizing-metadatastore-2026-09-28)
+- [Entry 14 – Datalake interface and the book-based layout (2026-09-28)](#entry-14--datalake-interface-and-the-book-based-layout-2026-09-28)
+- [Entry 15 – Range-based datalake layout (2026-09-29)](#entry-15--range-based-datalake-layout-2026-09-29)
+- [Entry 16 – Time-based datalake layout, and testing code that depends on the clock (2026-09-29)](#entry-16--time-based-datalake-layout-and-testing-code-that-depends-on-the-clock-2026-09-29)
+- [Entry 17 – In-memory inverted index (2026-09-29)](#entry-17--in-memory-inverted-index-2026-09-29)
+- [Entry 18 – Index persistence: interface and the monolithic JSON writer (2026-09-29)](#entry-18--index-persistence-interface-and-the-monolithic-json-writer-2026-09-29)
+- [Entry 19 – Hierarchical index writer (2026-09-29)](#entry-19--hierarchical-index-writer-2026-09-29)
+- [Entry 20 – Group decision: MongoDB runs via Docker (2026-09-29)](#entry-20--group-decision-mongodb-runs-via-docker-2026-09-29)
+- [Entry 21 – MongoDB index writer, and a real bug caught by testing (2026-09-29)](#entry-21--mongodb-index-writer-and-a-real-bug-caught-by-testing-2026-09-29)
+- [Entry 22 – AND query engine (2026-09-29)](#entry-22--and-query-engine-2026-09-29)
+- [Entry 23 – Control log (2026-09-29)](#entry-23--control-log-2026-09-29)
+- [Entry 24 – Control decision logic and the shared book id list (2026-09-29)](#entry-24--control-decision-logic-and-the-shared-book-id-list-2026-09-29)
+- [Entry 25 – main.cpp: wiring everything into a runnable pipeline (2026-09-30)](#entry-25--maincpp-wiring-everything-into-a-runnable-pipeline-2026-09-30)
+- [Entry 26 – Benchmark infrastructure: the timer and the shared CSV writer (2026-09-30)](#entry-26--benchmark-infrastructure-the-timer-and-the-shared-csv-writer-2026-09-30)
+- [Entry 27 – First real experiment: index_build (2026-09-30)](#entry-27--first-real-experiment-index_build-2026-09-30)
+- [Entry 28 – index_query: generalizing query_and to compare structures fairly (2026-09-30)](#entry-28--index_query-generalizing-query_and-to-compare-structures-fairly-2026-09-30)
+- [Entry 29 – Real books instead of synthetic data, and a CLI to run benchmarks (2026-10-01)](#entry-29--real-books-instead-of-synthetic-data-and-a-cli-to-run-benchmarks-2026-10-01)
+- [Entry 30 – datalake_write, and SampleBook gets a header (2026-10-01)](#entry-30--datalake_write-and-samplebook-gets-a-header-2026-10-01)
+- [Entry 31 – datalake_lookup: giving Datalake a locate() method (2026-10-01)](#entry-31--datalake_lookup-giving-datalake-a-locate-method-2026-10-01)
+- [Entry 32 – Cross-language comparison: how each language solved TimeBasedDatalake's lookup (2026-10-01)](#entry-32--cross-language-comparison-how-each-language-solved-timebaseddatalakes-lookup-2026-10-01)
+- [Entry 33 – datalake_incremental: Datalake gets list_book_ids() too (2026-10-01)](#entry-33--datalake_incremental-datalake-gets-list_book_ids-too-2026-10-01)
+- [Entry 34 – datalake_recovery, and a generalized measure_elapsed_ms (2026-10-01)](#entry-34--datalake_recovery-and-a-generalized-measure_elapsed_ms-2026-10-01)
+- [Entry 35 – datalake_storage, closing the datalake benchmark block (2026-10-01)](#entry-35--datalake_storage-closing-the-datalake-benchmark-block-2026-10-01)
+- [Entry 36 – metadata_insert, and a transaction gap this benchmark exposed (2026-10-01)](#entry-36--metadata_insert-and-a-transaction-gap-this-benchmark-exposed-2026-10-01)
+- [Entry 37 – Fixing the transaction gap Entry 36 found, and measuring the difference (2026-10-01)](#entry-37--fixing-the-transaction-gap-entry-36-found-and-measuring-the-difference-2026-10-01)
+- [Entry 38 – metadata_query, and two query methods the indexes were waiting for (2026-10-01)](#entry-38--metadata_query-and-two-query-methods-the-indexes-were-waiting-for-2026-10-01)
+- [Entry 39 – index_update reveals hierarchical is far worse than monolithic for updates (2026-10-01)](#entry-39--index_update-reveals-hierarchical-is-far-worse-than-monolithic-for-updates-2026-10-01)
+- [Entry 40 – Fixing hierarchical's update cost (Entry 39), and what the fix did and did not solve (2026-10-01)](#entry-40--fixing-hierarchicals-update-cost-entry-39-and-what-the-fix-did-and-did-not-solve-2026-10-01)
+- [Entry 41 – index_memory, measured without a garbage collector to lean on (2026-10-01)](#entry-41--index_memory-measured-without-a-garbage-collector-to-lean-on-2026-10-01)
+- [Entry 42 – index_disk, the last of the 12 SPEC section 9 experiments (2026-10-01)](#entry-42--index_disk-the-last-of-the-12-spec-section-9-experiments-2026-10-01)
+- [Entry 43 – Splitting main.cpp: argv parsing vs. command wiring (2026-10-01)](#entry-43--splitting-maincpp-argv-parsing-vs-command-wiring-2026-10-01)
+- [Entry 44 – `search` and `status` commands: querying the persisted index from the binary (2026-10-01)](#entry-44--search-and-status-commands-querying-the-persisted-index-from-the-binary-2026-10-01)
+- [Entry 45 – Module folders mirroring the Java package layout (2026-10-02)](#entry-45--module-folders-mirroring-the-java-package-layout-2026-10-02)
+- [Entry 46 – A user guide for the module: `cpp/README.md` (2026-10-02)](#entry-46--a-user-guide-for-the-module-cppreadmemd-2026-10-02)
+- [Entry 47 – The group's benchmark dataset agreement, written into the SPEC (2026-10-03)](#entry-47--the-groups-benchmark-dataset-agreement-written-into-the-spec-2026-10-03)
+- [Entry 48 – `sample_dataset/`: the group's 15 original books, raw and split (2026-10-03)](#entry-48--sample_dataset-the-groups-15-original-books-raw-and-split-2026-10-03)
+- [Entry 49 – Offline pipeline mode: `pipeline <N> --offline` reads `sample_dataset/raw/` (2026-10-03)](#entry-49--offline-pipeline-mode-pipeline-n---offline-reads-sample_datasetraw-2026-10-03)
+- [Entry 50 – `HierarchicalIndexWriter::write()` now replaces its folder, and `index_build` empties it untimed (2026-10-03)](#entry-50--hierarchicalindexwriterwrite-now-replaces-its-folder-and-index_build-empties-it-untimed-2026-10-03)
+- [Entry 51 – The pipeline reports what a step actually did, and stops at the first failure (2026-10-03)](#entry-51--the-pipeline-reports-what-a-step-actually-did-and-stops-at-the-first-failure-2026-10-03)
+- [Entry 52 – Benchmark adaptation, step 2: `load_sample_books` returns books in ascending id order (2026-10-03)](#entry-52--benchmark-adaptation-step-2-load_sample_books-returns-books-in-ascending-id-order-2026-10-03)
+- [Entry 53 – Benchmark adaptation, step 3a: index experiments at N=50, 100 and 200 (2026-10-03)](#entry-53--benchmark-adaptation-step-3a-index-experiments-at-n50-100-and-200-2026-10-03)
+- [Entry 54 – Benchmark adaptation, step 3b: `index_memory` per size, measured with allocator in-use bytes instead of peak RSS (2026-10-03)](#entry-54--benchmark-adaptation-step-3b-index_memory-per-size-measured-with-allocator-in-use-bytes-instead-of-peak-rss-2026-10-03)
+- [Entry 55 – `index_query` and `index_memory` now measure exactly what the Java module measures (2026-10-03)](#entry-55--index_query-and-index_memory-now-measure-exactly-what-the-java-module-measures-2026-10-03)
+- [Entry 56 – Parity with Java, step A: `index_build`, `index_update` and `index_disk` under Java's conditions (2026-10-03)](#entry-56--parity-with-java-step-a-index_build-index_update-and-index_disk-under-javas-conditions-2026-10-03)
+- [Entry 57 – Parity with Java, step B: `JavaRandom`, Java's random generator reproduced number for number (2026-10-03)](#entry-57--parity-with-java-step-b-javarandom-javas-random-generator-reproduced-number-for-number-2026-10-03)
+- [Entry 58 – MongoDB measured for the first time, under Java's conditions (2026-10-03)](#entry-58--mongodb-measured-for-the-first-time-under-javas-conditions-2026-10-03)
+- [Entry 59 – Index benchmark results will come from a teammate's machine with native Docker (2026-10-03)](#entry-59--index-benchmark-results-will-come-from-a-teammates-machine-with-native-docker-2026-10-03)
+- [Entry 60 – Only results with the agreed sizes stay in the repo (2026-10-03)](#entry-60--only-results-with-the-agreed-sizes-stay-in-the-repo-2026-10-03)
+- [Entry 61 – Parity with Java, step C: the five datalake experiments under Java's conditions (2026-10-03)](#entry-61--parity-with-java-step-c-the-five-datalake-experiments-under-javas-conditions-2026-10-03)
+- [Entry 62 – Parity with Java, step D: the metadata experiments on Java's synthetic rows, with `sqlite_no_index` (2026-10-03)](#entry-62--parity-with-java-step-d-the-metadata-experiments-on-javas-synthetic-rows-with-sqlite_no_index-2026-10-03)
+- [Entry 63 – Benchmark results committed, in `real/` and `synthetic/`, one folder per category (2026-10-03)](#entry-63--benchmark-results-committed-in-real-and-synthetic-one-folder-per-category-2026-10-03)
+- [Entry 64 – `MongoIndexWriter::update_terms` sends one bulk write, as Java's `flush` does (2026-10-03)](#entry-64--mongoindexwriterupdate_terms-sends-one-bulk-write-as-javas-flush-does-2026-10-03)
+- [Entry 65 – The benchmark module split into one subfolder per category (2026-10-03)](#entry-65--the-benchmark-module-split-into-one-subfolder-per-category-2026-10-03)
+- [Entry 66 – 20 stale files a merge brought back into `cpp/` removed (2026-10-04)](#entry-66--20-stale-files-a-merge-brought-back-into-cpp-removed-2026-10-04)
+- [Entry 67 – The `index_memory` test that failed on Linux, fixed and checked on Linux (2026-10-04)](#entry-67--the-index_memory-test-that-failed-on-linux-fixed-and-checked-on-linux-2026-10-04)
+- [Entry 68 – The pipeline's datalake and index chosen in `config.properties`, as in Java (2026-10-04)](#entry-68--the-pipelines-datalake-and-index-chosen-in-configproperties-as-in-java-2026-10-04)
+- [Entry 69 – The root README's C++ parts brought up to date (2026-10-04)](#entry-69--the-root-readmes-c-parts-brought-up-to-date-2026-10-04)
+- [Entry 70 – The module's documentation gathered in `cpp/docs/`, with a report for readers (2026-10-04)](#entry-70--the-modules-documentation-gathered-in-cppdocs-with-a-report-for-readers-2026-10-04)
 
 ---
 
@@ -3444,3 +3519,39 @@ updated (the rest is the teammates'):
 
 The Python cells and the Python known issues were left as they are. They are still the
 2026-10-03 ones, and keeping them current is the Python teammate's part.
+
+---
+
+## Entry 70 – The module's documentation gathered in `cpp/docs/`, with a report for readers (2026-10-04)
+
+### What was done
+At the user's request, the module's documentation now lives in one folder, `cpp/docs/`, as three
+files for three readers:
+
+| File | Was | What it holds |
+|---|---|---|
+| `DEVLOG.md` | `cpp/DEVLOG.md` | This in-depth development log, now opened by an introduction and an index of every entry |
+| `USER_GUIDE.md` | `cpp/README.md` | The user guide: build, test, commands, configuration, where data goes, exit codes |
+| `MODULE_REPORT.md` | new | A summary of the whole module for instructors: architecture, code structure, pipeline flow, design decisions, development process, testing, benchmarks against Java, how to run it, known limitations |
+
+- Both existing files were moved with `git mv`, so their history follows them. The user guide was
+  renamed because "README" did not say what it was. `DEVLOG.md` kept its name: dozens of code
+  comments cite "DEVLOG Entry N".
+- `MODULE_REPORT.md` is the Markdown version of the report written for the instructors as a Claude
+  Docs document. Its architecture diagram is drawn in Mermaid, which GitHub renders.
+- The DEVLOG gained an introduction (what it is, how it relates to the other two files) and a
+  **Contents** list linking every entry. No entry was rewritten: they stay append-only.
+- Links updated:
+  - the root `README.md`, in its C++ section only, now points to the three files;
+  - the user guide's own relative links (`DEVLOG.md`, `../../shared/SPEC.md`,
+    `../config.properties`);
+  - the comment at the top of `cpp/config.properties`;
+  - `sample_dataset/README.md`, which pointed to `cpp/README.md`.
+- Earlier entries keep their old paths (`cpp/README.md`, `cpp/DEVLOG.md`), because they record what
+  was true at the time.
+
+### Why
+The documentation had grown to a 3,400-line log and a 200-line guide in the module's root, with
+nothing that summarised the module for someone grading it. Three files in one folder, each named
+after what it is, let each reader start where they need to: the instructor with the report, a user
+with the guide, and a reviewer who wants the full reasoning with the log.
