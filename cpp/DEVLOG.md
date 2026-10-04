@@ -3253,3 +3253,80 @@ single class per category, against six or seven files per category here.
   pass; the 10 Mongo ones were skipped because no server was running.
 - The rebuilt CLI reran the deterministic `datalake_storage`, and its CSV came out identical to the
   committed one: the moved code produces exactly the same results.
+
+---
+
+## Entry 66 – 20 stale files a merge brought back into `cpp/` removed (2026-10-04)
+
+### What happened
+When the teammates pushed their final versions, merge commit `a662049` ("Resolve conflicts accepting
+deletions from upstream for cpp") came from the Python branch. It **added back 20 old files**:
+copies from before Entry 45's reorganisation, sitting loose at the root of `cpp/include/stage1/`,
+`cpp/src/` and `cpp/tests/`:
+
+- 7 headers: `benchmark`, `index_build_benchmark`, `index_query_benchmark`, `pipeline`,
+  `query_list`, `stopwords`, `tokenizer`;
+- 6 sources: the same names, without `stopwords`;
+- 7 tests: `benchmark_test`, `index_build_benchmark_test`, `index_query_benchmark_test`,
+  `pipeline_test`, `query_list_test`, `stopwords_test`, `tokenizer_test`.
+
+They came from the Python branch's history, which still held `cpp/` as it was before the
+reorganisation. The conflict resolution kept them instead of the moves.
+
+This is the second time: the merge incident of 2026-09-30 (PR #1) went the other way and deleted 8
+of this module's files.
+
+### What was done
+Before removing anything, every file was checked:
+- none appears in either `CMakeLists.txt`, so none was ever compiled;
+- no other file includes the old flat headers (`"stage1/tokenizer.hpp"` and so on);
+- each one has its current version in its module folder, for example
+  `datamart/index/tokenizer.hpp`, `control/pipeline.hpp` and `benchmark/index/query_list.hpp`.
+
+They were removed with `git rm`, so they stay in the history. `cpp/`'s roots are again what Entry 45
+defined: only `cli_commands`, `main.cpp` and `smoke_test.cpp` sit outside the module folders.
+
+### Verification
+A clean configure and build had no warnings, and all 217 tests pass. Since the files were not
+compiled, nothing could change, and nothing did.
+
+### For the group
+The Python branch should not resolve conflicts in `cpp/`. Two safe options: rebase it on `main`
+instead of merging `main` into it, or resolve any conflict outside `python/` by taking `main`'s
+side.
+
+---
+
+## Entry 67 – The `index_memory` test that failed on Linux, fixed and checked on Linux (2026-10-04)
+
+### The problem
+The root README, written by the Java teammate after running this module on Linux, reported one
+failing test there:
+`BenchmarkIndexMemory.ReportsHeapAfterBuildAndAfterOpenPerStructureLikeTheJavaModule`. It asserted
+that, after opening, the hierarchical index holds less heap than the monolithic one. That is true at
+the scale the experiment is about, where the monolithic index parses its whole JSON and the
+hierarchical one keeps only a folder path. But the test used a 2-book corpus of 5 terms. At that
+size both are a few hundred bytes, and which one is larger depends on how each allocator rounds its
+blocks: on macOS the assertion held; on glibc it measured 256 against 192–224 bytes. The test was
+checking the allocator, not the design.
+
+### What was done
+- The small test keeps its checks (rows, units, both structures present, values above 0) but no
+  longer compares the two structures.
+- A new test, `OpeningMonolithicHoldsTheWholeIndexWhileHierarchicalHoldsAlmostNothing`, makes the
+  comparison where it means something: two books of 3,000 distinct terms each (4,500 in total). It
+  asserts that monolithic holds more than 100,000 bytes after opening, and more than 10 times what
+  hierarchical holds. At that size the gap is orders of magnitude, whatever the allocator.
+- No production code changed. `cpp/README.md` now says 218 tests.
+
+### Verification
+- **On Linux:** an Ubuntu 24.04 container (glibc 2.39), run through Colima. It compiled the
+  `index_memory` benchmark and its sources with g++ and the distribution's GoogleTest. Mongo was
+  replaced by a stub that reports "unreachable", as on a machine without a server.
+  - The **old** test failed exactly as reported: `256 vs 192`.
+  - The **new** file passes both of its tests.
+- **On macOS:** all 218 tests pass (10 Mongo ones skipped without a server).
+
+### For the group
+The root README's "Known issues" bullet about this test, and its "217, one failing on Linux" cell,
+are now out of date. It is the group's file, so it was not edited here.
