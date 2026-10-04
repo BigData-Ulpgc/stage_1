@@ -10,12 +10,10 @@ from typing import Optional, Tuple
 
 # Regular expressions for the start and end markers (both variants)
 START_MARKER_RE = re.compile(
-    r"\*\*\* START OF (THE|THIS) PROJECT GUTENBERG EBOOK.*",
-    re.IGNORECASE
+    r"\*\*\* START OF (THE|THIS) PROJECT GUTENBERG EBOOK.*"
 )
 END_MARKER_RE = re.compile(
-    r"\*\*\* END OF (THE|THIS) PROJECT GUTENBERG EBOOK",
-    re.IGNORECASE
+    r"\*\*\* END OF (THE|THIS) PROJECT GUTENBERG EBOOK"
 )
 
 

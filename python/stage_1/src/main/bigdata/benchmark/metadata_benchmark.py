@@ -48,24 +48,27 @@ def insert(size: int, work_dir: Path) -> List[BenchmarkRow]:
     for backend in ('sqlite', 'sqlite_no_index'):
         db_path = work_dir / 'insert' / f'{backend}.db'
 
+        repo_holder = [None]
+
         def setup(p=db_path, b=backend):
+            if repo_holder[0] is not None:
+                repo_holder[0].close()
             p.parent.mkdir(parents=True, exist_ok=True)
             if p.exists():
                 p.unlink()
             # Pre-create DB schema and indexes outside of timed task
             with_idx = (b == 'sqlite')
-            repo = MetadataRepository(p, with_indexes=with_idx)
-            repo.close()
+            repo_holder[0] = MetadataRepository(p, with_indexes=with_idx)
 
-        def task(p=db_path, b=backend):
-            with_idx = (b == 'sqlite')
-            repo = MetadataRepository(p, with_indexes=with_idx)
+        def task():
+            repo = repo_holder[0]
             # Insert in batches of 1000
             for i in range(0, size, 1000):
                 repo.save_all(data[i:i+1000])
-            repo.close()
 
         elapsed = measure('metadata_insert', backend, size, setup=setup, task=task)
+        if repo_holder[0] is not None:
+            repo_holder[0].close()
         
         import sqlite3
         with sqlite3.connect(db_path) as conn:
@@ -126,8 +129,8 @@ def query(size: int, work_dir: Path, n_queries: int = DEFAULT_QUERY_COUNT) -> Li
         for query_type, task_fn in [('find_by_id', task_id), ('find_by_author', task_author), ('find_by_title', task_title)]:
             elapsed = measure('metadata_query', backend, size, setup=setup, task=task_fn)
             
-            if found[0] < 1000:
-                raise RuntimeError(f"Expected >= 1000 found, got {found[0]} for {query_type}")
+            if found[0] < n_queries:
+                raise RuntimeError(f"Expected >= {n_queries} found, got {found[0]} for {query_type}")
                 
             avg_rows = derived_rows(elapsed, f'{query_type}_avg', 'us',
                                      lambda ms: ms * 1000.0 / n_queries)

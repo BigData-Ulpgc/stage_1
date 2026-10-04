@@ -234,6 +234,10 @@ def main() -> None:
             print(f"[WARN] [{book_id}] MongoDB index skipped (no connection).")
 
         # 3g. Confirmation in control layer
+        mono_index.flush()
+        hier_index.flush()
+        if mongo_index is not None:
+            mongo_index.flush()
         control.mark_as_downloaded(book_id)
         control.mark_as_indexed(book_id)
         print(f"[INFO] [{book_id}] [OK] Book processed successfully.")

@@ -48,7 +48,7 @@ class HierarchicalFolderIndex(InvertedIndex):
             
             sorted_new = sorted(new_ids)
             
-            if not existing_ids or sorted_new[0] > existing_ids[-1]:
+            if not existing_ids or sorted_new[0] > max(existing_ids):
                 with open(path, 'a', encoding='utf-8', newline='\n', buffering=131072) as f:
                     for book_id in sorted_new:
                         f.write(f"{book_id}\n")

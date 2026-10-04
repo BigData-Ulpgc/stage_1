@@ -27,7 +27,7 @@ def write_csv(file: Path, rows: List[BenchmarkRow]) -> None:
     content = '\n'.join(lines) + '\n'
     
     try:
-        tmp.write_text(content, encoding='utf-8')
+        tmp.write_text(content, encoding='utf-8', newline='\n')
         os.replace(str(tmp), str(file))
     except Exception:
         tmp.unlink(missing_ok=True)

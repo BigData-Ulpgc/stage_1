@@ -49,9 +49,9 @@ The main entry point for the application is the `main.py` orchestrator.
 
 | Command | What it does | Network |
 | --- | --- | --- |
-| `pipeline [steps]` | Runs up to *steps* pipeline steps. Downloads a new book from Gutenberg if needed, splits it, and indexes it. | Yes |
+| `pipeline [steps]` | Runs up to *steps* books (counts books: download and index together, not actions). Downloads a new book from Gutenberg if needed, splits it, and indexes it. | Yes |
 | `search <words...>` | AND search on the active index: returns books containing every word. | No |
-| `status` | Displays the current count of downloaded, indexed, and pending books. | No |
+| `status` | Displays the current count of downloaded, indexed, and pending books ('Pending' means 'not indexed'). | No |
 | `--offline-source` | Skips Gutenberg network requests and loads books directly from a local folder. | No |
 
 **Examples:**

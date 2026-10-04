@@ -63,6 +63,7 @@ def _mongo_backend():
         # Quick availability test
         idx = MongoInvertedIndex(
             db_name=BENCH_DATABASE, collection='_probe')
+        idx._collection.drop()
         idx.close()
         return ('mongo', lambda d: MongoInvertedIndex(
             db_name=BENCH_DATABASE, collection='inverted_index'))
@@ -133,10 +134,24 @@ def _allocated_bytes(root: Path) -> int:
 
 
 # ================================================================== #
+def verify(index, books, queries, what: str) -> None:
+    reference = InMemoryInvertedIndex()
+    _add_all(reference, books)
+    terms = [t for q in queries for t in sorted(tokenize(q))]
+    terms += sorted(books[0].terms)[:20] + sorted(books[-1].terms)[:20]
+    for term in dict.fromkeys(terms):
+        if index.postings(term) != reference.postings(term):
+            raise RuntimeError(f'{what}: different postings for "{term}"')
+    for q in queries:
+        if search(index, q) != search(reference, q):
+            raise RuntimeError(f'{what}: different result for "{q}"')
+
+
+# ================================================================== #
 # Experiment 1: index_build                                           #
 # ================================================================== #
 
-def build(books: List[TokenizedBook], work_dir: Path, backends) -> List[BenchmarkRow]:
+def build(books: List[TokenizedBook], work_dir: Path, backends, queries: List[str]) -> List[BenchmarkRow]:
     rows = []
     n = len(books)
     for name, open_fn in backends:
@@ -152,6 +167,7 @@ def build(books: List[TokenizedBook], work_dir: Path, backends) -> List[Benchmar
             idx.flush()
 
         elapsed = measure('index_build', name, n, setup=setup, task=task)
+        verify(idx_holder[0], books, queries, f'build {name}')
         rows.extend(elapsed)
         rows.extend(derived_rows(elapsed, 'throughput', 'books_per_s',
                                  lambda ms, nn=n: nn / (ms / 1000.0)))
@@ -185,6 +201,7 @@ def query(
         built.close()
 
         idx = open_fn(d)
+        verify(idx, books, queries, f'query {name}')
         found = [0]
 
         def setup():
@@ -208,7 +225,7 @@ def query(
 # Experiment 3: index_update                                          #
 # ================================================================== #
 
-def update(books: List[TokenizedBook], work_dir: Path, backends) -> List[BenchmarkRow]:
+def update(books: List[TokenizedBook], work_dir: Path, backends, queries: List[str]) -> List[BenchmarkRow]:
     n = len(books)
     k = max(1, n // 10)
     base_books = books[:n - k]
@@ -232,6 +249,7 @@ def update(books: List[TokenizedBook], work_dir: Path, backends) -> List[Benchma
                 idx.flush()
 
         elapsed = measure('index_update', name, n, setup=setup, task=task)
+        verify(idx_holder[0], books, queries, f'update {name}')
         if idx_holder[0]:
             idx_holder[0].clear()
             idx_holder[0].close()
@@ -245,7 +263,7 @@ def update(books: List[TokenizedBook], work_dir: Path, backends) -> List[Benchma
 # Experiment 4: index_memory                                          #
 # ================================================================== #
 
-def memory(books: List[TokenizedBook], work_dir: Path, backends) -> List[BenchmarkRow]:
+def memory(books: List[TokenizedBook], work_dir: Path, backends, queries: List[str]) -> List[BenchmarkRow]:
     rows = []
     n = len(books)
     for name, open_fn in backends:
@@ -273,6 +291,7 @@ def memory(books: List[TokenizedBook], work_dir: Path, backends) -> List[Benchma
 
         snap_before_open = tracemalloc.take_snapshot()
         reopened = open_fn(d)
+        verify(reopened, books, queries, f'memory {name}')
         gc.collect()
         snap_after_open = tracemalloc.take_snapshot()
         heap_before_open = sum(s.size for s in snap_before_open.statistics('filename'))
@@ -292,7 +311,7 @@ def memory(books: List[TokenizedBook], work_dir: Path, backends) -> List[Benchma
 # Experiment 5: index_disk                                            #
 # ================================================================== #
 
-def disk(books: List[TokenizedBook], work_dir: Path, backends) -> List[BenchmarkRow]:
+def disk(books: List[TokenizedBook], work_dir: Path, backends, queries: List[str]) -> List[BenchmarkRow]:
     # Compute logical index stats
     all_terms = set()
     total_postings = 0
@@ -307,6 +326,7 @@ def disk(books: List[TokenizedBook], work_dir: Path, backends) -> List[Benchmark
         idx = _fresh_index(name, open_fn, d)
         _add_all(idx, books)
         idx.flush()
+        verify(idx, books, queries, f'disk {name}')
 
         disk_bytes = idx.disk_usage_bytes()
         rows.append(single_row('index_disk', name, n, 'bytes', disk_bytes, 'bytes'))
@@ -357,15 +377,15 @@ def run_all(
         print(f'  [index] size={n} ...')
 
         print('    build ...')
-        results['index_build'].extend(build(subset, work_dir, backends))
+        results['index_build'].extend(build(subset, work_dir, backends, queries))
         print('    query ...')
         results['index_query'].extend(query(subset, work_dir, backends, queries))
         print('    update ...')
-        results['index_update'].extend(update(subset, work_dir, backends))
+        results['index_update'].extend(update(subset, work_dir, backends, queries))
         print('    memory ...')
-        results['index_memory'].extend(memory(subset, work_dir, backends))
+        results['index_memory'].extend(memory(subset, work_dir, backends, queries))
         print('    disk ...')
-        results['index_disk'].extend(disk(subset, work_dir, backends))
+        results['index_disk'].extend(disk(subset, work_dir, backends, queries))
 
     for experiment, rows in results.items():
         write_experiment(results_dir, experiment, rows)

@@ -9,11 +9,11 @@ except ImportError:
     HAS_PYMONGO = False
 
 class MongoInvertedIndex(InvertedIndex):
-    def __init__(self, uri='mongodb://localhost:27017', db_name='search_engine', collection='inverted_index'):
+    def __init__(self, uri='mongodb://localhost:27017', db_name='search_engine_bench', collection='inverted_index'):
         if not HAS_PYMONGO:
             raise ImportError("pymongo is required for MongoInvertedIndex")
         
-        self._client = MongoClient(uri)
+        self._client = MongoClient(uri, serverSelectionTimeoutMS=3000)
         self._db = self._client[db_name]
         self._collection = self._db[collection]
         
@@ -63,7 +63,10 @@ class MongoInvertedIndex(InvertedIndex):
     def disk_usage_bytes(self) -> int:
         try:
             # Flush WiredTiger buffers to disk so collStats reflects the real size
-            self._client.admin.command('fsync')
+            try:
+                self._client.admin.command('fsync')
+            except Exception:
+                pass
             stats = self._db.command("collStats", self._collection.name)
             return stats.get("storageSize", 0) + stats.get("totalIndexSize", 0)
         except Exception:

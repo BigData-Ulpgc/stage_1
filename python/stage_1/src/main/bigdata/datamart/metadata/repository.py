@@ -58,12 +58,12 @@ class MetadataRepository:
 
     def find_by_author(self, author: str) -> List[BookMetadata]:
         cursor = self._conn.cursor()
-        cursor.execute('SELECT * FROM books WHERE author = ?', (author,))
+        cursor.execute('SELECT * FROM books WHERE author = ? ORDER BY book_id', (author,))
         return [self._row_to_metadata(row) for row in cursor.fetchall()]
 
     def find_by_title(self, title: str) -> List[BookMetadata]:
         cursor = self._conn.cursor()
-        cursor.execute('SELECT * FROM books WHERE title = ?', (title,))
+        cursor.execute('SELECT * FROM books WHERE title = ? ORDER BY book_id', (title,))
         return [self._row_to_metadata(row) for row in cursor.fetchall()]
 
     def close(self):
