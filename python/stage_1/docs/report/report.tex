@@ -277,8 +277,9 @@ every structure in the same pass.
         into \code{\textbackslash n} and calls \code{split\_header\_body}, which finds the markers and
         returns header and body, both trimmed. A book without both markers is discarded.
   \item The \code{RawBook} is saved in the three datalakes. Each file is written to a \code{.tmp} and
-        moved into place, so a book is either complete or absent. Only then
-        \code{mark\_as\_downloaded(1342)} appends the id to \code{downloaded\_books.txt}.
+        moved into place, so a book is either complete or absent. Only then is the id appended
+        to \code{downloaded\_\allowbreak books.txt}, by
+        \code{mark\_as\_\allowbreak downloaded(1342)}.
   \item \code{parse\_metadata} applies the four regexes of the SPEC to the header, and
         \code{MetadataRepository.save\_all} stores the row in SQLite.
   \item \code{tokenize} turns the body into its set of terms, which is added to the monolithic, the
@@ -553,9 +554,10 @@ contributes each term once. The stopwords are read once, when the module is impo
 \code{shared/stopwords.txt}.
 
 \cls{InvertedIndex}{abstract base class, \code{base.py}}
-\code{add\_document(id, terms)}, \code{postings(term)} (sorted ids), \code{flush()},
-\code{clear()}, \code{disk\_usage\_bytes()} and \code{close()}. \code{add\_document} only touches
-memory; nothing is persistent until \code{flush}.
+Its methods are \code{add\_\allowbreak document(id, terms)}, \code{postings(term)} (sorted ids),
+\code{flush()}, \code{clear()}, \code{disk\_\allowbreak usage\_\allowbreak bytes()} and
+\code{close()}. \code{add\_\allowbreak document} only touches memory; nothing is persistent until
+\code{flush}.
 
 \cls{InMemoryInvertedIndex}{class, structure \code{memory}}
 A dictionary of sets. It is never persisted: it is the reference against which \code{verify()}
@@ -757,12 +759,13 @@ python -m src.main.bigdata.benchmark.benchmark_runner data/datalake/book > bench
 python -m src.main.bigdata.benchmark.benchmark_runner > benchmarks/bench_synthetic.log 2>&1
 python -m src.main.bigdata.benchmark.verify_results
 \end{lstlisting}
-Both logs must list the backends \code{['monolithic', 'hierarchical', 'mongo']}. The CSVs of each
+Both logs must list the three backends, monolithic, hierarchical and mongo. The CSVs of each
 block (datalake, metadata, index) are written when the block ends, so the machine must not sleep
 during the run, which takes hours.
 
-\textbf{Windows and Linux.} The commands are the same on both (on Windows, \code{venv\textbackslash
-Scripts\textbackslash activate}). The difference is speed: each repetition of the hierarchical index
+\textbf{Windows and Linux.} The commands are the same on both; on Windows the environment is
+activated with \code{venv\textbackslash Scripts\textbackslash activate}. The difference is speed:
+each repetition of the hierarchical index
 experiments creates and deletes about 129,000 small files, which is far slower on NTFS with an
 antivirus scanning every new file, and a folder synchronised by OneDrive makes it worse. The
 official results were therefore produced on Linux.
