@@ -14,7 +14,8 @@
 #include <vector>
 
 #include "stage1/benchmark/benchmark.hpp"
-#include "stage1/datalake/book_based_datalake.hpp"
+#include "stage1/config/datalake_factory.hpp"
+#include "stage1/config/index_factory.hpp"
 #include "stage1/control/book_id_list.hpp"
 #include "stage1/control/control_log.hpp"
 #include "stage1/crawler/curl_http_client.hpp"
@@ -36,7 +37,6 @@
 #include "stage1/benchmark/metadata/metadata_insert_benchmark.hpp"
 #include "stage1/benchmark/metadata/metadata_query_benchmark.hpp"
 #include "stage1/datamart/metadata/metadata_store.hpp"
-#include "stage1/datamart/index/monolithic_index_writer.hpp"
 #include "stage1/control/pipeline.hpp"
 #include "stage1/query/query_engine.hpp"
 #include "stage1/benchmark/index/query_list.hpp"
@@ -55,11 +55,7 @@ const std::filesystem::path kSharedDir = STAGE1_SHARED_DIR;
 const std::filesystem::path kSampleDir = STAGE1_SAMPLE_DIR;
 const std::filesystem::path kDataDir = STAGE1_DATA_DIR;
 const std::filesystem::path kBenchmarksDir = STAGE1_BENCHMARKS_DIR;
-
-// Written by `pipeline` (MonolithicIndexWriter), read back by `search`
-// (monolithic_postings_fetcher): one constant so the two can never drift
-// apart. Swapping pipeline's index format means swapping search's reader too.
-const std::filesystem::path kIndexPath = kDataDir / "datamarts" / "inverted_index.json";
+const std::filesystem::path kConfigFile = STAGE1_CONFIG_FILE;
 
 // Where an experiment's CSV goes: SPEC section 10.4's real/ (the downloaded
 // books: datalake and index experiments) or synthetic/ (the generated rows of
@@ -121,12 +117,11 @@ void describe(const StepResult& step) {
 
 }  // namespace
 
-// The datalake layout (book-based here) and the index format (monolithic
-// JSON here) are each one of three SPEC-required alternatives; both sit
-// behind their own interface (Datalake, IndexWriter), so swapping either for
-// a benchmark run means changing these two lines, not anything in
-// stage1_core.
-int run_pipeline_command(int steps, bool offline) {
+// The datalake layout and the index structure come from `config`
+// (config.properties, or -Dkey=value), as in the Java module: both sit behind
+// their own interface (Datalake, IndexWriter), so nothing below this point
+// knows which one it was given.
+int run_pipeline_command(const AppConfig& config, int steps, bool offline) {
     const auto stopwords = load_stopwords(kSharedDir / "stopwords.txt");
     const auto candidate_ids = load_book_ids(offline ? kSampleDir / "book_ids.txt" : kSharedDir / "book_ids.txt");
 
@@ -144,15 +139,18 @@ int run_pipeline_command(int steps, bool offline) {
         std::cout << "[pipeline] offline: reading books from " << (kSampleDir / "raw").lexically_normal() << "\n";
     }
 
-    BookBasedDatalake datalake(kDataDir / "datalake" / "book");
+    // Each layout in its own folder, so they can coexist (Java's datalakeDir).
+    const auto datalake = create_datalake(config.datalake_structure, kDataDir / "datalake" / config.datalake_structure,
+                                          std::make_unique<SystemClock>());
     MetadataStore metadata(kDataDir / "datamarts" / "metadata.db");
-    MonolithicIndexWriter index_writer(kIndexPath);
+    const auto index_writer = create_index_writer(config.index_structure, kDataDir);
+    std::cout << "[pipeline] datalake=" << config.datalake_structure << " index=" << config.index_structure << "\n";
 
     // Rebuilt from scratch on every run by re-reading each already-indexed
-    // book's body: this stage has no reader for the on-disk index formats
-    // (only writers), so this is the simplest correct way to resume with a
-    // populated in-memory index. Known cost, worth revisiting once the
-    // project needs to resume large runs often (see DEVLOG).
+    // book's body: the same code whatever the index structure, and it lets a
+    // newly chosen structure be written whole just below. Known cost, worth
+    // revisiting once the project needs to resume large runs often (see
+    // DEVLOG).
     InvertedIndex index;
     for (int book_id : candidate_ids) {
         if (!indexed.contains(book_id)) {
@@ -163,9 +161,21 @@ int run_pipeline_command(int steps, bool offline) {
         }
     }
 
+    // Every step from now on only persists its own book's terms, so the
+    // chosen structure must already hold exactly the index rebuilt above. It
+    // may not: never written for these books (a new choice, the first run),
+    // left partial by an interrupted run, or holding something else (a stale
+    // collection). Comparing term counts catches all three cheaply; then the
+    // index is written once, whole, before any step. Writing it when it does
+    // not exist at all also creates mongo's unique index on `term`.
+    if (!index_exists(config.index_structure, kDataDir) ||
+        stored_term_count(config.index_structure, kDataDir) != index.term_count()) {
+        index_writer->write(index);
+    }
+
     for (int step = 0; step < steps; ++step) {
-        const auto step_result = run_pipeline_step(candidate_ids, downloaded, indexed, source, datalake, metadata,
-                                                    index, index_writer, stopwords);
+        const auto step_result = run_pipeline_step(candidate_ids, downloaded, indexed, source, *datalake, metadata,
+                                                    index, *index_writer, stopwords);
         describe(step_result);
         if (!step_result.completed) {
             // The book stays unmarked, so the control layer would choose it
@@ -182,7 +192,7 @@ int run_pipeline_command(int steps, bool offline) {
     return 0;
 }
 
-int run_search_command(const std::string& query) {
+int run_search_command(const AppConfig& config, const std::string& query) {
     // Same tokenizer and stopwords as indexing (SPEC section 7), otherwise a
     // query term could never match how the books' terms were stored.
     const auto stopwords = load_stopwords(kSharedDir / "stopwords.txt");
@@ -192,18 +202,19 @@ int run_search_command(const std::string& query) {
         return 0;
     }
 
-    if (!std::filesystem::exists(kIndexPath)) {
-        std::cerr << "[search] no index found at " << kIndexPath << " -- run `pipeline <N>` first to build one.\n";
+    if (!index_exists(config.index_structure, kDataDir)) {
+        std::cerr << "[search] no " << config.index_structure
+                  << " index found -- run `pipeline <N>` first to build one.\n";
         return 1;
     }
-    const auto postings = monolithic_postings_fetcher(kIndexPath);
+    const auto postings = open_index(config.index_structure, kDataDir);
     const auto book_ids = query_and(postings, terms);
 
     std::cout << book_ids.size() << " book(s) matching all of:";
     for (const auto& term : terms) {
         std::cout << " " << term;
     }
-    std::cout << "\n";
+    std::cout << " (index=" << config.index_structure << ")\n";
 
     MetadataStore metadata(kDataDir / "datamarts" / "metadata.db");
     for (int book_id : book_ids) {
@@ -212,6 +223,16 @@ int run_search_command(const std::string& query) {
         std::cout << "  " << book_id << "  " << title << "\n";
     }
 
+    return 0;
+}
+
+AppConfig load_cli_config(const Properties& overrides) { return load_config(kConfigFile, overrides); }
+
+int run_config_command(const AppConfig& config) {
+    std::cout << "config file: " << kConfigFile.lexically_normal()
+              << (std::filesystem::exists(kConfigFile) ? "" : " (not found: defaults)") << "\n"
+              << describe(config)
+              << "datalake folder: " << (kDataDir / "datalake" / config.datalake_structure).lexically_normal() << "\n";
     return 0;
 }
 

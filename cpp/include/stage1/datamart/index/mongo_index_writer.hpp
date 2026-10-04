@@ -72,6 +72,19 @@ std::function<std::vector<int>(const std::string&)> mongo_postings_fetcher(
     const std::string& uri = "mongodb://localhost:27017", const std::string& database = kMongoDatabase,
     const std::string& collection = kMongoCollection);
 
+// Whether `collection` exists in `database` at `uri`: whether the "mongo"
+// structure has been written there at all. Throws std::runtime_error if the
+// server cannot be reached.
+bool mongo_collection_exists(const std::string& uri = "mongodb://localhost:27017",
+                             const std::string& database = kMongoDatabase,
+                             const std::string& collection = kMongoCollection);
+
+// How many documents (terms) `collection` holds; 0 if it does not exist.
+// Throws std::runtime_error if the server cannot be reached.
+long long mongo_document_count(const std::string& uri = "mongodb://localhost:27017",
+                               const std::string& database = kMongoDatabase,
+                               const std::string& collection = kMongoCollection);
+
 // Bytes MongoDB reports on disk for a collection, exactly as the Java module
 // measures them (MongoInvertedIndex.diskUsageBytes): storageSize (data) plus
 // totalIndexSize (indexes), from $collStats. An fsync is requested first,

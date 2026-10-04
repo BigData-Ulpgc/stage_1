@@ -164,6 +164,21 @@ TEST(MongoIndexWriter, UpdateTermsWithNoTermsChangesNothing) {
     EXPECT_EQ(stage1::mongo_postings_fetcher(kTestUri, kTestDb)("car"), (std::vector<int>{1}));
 }
 
+TEST(MongoCollectionExists, AndDocumentCountReflectWhatWasWritten) {
+    if (!stage1::mongo_is_reachable(kTestUri)) {
+        GTEST_SKIP() << "no MongoDB reachable at " << kTestUri;
+    }
+
+    InvertedIndex index;
+    index.add_book(1, {"car"});
+    MongoIndexWriter(kTestUri, kTestDb).write(index);
+
+    EXPECT_TRUE(stage1::mongo_collection_exists(kTestUri, kTestDb, "inverted_index"));
+    EXPECT_FALSE(stage1::mongo_collection_exists(kTestUri, kTestDb, "no_such_collection"));
+    EXPECT_EQ(stage1::mongo_document_count(kTestUri, kTestDb, "inverted_index"), 1);
+    EXPECT_EQ(stage1::mongo_document_count(kTestUri, kTestDb, "no_such_collection"), 0);
+}
+
 TEST(MongoIndexWriter, ClearDropsTheWholeCollection) {
     if (!stage1::mongo_is_reachable(kTestUri)) {
         GTEST_SKIP() << "no MongoDB reachable at " << kTestUri;

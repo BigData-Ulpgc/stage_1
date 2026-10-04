@@ -23,6 +23,9 @@ add_executable(stage1_tests
   control/control_log_test.cpp
   control/book_id_list_test.cpp
   control/pipeline_test.cpp
+  config/app_config_test.cpp
+  config/datalake_factory_test.cpp
+  config/index_factory_test.cpp
   benchmark/benchmark_test.cpp
   benchmark/java_random_test.cpp
   benchmark/sample_books_test.cpp

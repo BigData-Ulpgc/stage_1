@@ -129,6 +129,26 @@ void MongoIndexWriter::clear() {
     }
 }
 
+bool mongo_collection_exists(const std::string& uri, const std::string& database, const std::string& collection) {
+    ensure_mongo_driver_initialized();
+    try {
+        mongocxx::client client{mongocxx::uri{uri}};
+        return client[database].has_collection(collection);
+    } catch (const mongocxx::exception& error) {
+        throw std::runtime_error(std::string("failed to query MongoDB: ") + error.what());
+    }
+}
+
+long long mongo_document_count(const std::string& uri, const std::string& database, const std::string& collection) {
+    ensure_mongo_driver_initialized();
+    try {
+        mongocxx::client client{mongocxx::uri{uri}};
+        return client[database][collection].count_documents(make_document());
+    } catch (const mongocxx::exception& error) {
+        throw std::runtime_error(std::string("failed to query MongoDB: ") + error.what());
+    }
+}
+
 std::function<std::vector<int>(const std::string&)> mongo_postings_fetcher(const std::string& uri,
                                                                            const std::string& database,
                                                                            const std::string& collection) {

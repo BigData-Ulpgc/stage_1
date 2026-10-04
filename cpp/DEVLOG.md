@@ -3330,3 +3330,101 @@ checking the allocator, not the design.
 ### For the group
 The root README's "Known issues" bullet about this test, and its "217, one failing on Linux" cell,
 are now out of date. It is the group's file, so it was not edited here.
+
+---
+
+## Entry 68 – The pipeline's datalake and index chosen in `config.properties`, as in Java (2026-10-04)
+
+### Why
+The root README's "Implementation status" showed the gap. Java's pipeline uses "one structure,
+chosen in the configuration"; this module's pipeline had `book` and `monolithic` hardcoded in
+`cli_commands.cpp`. Entry 61 had also left `SystemClock` without a production caller. The user
+chose Java's approach: a configuration file plus `-Dkey=value` overrides, limited to the two keys
+that choose a structure. Java's other eight keys (paths, Mongo URI, HTTP timeouts) were left out.
+A file was preferred over per-command flags because `pipeline` and `search` must agree on the
+index: a flag forgotten on `search` would read another structure.
+
+### What was done
+- **`config/` module**, mirroring Java's `config` package:
+  - `AppConfig` holds `datalake_structure` and `index_structure`, with Java's key names and defaults
+    (`time`, `monolithic`). `parse_properties` reads the `key = value` subset of the .properties
+    format; `#` and `!` lines are comments. `load_config` applies the defaults, then the file if it
+    exists, then the overrides. An unknown key or structure throws, so a typo stops the program at
+    startup (Java's rule).
+  - `datalake_factory` holds `kDatalakeStructures` (moved here from the benchmark support) and
+    `create_datalake(name, root, clock)`, Java's `DatalakeFactory.create`. It is now the only place
+    that maps a name to a class. `time` owns the clock it is given, through the same base-class
+    pattern as Entry 61 (a private base listed first, so it is built before the datalake and
+    destroyed after it). The pipeline passes a **`SystemClock`, which is used again**. The
+    benchmarks' `fresh_datalake` now calls the factory with a `SimulatedClock`, instead of keeping
+    a switch of its own.
+  - `index_factory` holds `kIndexStructures`, plus three functions: `create_index_writer` (write
+    side), `open_index` (read side, the postings fetcher `query_and` takes) and `index_exists`.
+    Paths are SPEC section 6's: `datamarts/inverted_index.json`, `datamarts/inverted_index/`, and
+    the `search_engine`/`inverted_index` collection. Java's `memory` structure was not ported: here
+    the in-memory index is not a structure of its own. For `mongo`, `index_exists` uses the new
+    `mongo_collection_exists`, and throws a clear error when no server is reachable.
+- **CLI:**
+  - `cpp/config.properties`, whose path is fixed at build time (`STAGE1_CONFIG_FILE`), like the
+    other directories.
+  - `-Dkey=value` arguments before the command, then the new `config` command.
+  - `pipeline` uses the configured datalake, in its own folder `data/datalake/<structure>/` (Java's
+    `datalakeDir`), and the configured index. It prints `[pipeline] datalake=... index=...`.
+  - `search` reads the configured index and names it in its output.
+- **Pipeline: each indexed book persists only its own terms.** `perform_indexing` called `write()`
+  (the whole index) for every book. It now calls `update_terms` with the book's distinct terms, as
+  Java's `flush()` does. Monolithic still rewrites its single file, which is its default
+  behaviour; hierarchical rewrites only those terms' files, and mongo upserts only those documents.
+  Without this, choosing `hierarchical` would have rewritten around 130,000 files per book.
+- **Switching structures, and partial or stale indexes.** At startup `pipeline` rebuilds the
+  in-memory index from every indexed book's body (Entry 43). Before any step, it checks that the
+  chosen structure holds exactly that index. The new `stored_term_count` counts monolithic's JSON
+  keys, hierarchical's term files, or mongo's documents (through the new `mongo_document_count`),
+  and the pipeline compares that with `InvertedIndex::term_count()`, which until now only tests
+  used. If the structure is missing or the counts differ, it writes the whole index once. A switch
+  from `monolithic` to `hierarchical` on an already indexed `data/` therefore gives a complete
+  index, where Java would start from an empty one. This was not in the first version. The
+  first end-to-end run with mongo found **5 stale documents** in `search_engine.inverted_index`,
+  left by Mongo tests from before Entry 58 gave them their own database. "The collection exists"
+  made the pipeline skip writing, and `search` answered from those 5 documents. A plain existence
+  check would equally have trusted a hierarchical index left half-written by an interrupted run.
+- **Tests: 15 new, 232 in total.**
+  - Properties parsing, the precedence defaults → file → `-D`, rejected keys and values (including
+    Java's `memory`), and `describe`.
+  - The three datalakes from the factory. A `time` datalake still uses its clock after
+    `create_datalake` returned. Unknown names and a `time` datalake without a clock are rejected.
+  - Both file indexes written and read back through the factory, at SPEC's paths.
+  - A pipeline step with a spy writer: indexing calls only `update_terms`, with the book's distinct
+    terms.
+  - `stored_term_count` is 0 before writing and the index's term count after, for both file
+    structures. `mongo_collection_exists` and `mongo_document_count` are checked against a real
+    server.
+  - With the group's MongoDB running (Colima), all 232 pass and none is skipped.
+
+### Verification with the real CLI, on the 200 downloaded books
+- `config` shows the file and `time` / `monolithic`.
+- `search whale island` gives 28 books, `(index=monolithic)`.
+- `-Dindex.structure=hierarchical pipeline 1` wrote the whole hierarchical index once in about 13 s:
+  **129,356 files, SPEC section 10.1's term count for N=200**. Then "nothing left to do".
+- `-Dindex.structure=hierarchical search whale island` gives the same 28 books and titles as
+  monolithic (compared with `diff`).
+- `-Ddatalake.structure=hash`, a misspelt key, and a malformed `-D` exit with code 1 and a
+  message. `-Dindex.structure=mongo search` without a server stops with "no MongoDB server
+  reachable".
+- With MongoDB running:
+  1. With 5 stale documents put back in `search_engine.inverted_index`,
+     `-Dindex.structure=mongo pipeline 1` rewrote the collection whole (129,356 documents), and
+     mongo's search gives the same 28 books as monolithic.
+  2. With the hierarchical index's `W` folder deleted (125,577 files left), the next run rewrote it
+     whole: 129,356 files again, and the same search results.
+  3. A complete monolithic index was left alone: its file's modification time did not change.
+- All the test data (the hierarchical folder and the mongo collection) was removed afterwards.
+
+### Notes
+- The default datalake is now `time`, as in Java's file. The 200 books already downloaded stay in
+  `data/datalake/book`, and nothing has to move: indexing reads each body through the path stored
+  in the metadata. The group's final choice (still open) is a one-line change in `config.properties`.
+- `cpp/README.md` section 3 explains the keys and `-D`. Section 5 shows each structure's layout, and
+  section 7's offline check now uses `-Ddatalake.structure=book`.
+- The root README's "Implementation status" (the group's file) still says `book` and `monolithic`
+  for C++. It should now say "one, chosen in the configuration", as for Java.

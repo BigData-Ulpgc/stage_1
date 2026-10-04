@@ -105,6 +105,35 @@ TEST(Pipeline, SecondStepIndexesTheDownloadedBook) {
     EXPECT_EQ(on_disk["whale"], nlohmann::json({1342}));
 }
 
+namespace {
+
+// Records how the pipeline persists the index, instead of persisting it.
+struct SpyIndexWriter : stage1::IndexWriter {
+    int full_writes = 0;
+    std::vector<std::vector<std::string>> updates;
+
+    void write(const InvertedIndex&) override { ++full_writes; }
+    void update_terms(const InvertedIndex&, const std::vector<std::string>& changed_terms) override {
+        updates.push_back(changed_terms);
+    }
+};
+
+}  // namespace
+
+TEST(Pipeline, IndexingPersistsOnlyTheBooksDistinctTerms) {
+    PipelineFixture fixture;
+    fixture.step({1342});  // downloads it first
+    SpyIndexWriter spy;
+
+    const auto result = run_pipeline_step({1342}, fixture.downloaded, fixture.indexed, fixture.source,
+                                          fixture.datalake, fixture.metadata, fixture.index, spy, fixture.stopwords);
+
+    EXPECT_TRUE(result.completed);
+    EXPECT_EQ(spy.full_writes, 0);  // never the whole index, as Java's flush()
+    // "The whale swims. The whale dives." without the stopword "the": each term once.
+    EXPECT_EQ(spy.updates, (std::vector<std::vector<std::string>>{{"dives", "swims", "whale"}}));
+}
+
 TEST(Pipeline, ThirdStepHasNothingLeftToDo) {
     PipelineFixture fixture;
     fixture.step({1342});  // download

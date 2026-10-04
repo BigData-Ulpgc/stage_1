@@ -1,5 +1,6 @@
 #include "stage1/control/pipeline.hpp"
 
+#include <algorithm>
 #include <string>
 
 #include "stage1/crawler/book_splitter.hpp"
@@ -40,9 +41,16 @@ std::string perform_indexing(int book_id, ControlLog& indexed, MetadataStore& me
         return "no metadata row for it";  // should not normally happen: download stores it before marking
     }
 
-    const std::string body = read_text_file(stored->body_path);
-    index.add_book(book_id, tokenize(body, stopwords));
-    index_writer.write(index);  // rewrites the whole structure, see DEVLOG
+    // The book's distinct terms: the ones whose postings change.
+    std::vector<std::string> terms = tokenize(read_text_file(stored->body_path), stopwords);
+    std::sort(terms.begin(), terms.end());
+    terms.erase(std::unique(terms.begin(), terms.end()), terms.end());
+
+    index.add_book(book_id, terms);
+    // Only this book's terms are persisted, as the Java module's flush()
+    // does: hierarchical rewrites only their files and mongo upserts only
+    // their documents. Monolithic has no cheaper path and rewrites its file.
+    index_writer.update_terms(index, terms);
 
     indexed.mark(book_id);  // only now: the index has actually been persisted
     return {};

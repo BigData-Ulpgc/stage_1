@@ -39,7 +39,7 @@ make test
 ```
 
 `make` configures and builds in Release mode (needed for meaningful benchmark numbers). The first run
-also downloads the dependencies. `make test` runs the whole GoogleTest suite (218 tests; the 10 Mongo
+also downloads the dependencies. `make test` runs the whole GoogleTest suite (232 tests; the 11 Mongo
 ones show as skipped without a MongoDB server, and all pass with one).
 
 The result is one executable, `build/release/search_engine_stage1`. To save typing, store its path
@@ -60,6 +60,7 @@ at build time, so it works from any directory.
 | `$B pipeline <N> --offline` | The same pipeline, but **without network**: the books are the 15 of `sample_dataset/`, read from `sample_dataset/raw/` instead of Project Gutenberg. Everything after fetching a book is identical. | no | `data/` |
 | `$B search <words...>` | AND search: the books containing **every** word, with their titles. Words are tokenized like the books (case, punctuation and stopwords ignored). | no | nothing |
 | `$B status` | How many books the dataset lists, how many are downloaded and indexed, and which are downloaded but not indexed yet. | no | nothing |
+| `$B config` | The configuration file used and the structures `pipeline` and `search` work with (see below). | no | nothing |
 | `$B benchmark <experiment>` | Runs one of the 12 SPEC experiments and writes its CSV under `benchmarks/results/` (see section 7). The datalake and index experiments use the books already downloaded; the metadata ones use synthetic rows at N=1,000, 10,000 and 100,000 (SPEC section 10.2). | no | `benchmarks/` |
 
 Experiments: `datalake_write`, `datalake_lookup`, `datalake_incremental`, `datalake_recovery`,
@@ -67,6 +68,40 @@ Experiments: `datalake_write`, `datalake_lookup`, `datalake_incremental`, `datal
 `index_memory`, `index_disk`.
 
 Running `$B` with no arguments, or with wrong ones, prints this usage and exits with code 1.
+
+### Choosing the structures
+
+`pipeline` and `search` use one datalake structure and one inverted index, chosen in
+[`config.properties`](config.properties) (same keys and defaults as the Java module):
+
+| Key | Values | Default |
+|---|---|---|
+| `datalake.structure` | `book`, `range`, `time` (SPEC section 3) | `time` |
+| `index.structure` | `monolithic`, `hierarchical`, `mongo` (SPEC section 6) | `monolithic` |
+
+To change one for a single run without editing the file, put `-Dkey=value` before the command:
+
+```bash
+$B -Dindex.structure=hierarchical pipeline 400
+$B -Dindex.structure=hierarchical search whale island
+$B -Ddatalake.structure=book config
+```
+
+- `pipeline` and `search` must use the same index: `search` reads the index it is told to, so if the
+  pipeline built `hierarchical`, search with `hierarchical` too (or set it in the file).
+- When the chosen index does not hold every indexed book (it does not exist yet, for example after
+  switching from `monolithic` to `hierarchical`; or it was left partial or stale), the next
+  `pipeline` run writes it whole first: about 13 s for the 200 books in `hierarchical`. It finds out
+  by comparing the stored index's term count with the index rebuilt from the indexed books. After
+  that, each indexed book only updates its own terms.
+- `mongo` needs the group's MongoDB (section 1). Without a server, `pipeline` and `search` stop with
+  `no MongoDB server reachable`.
+- Each datalake structure has its own folder, `data/datalake/<structure>/`, so they can coexist.
+  Books downloaded under one structure stay where they are: indexing reads each book through the
+  path stored in the metadata.
+- A typo stops the program before it does anything: an unknown key or value prints `[config] ...`
+  and exits with code 1.
+- The benchmarks do not use this configuration: they always compare every structure.
 
 ## 4. Quick start
 
@@ -111,12 +146,19 @@ Everything `pipeline` produces lives under `data/`, which git ignores:
 
 ```
 data/
-├── datalake/book/<id>/header.txt, body.txt   datalake: each book as downloaded, split in two
+├── datalake/<structure>/...                  datalake: each book as downloaded, split in two
+│     time:  YYYYMMDD/HH/<id>.header.txt, <id>.body.txt
+│     book:  <id>/header.txt, <id>/body.txt
+│     range: 01000-01999/<id>.header.txt, <id>.body.txt
 ├── datamarts/metadata.db                     datamart: title, author, language... (SQLite)
-├── datamarts/inverted_index.json             datamart: word -> ids of the books containing it
+├── datamarts/inverted_index.json             datamart, index.structure = monolithic
+├── datamarts/inverted_index/<LETTER>/<term>.txt   datamart, index.structure = hierarchical
 └── control/downloaded_books.txt              control layer: what is already done,
     control/indexed_books.txt                 so a new run resumes instead of repeating
 ```
+
+With `index.structure = mongo`, the index is the `inverted_index` collection of the `search_engine`
+database on the group's MongoDB instead.
 
 You can check that the CLI tells the truth by reading these files directly:
 
@@ -165,7 +207,8 @@ $B status x ; echo $?
 | `search the and` | `no searchable terms` (only stopwords), exit code 0 |
 | `search xyzzy` | `0 book(s) matching all of: xyzzy`, exit code 0 |
 | `status x` | usage message, exit code 1 |
-| `search` before any `pipeline` run | `no index found ... run pipeline <N> first`, exit code 1 |
+| `search` before any `pipeline` run | `no monolithic index found -- run pipeline <N> first` (or the chosen structure), exit code 1 |
+| `-Dindex.structure=memory status` | `[config] index.structure = "memory" does not exist. Options: ...`, exit code 1 |
 | `pipeline <N>` when Project Gutenberg cannot be reached | `could not download book <ID>: <reason>`, then `stopping; run pipeline again to retry`, exit code 1. The book stays unmarked, so the next run retries it |
 
 ## 7. Good to know
@@ -190,6 +233,6 @@ $B status x ; echo $?
   `pipeline 5`.
 - **Starting over.** `rm -rf data` deletes all downloaded books and the indexes. The next `pipeline`
   run downloads everything again.
-- **Checking the offline output.** After `pipeline 30 --offline` on an empty `data/`, the datalake is
-  byte-identical to the sample's expected output: `diff -r data/datalake/book ../sample_dataset/book`
-  prints nothing.
+- **Checking the offline output.** After `$B -Ddatalake.structure=book pipeline 30 --offline` on an
+  empty `data/`, the datalake is byte-identical to the sample's expected output:
+  `diff -r data/datalake/book ../sample_dataset/book` prints nothing.

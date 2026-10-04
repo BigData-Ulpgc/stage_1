@@ -34,8 +34,8 @@ struct StepResult {
 //    extract and store its metadata, then mark it downloaded. A failed fetch is
 //    likewise never marked, for the same reason.
 //  - IndexBook: read the book's body back from the path MetadataStore stored,
-//    tokenize it with `stopwords`, add it to `index`, persist the whole index
-//    through `index_writer`, then mark it indexed.
+//    tokenize it with `stopwords`, add it to `index`, persist that book's
+//    distinct terms through `index_writer.update_terms`, then mark it indexed.
 //  - Nothing: every candidate is already downloaded and indexed.
 //
 // Every dependency is passed in by reference (the same dependency-injection

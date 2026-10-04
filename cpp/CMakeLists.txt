@@ -70,6 +70,9 @@ add_library(stage1_core
   src/control/control_log.cpp
   src/control/book_id_list.cpp
   src/control/pipeline.cpp
+  src/config/app_config.cpp
+  src/config/datalake_factory.cpp
+  src/config/index_factory.cpp
   src/benchmark/benchmark.cpp
   src/benchmark/java_random.cpp
   src/benchmark/sample_books.cpp
@@ -106,7 +109,8 @@ target_compile_definitions(search_engine_stage1 PRIVATE
   STAGE1_SHARED_DIR="${CMAKE_SOURCE_DIR}/../shared"
   STAGE1_SAMPLE_DIR="${CMAKE_SOURCE_DIR}/../sample_dataset"
   STAGE1_DATA_DIR="${CMAKE_SOURCE_DIR}/data"
-  STAGE1_BENCHMARKS_DIR="${CMAKE_SOURCE_DIR}/benchmarks")
+  STAGE1_BENCHMARKS_DIR="${CMAKE_SOURCE_DIR}/benchmarks"
+  STAGE1_CONFIG_FILE="${CMAKE_SOURCE_DIR}/config.properties")
 
 # ---- Tests ----
 enable_testing()
