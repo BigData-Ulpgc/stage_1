@@ -1,4 +1,3 @@
-```markdown
 # Python Module – User Guide
 
 The Python implementation of the Stage 1 data layer. It downloads books from Project Gutenberg (or processes them locally via offline mode), splits each one into header and body, stores them in a datalake, extracts their metadata into SQLite, and builds an inverted index that answers AND searches. It also runs the comprehensive benchmarks that compare the storage structures.
@@ -139,7 +138,5 @@ python -m src.main.bigdata.main pipeline 15 --offline-source ../../sample_datase
 
 * **Starting Over**: Running `rm -rf data` deletes downloaded books, indexes, and control files. It does *not* touch the MongoDB collection. To clear Mongo, run `docker compose down -v` at the repository root.
 * **Benchmark Teardown**: The benchmark suite creates a temporary database (`search_engine_benchmark`) during its run. It automatically cleans and drops this database upon completion to prevent disk bloat. Your production `search_engine` database remains untouched.
-
-```
 
 ```
