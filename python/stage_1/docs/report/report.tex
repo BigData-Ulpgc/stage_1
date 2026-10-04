@@ -286,7 +286,7 @@ every structure in the same pass.
         to \code{downloaded\_\allowbreak books.txt}, by
         \code{mark\_as\_\allowbreak downloaded(1342)}.
   \item \code{parse\_metadata} applies the four regexes of the SPEC to the header, and
-        \code{MetadataRepository.save\_all} stores the row in SQLite.
+        \code{MetadataRepository.\allowbreak save\_all} stores the row in SQLite.
   \item \code{tokenize} turns the body into its set of terms, which is added to the monolithic, the
         hierarchical and (with a server) the Mongo index. The three are \textbf{flushed} to disk
         right away.
