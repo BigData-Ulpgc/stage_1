@@ -7,7 +7,7 @@ simulated Project Gutenberg text, without requiring network access.
 
 import unittest
 
-from ..main.bigdata.crawler.splitter import split_header_body
+from ...main.bigdata.crawler.splitter import split_header_body
 
 
 class TestSplitHeaderBody(unittest.TestCase):
@@ -20,9 +20,9 @@ class TestSplitHeaderBody(unittest.TestCase):
         of a Project Gutenberg ebook:
 
         1. Preceding junk text
-        2. *** START OF THE PROJECT GUTENBERG EBOOK TEST ***   (1st occurrence → header)
+        2. *** START OF THE PROJECT GUTENBERG EBOOK TEST ***   (1st occurrence -> header)
         3. Header with Title and Author
-        4. *** START OF THE PROJECT GUTENBERG EBOOK TEST ***   (2nd occurrence → start of actual body)
+        4. *** START OF THE PROJECT GUTENBERG EBOOK TEST ***   (2nd occurrence -> start of actual body)
         5. Body content
         6. *** END OF THE PROJECT GUTENBERG EBOOK TEST ***
         """
