@@ -2,7 +2,8 @@
 
 How to build this module, run it from the terminal, and use its command-line interface (CLI).
 The reasoning behind every design decision lives in [`DEVLOG.md`](DEVLOG.md), and a summary of the
-whole module for readers of the project is in [`MODULE_REPORT.md`](MODULE_REPORT.md); the rules shared
+whole module for readers of the project is in the technical report,
+[`Stage1_Cpp_Report.pdf`](Stage1_Cpp_Report.pdf); the rules shared
 with the Java and Python modules live in [`../../shared/SPEC.md`](../../shared/SPEC.md).
 
 ## 1. Requirements
@@ -74,8 +75,8 @@ Running `$B` with no arguments, or with wrong ones, prints this usage and exits 
 
 `pipeline` and `search` use one datalake structure and one inverted index, chosen in
 [`config.properties`](../config.properties). The keys are the Java module's, and so is the choice:
-`book` and `monolithic`, the most efficient structures in the benchmarks ([`MODULE_REPORT.md`](MODULE_REPORT.md),
-"Chosen structures", explains why).
+`book` and `monolithic`, the most efficient structures in the benchmarks (section 3 of
+[`Stage1_Cpp_Report.pdf`](Stage1_Cpp_Report.pdf) explains why).
 
 | Key | Values | Selected in `config.properties` | Without the file |
 |---|---|---|---|

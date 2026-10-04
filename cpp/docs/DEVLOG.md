@@ -3,7 +3,8 @@
 An in-depth record of how the C++ module was built, from its first CMake file (2026-09-20) to the
 final version: **what** was done at each step and, above all, **why**, with the alternatives that
 were discarded and the measurements behind each decision. It is the long-form companion of
-[`MODULE_REPORT.md`](MODULE_REPORT.md), which summarises the module for its readers, and of
+the technical report, [`Stage1_Cpp_Report.pdf`](Stage1_Cpp_Report.pdf), which presents the module to
+its readers, and of
 [`USER_GUIDE.md`](USER_GUIDE.md), which explains how to build and run it. New entries go at the
 bottom; history is never rewritten, and a correction is a new entry.
 
@@ -85,6 +86,7 @@ Conventions for the whole module:
 - [Entry 69 – The root README's C++ parts brought up to date (2026-10-04)](#entry-69--the-root-readmes-c-parts-brought-up-to-date-2026-10-04)
 - [Entry 70 – The module's documentation gathered in `cpp/docs/`, with a report for readers (2026-10-04)](#entry-70--the-modules-documentation-gathered-in-cppdocs-with-a-report-for-readers-2026-10-04)
 - [Entry 71 – `book` + `monolithic` chosen from the benchmarks, the same choice as Java (2026-10-04)](#entry-71--book--monolithic-chosen-from-the-benchmarks-the-same-choice-as-java-2026-10-04)
+- [Entry 72 – The module report becomes a LaTeX technical report in PDF (2026-10-04)](#entry-72--the-module-report-becomes-a-latex-technical-report-in-pdf-2026-10-04)
 
 ---
 
@@ -3612,3 +3614,65 @@ rather than `mongo`, because it beats `mongo` on both queries and updates. Java'
   books already sit in `data/datalake/book`.
 - `search whale island` returns the same 28 books.
 - `-Ddatalake.structure=time config` still overrides the file.
+
+---
+
+## Entry 72 – The module report becomes a LaTeX technical report in PDF (2026-10-04)
+
+### What was done
+- `docs/MODULE_REPORT.md` was removed. Its replacement is **`docs/Stage1_Cpp_Report.pdf`** (22 pages),
+  typeset from `docs/report/report.tex`. It has a title page with the course, the group, the members
+  and a quick check for instructors, an abstract, a table of contents, and eight sections:
+  1. Introduction and objectives: the six parts of the data layer, and what the common contract
+     (`shared/SPEC.md`) fixes.
+  2. System architecture: a component diagram, the life of one book, the layers, the design
+     principles, the folder tree, the build targets and the libraries.
+  3. Design decisions: why `book` + `monolithic`, and a table of implementation decisions with the
+     alternatives that were discarded.
+  4. Implementation: every module, class by class, with a design rationale per module.
+  5. Testing strategy: the 232 tests by area, the MongoDB tests, the sample dataset test and the
+     checks beyond the unit tests.
+  6. Setup and execution: requirements, build, the offline quick test with its real output, the
+     commands, configuration, and running the benchmarks.
+  7. Benchmarks and results: the methodology, the data, and tables, figures and discussion for the
+     datalake, the metadata and the inverted index, ending with which structure to choose.
+  8. Conclusions and future improvements.
+- `docs/report/charts.py` draws the five figures from the committed CSVs into `docs/report/figures/`
+  as vector PDFs. The figures are committed, so the report compiles without Python. The series use
+  three categorical colours whose colour-blind separation was checked with a palette validator,
+  plus one marker shape per series, so they also read in black and white.
+- `docs/report/.gitignore` ignores the LaTeX intermediates and the build output `report.pdf`. The
+  delivered copy is `docs/Stage1_Cpp_Report.pdf`.
+- The links to the old report now point to the PDF: the root README (C++ section, two links),
+  `docs/USER_GUIDE.md` (its introduction and section 3), this log's introduction, and the comment in
+  `config.properties`.
+
+### Why
+- The report is what the instructors read to assess the module. A typeset document with diagrams,
+  tables and charts presents the architecture and the results better than Markdown. This log stays
+  the long-form record, and `USER_GUIDE.md` the practical guide.
+- The figures are generated from the CSVs rather than drawn by hand. If the benchmarks are run
+  again, `charts.py` and one compilation bring the report up to date.
+
+### Rebuilding the report
+```bash
+cd cpp/docs/report
+uv run --with matplotlib python charts.py
+tectonic report.tex
+cp report.pdf ../Stage1_Cpp_Report.pdf
+```
+`pdflatex report.tex`, run twice so the table of contents is filled, works as well. Tectonic 0.17
+(`brew install tectonic`) downloads the packages it needs on its first run.
+
+### Verified
+- **Every number** in the report was checked against the medians recomputed from the twelve C++
+  CSVs.
+- **The quick-test output** is the output of a fresh run. `data/` was moved aside first and restored
+  afterwards, 200/200 again. `pipeline 30 --offline` took 0.36 s, `search whale island` found 76, 84
+  and 2701, and `diff -r data/datalake/book ../sample_dataset/book` printed nothing.
+- **Every identifier** the report names exists in the code. The per-area test counts (71, 49, 25, 24,
+  22, 19, 12, 7 and 3) come from counting `TEST`/`TEST_F` per folder, and add up to 232.
+- **The PDF** compiles with no errors. One overfull line is left, 0.4 pt. Every page was rendered
+  and inspected.
+- **A correction to Entry 71:** the monolithic index's memory after opening at N=100 is 28.1 MB
+  (28,147,104 bytes), not 28.2 MB.

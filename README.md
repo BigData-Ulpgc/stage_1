@@ -209,7 +209,7 @@ with the same keys as Java:
 * `index.structure`: `monolithic` (selected in `config.properties`), `hierarchical` or `mongo`
 
 `book` and `monolithic` are also the most efficient structures in the C++ benchmarks, the same choice
-as Java's; [`cpp/docs/MODULE_REPORT.md`](cpp/docs/MODULE_REPORT.md) explains it. Any key can be changed
+as Java's; section 3 of the [C++ report](cpp/docs/Stage1_Cpp_Report.pdf) explains it. Any key can be changed
 for one run with `-Dkey=value` before the command. `pipeline` and `search` must use the same index:
 
 ```bash
@@ -226,7 +226,8 @@ $B search whale island      # 76, 84 and 2701
 
 The C++ module's documentation is in [`cpp/docs/`](cpp/docs/): a user guide,
 [`USER_GUIDE.md`](cpp/docs/USER_GUIDE.md) (where data goes, resuming after an interruption, exit codes); a
-summary of the module, [`MODULE_REPORT.md`](cpp/docs/MODULE_REPORT.md); and the in-depth development log,
+technical report, [`Stage1_Cpp_Report.pdf`](cpp/docs/Stage1_Cpp_Report.pdf) (LaTeX sources in
+[`cpp/docs/report/`](cpp/docs/report/)); and the in-depth development log,
 [`DEVLOG.md`](cpp/docs/DEVLOG.md).
 
 ## Sample dataset
