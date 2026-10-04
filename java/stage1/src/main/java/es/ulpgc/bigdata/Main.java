@@ -16,16 +16,20 @@ import java.util.List;
  * what to download, how to index or how to intersect live in PipelineController, Indexer and SearchService.
  *
  * Usage:  java ... Main [--config file.properties] <command>
- *   pipeline [steps]    downloads/indexes at most 'steps' books (default 10)
- *   search <query>      AND search with the active index
- *   status              downloaded, indexed and pending
- *   config              effective configuration
+ *   pipeline [steps] [--offline]   downloads/indexes at most 'steps' books (default 10)
+ *   search <query>                 AND search with the active index
+ *   status [--offline]             downloaded, indexed and pending
+ *   config                         effective configuration
+ *
+ * --offline: no network. The books are the 15 of sample_dataset/, read from sample_dataset/raw/
+ * instead of Project Gutenberg (SearchEngine.openOffline). Everything after the fetch is identical.
  *
  * Changing the structure does not touch code:  -Ddatalake.structure=book -Dindex.structure=hierarchical
  */
 public final class Main {
 
     private static final int DEFAULT_STEPS = 10;
+    private static final String OFFLINE = "--offline";
 
     private Main() {
     }
@@ -44,11 +48,14 @@ public final class Main {
         try {
             AppConfig config = configFile != null ? AppConfig.load(configFile) : AppConfig.load();
             String command = rest.get(0);
-            List<String> params = rest.subList(1, rest.size());
+            List<String> params = new ArrayList<>(rest.subList(1, rest.size()));
             switch (command) {
-                case "pipeline" -> pipeline(config, params.isEmpty() ? DEFAULT_STEPS : Integer.parseInt(params.get(0)));
+                case "pipeline" -> {
+                    boolean offline = params.remove(OFFLINE);
+                    pipeline(config, params.isEmpty() ? DEFAULT_STEPS : parseSteps(params.get(0)), offline);
+                }
                 case "search" -> search(config, String.join(" ", params));
-                case "status" -> status(config);
+                case "status" -> status(config, params.remove(OFFLINE));
                 case "config" -> System.out.println(config.describe());
                 default -> {
                     System.err.println("Comando desconocido: " + command);
@@ -66,8 +73,11 @@ public final class Main {
     // Commands: connect pieces and show results
     // ------------------------------------------------------------------
 
-    private static void pipeline(AppConfig config, int steps) {
-        try (SearchEngine engine = SearchEngine.open(config)) {
+    private static void pipeline(AppConfig config, int steps, boolean offline) {
+        if (offline) {
+            System.out.println("offline: libros leídos de " + config.sampleRawDir().toAbsolutePath().normalize());
+        }
+        try (SearchEngine engine = offline ? SearchEngine.openOffline(config) : SearchEngine.open(config)) {
             System.out.println("datalake=" + engine.datalake().name() + "  index=" + engine.index().name());
             List<StepResult> results = engine.pipeline().runUntilIdle(steps);
             for (StepResult r : results) {
@@ -90,21 +100,35 @@ public final class Main {
         }
     }
 
-    private static void status(AppConfig config) {
+    private static void status(AppConfig config, boolean offline) {
         ControlFiles control = new ControlFiles(config.controlDir());
-        System.out.println("dataset:     " + BookIdList.load(config.bookIdsFile()).size());
+        Path dataset = offline ? config.sampleBookIdsFile() : config.bookIdsFile();
+        System.out.println("dataset:     " + BookIdList.load(dataset).size() + (offline ? " (sample_dataset)" : ""));
         System.out.println("descargados: " + control.downloaded().size());
         System.out.println("indexados:   " + control.indexed().size());
         System.out.println("pendientes:  " + control.readyToIndex());
     }
 
+    private static int parseSteps(String value) {
+        try {
+            int steps = Integer.parseInt(value);
+            if (steps > 0) {
+                return steps;
+            }
+        } catch (NumberFormatException ignored) {
+            // falls through to the error below
+        }
+        throw new IllegalArgumentException("el número de pasos debe ser un entero positivo: \"" + value + "\"");
+    }
+
     private static void usage() {
         System.err.println("""
                 Uso: Main [--config fichero.properties] <comando>
-                  pipeline [pasos]    descarga e indexa (por defecto 10 pasos)
-                  search <consulta>   búsqueda AND
-                  status              estado de la capa de control
-                  config              configuración efectiva
+                  pipeline [pasos] [--offline]   descarga e indexa (por defecto 10 pasos)
+                  search <consulta>              búsqueda AND
+                  status [--offline]             estado de la capa de control
+                  config                         configuración efectiva
+                --offline: sin red, con los 15 libros de sample_dataset/raw/
                 Cualquier clave se puede cambiar con -Dclave=valor, p. ej. -Dindex.structure=hierarchical""");
     }
 }

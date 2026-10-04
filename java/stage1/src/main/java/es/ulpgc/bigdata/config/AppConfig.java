@@ -23,6 +23,7 @@ import java.util.Properties;
  *   <data>/datamarts/inverted_index/         hierarchical index
  *   <data>/control/                          ControlFiles
  *   <shared>/book_ids.txt, stopwords.txt, queries.txt
+ *   <sample>/book_ids.txt, raw/pg<ID>.txt   offline pipeline (sample_dataset/)
  *   <benchmarks>/results/, <benchmarks>/work/
  *
  * No other class writes "data/..." or "inverted_index.json": they ask for the path here.
@@ -33,7 +34,7 @@ import java.util.Properties;
  *   3. the MONGO_URI environment variable (the one used by docker and the tests)
  *   4. the system properties: java -Dindex.structure=hierarchical ...
  */
-public record AppConfig(Path dataDir, Path sharedDir, Path benchmarksDir,
+public record AppConfig(Path dataDir, Path sharedDir, Path sampleDir, Path benchmarksDir,
                         String datalakeStructure, String indexStructure,
                         String mongoUri, String mongoDatabase, String mongoCollection,
                         Duration connectTimeout, Duration requestTimeout) {
@@ -41,6 +42,7 @@ public record AppConfig(Path dataDir, Path sharedDir, Path benchmarksDir,
     // --- Keys of the .properties file ---
     public static final String DATA_DIR = "data.dir";
     public static final String SHARED_DIR = "shared.dir";
+    public static final String SAMPLE_DIR = "sample.dir";
     public static final String BENCHMARKS_DIR = "benchmarks.dir";
     public static final String DATALAKE_STRUCTURE = "datalake.structure";
     public static final String INDEX_STRUCTURE = "index.structure";
@@ -51,7 +53,7 @@ public record AppConfig(Path dataDir, Path sharedDir, Path benchmarksDir,
     public static final String REQUEST_TIMEOUT = "http.request.timeout.seconds";
 
     /** All the keys, in the order they are shown. */
-    public static final List<String> KEYS = List.of(DATA_DIR, SHARED_DIR, BENCHMARKS_DIR,
+    public static final List<String> KEYS = List.of(DATA_DIR, SHARED_DIR, SAMPLE_DIR, BENCHMARKS_DIR,
             DATALAKE_STRUCTURE, INDEX_STRUCTURE, MONGO_URI, MONGO_DATABASE, MONGO_COLLECTION,
             CONNECT_TIMEOUT, REQUEST_TIMEOUT);
 
@@ -59,22 +61,24 @@ public record AppConfig(Path dataDir, Path sharedDir, Path benchmarksDir,
     public static final Path DEFAULT_FILE = Path.of("config.properties");
 
     /** Default values: meant for running from java/stage1. */
-    private static final Map<String, String> DEFAULTS = Map.of(
-            DATA_DIR, "data",
-            SHARED_DIR, "../../shared",
-            BENCHMARKS_DIR, "benchmarks",
-            DATALAKE_STRUCTURE, "time",
-            INDEX_STRUCTURE, "monolithic",
-            MONGO_URI, "mongodb://localhost:27017",
-            MONGO_DATABASE, MongoInvertedIndex.DEFAULT_DATABASE,
-            MONGO_COLLECTION, MongoInvertedIndex.DEFAULT_COLLECTION,
-            CONNECT_TIMEOUT, "10",
-            REQUEST_TIMEOUT, "15");
+    private static final Map<String, String> DEFAULTS = Map.ofEntries(
+            Map.entry(DATA_DIR, "data"),
+            Map.entry(SHARED_DIR, "../../shared"),
+            Map.entry(SAMPLE_DIR, "../../sample_dataset"),
+            Map.entry(BENCHMARKS_DIR, "benchmarks"),
+            Map.entry(DATALAKE_STRUCTURE, "time"),
+            Map.entry(INDEX_STRUCTURE, "monolithic"),
+            Map.entry(MONGO_URI, "mongodb://localhost:27017"),
+            Map.entry(MONGO_DATABASE, MongoInvertedIndex.DEFAULT_DATABASE),
+            Map.entry(MONGO_COLLECTION, MongoInvertedIndex.DEFAULT_COLLECTION),
+            Map.entry(CONNECT_TIMEOUT, "10"),
+            Map.entry(REQUEST_TIMEOUT, "15"));
 
     /** Checks the values on creation: a configuration error shows up at startup, not halfway. */
     public AppConfig {
         Objects.requireNonNull(dataDir, DATA_DIR);
         Objects.requireNonNull(sharedDir, SHARED_DIR);
+        Objects.requireNonNull(sampleDir, SAMPLE_DIR);
         Objects.requireNonNull(benchmarksDir, BENCHMARKS_DIR);
         requireOneOf(DATALAKE_STRUCTURE, datalakeStructure, DatalakeFactory.NAMES);
         requireOneOf(INDEX_STRUCTURE, indexStructure, InvertedIndexFactory.NAMES);
@@ -128,6 +132,7 @@ public record AppConfig(Path dataDir, Path sharedDir, Path benchmarksDir,
         return new AppConfig(
                 Path.of(get(p, DATA_DIR)),
                 Path.of(get(p, SHARED_DIR)),
+                Path.of(get(p, SAMPLE_DIR)),
                 Path.of(get(p, BENCHMARKS_DIR)),
                 get(p, DATALAKE_STRUCTURE),
                 get(p, INDEX_STRUCTURE),
@@ -140,7 +145,7 @@ public record AppConfig(Path dataDir, Path sharedDir, Path benchmarksDir,
 
     /** The same configuration with another data folder (the benchmarks work in their own folder). */
     public AppConfig withDataDir(Path newDataDir) {
-        return new AppConfig(newDataDir, sharedDir, benchmarksDir, datalakeStructure, indexStructure,
+        return new AppConfig(newDataDir, sharedDir, sampleDir, benchmarksDir, datalakeStructure, indexStructure,
                 mongoUri, mongoDatabase, mongoCollection, connectTimeout, requestTimeout);
     }
 
@@ -190,6 +195,16 @@ public record AppConfig(Path dataDir, Path sharedDir, Path benchmarksDir,
         return sharedDir.resolve("queries.txt");
     }
 
+    /** The 15 ids of the sample dataset: the offline pipeline downloads these instead of bookIdsFile(). */
+    public Path sampleBookIdsFile() {
+        return sampleDir.resolve("book_ids.txt");
+    }
+
+    /** The raw Gutenberg files of the sample, <sample>/raw/pg<ID>.txt: the offline BookSource. */
+    public Path sampleRawDir() {
+        return sampleDir.resolve("raw");
+    }
+
     public Path benchmarkResultsDir() {
         return benchmarksDir.resolve("results");
     }
@@ -204,6 +219,7 @@ public record AppConfig(Path dataDir, Path sharedDir, Path benchmarksDir,
         return String.join("\n",
                 DATA_DIR + " = " + dataDir,
                 SHARED_DIR + " = " + sharedDir,
+                SAMPLE_DIR + " = " + sampleDir,
                 BENCHMARKS_DIR + " = " + benchmarksDir,
                 DATALAKE_STRUCTURE + " = " + datalakeStructure + "   -> " + datalakeDir(),
                 INDEX_STRUCTURE + " = " + indexStructure,

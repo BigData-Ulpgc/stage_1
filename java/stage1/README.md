@@ -8,7 +8,8 @@ compare the storage structures.
 The rules shared with the Python and C++ modules (split markers, folder layouts, tokenizer, index
 formats, CSV format) are in [`../../shared/SPEC.md`](../../shared/SPEC.md). The design and the
 benchmark results are discussed in the report,
-[`docs/Memoria_Stage1_Java.pdf`](docs/Memoria_Stage1_Java.pdf).
+[`docs/Stage1_Java_Report.pdf`](docs/Stage1_Java_Report.pdf). Its LaTeX source, and the script
+that draws its charts from `benchmarks/results/`, are in [`docs/report/`](docs/report/).
 
 ## 1. Requirements
 
@@ -37,9 +38,9 @@ All commands are run from this `java/stage1/` folder.
 mvn package
 ```
 
-This compiles the code and runs the 354 tests. The 12 MongoDB tests are skipped when no server is
+This compiles the code and runs the 357 tests. The 12 MongoDB tests are skipped when no server is
 reachable, and all of them pass with one. The tests need no network: Project Gutenberg is replaced
-by a fake `BookSource`.
+by a fake `BookSource`, or by the local files of `../../sample_dataset/` (`SampleDatasetTest`).
 
 The `pom.xml` does not build an executable jar, so the program runs from the compiled classes plus
 the library classpath. Save that classpath once:
@@ -60,8 +61,9 @@ java -cp "$CP" es.ulpgc.bigdata.Main [--config file.properties] <command>
 | Command | What it does | Network |
 |---|---|---|
 | `pipeline [steps]` | Runs up to `steps` pipeline steps (default 10). Each step does **one** thing: if a book is downloaded but not indexed, it indexes it; otherwise it downloads the next book of `shared/book_ids.txt`. Stops early when nothing is left. | yes |
+| `pipeline [steps] --offline` | The same pipeline over the 15 books of `sample_dataset/book_ids.txt`, read from `sample_dataset/raw/` instead of Project Gutenberg. Everything after fetching a book is identical. See [Quick test without network](#quick-test-without-network). | no |
 | `search <words...>` | AND search on the active index: the books that contain every word, with their titles. The query is tokenized like the books. | no |
-| `status` | Books in the dataset, downloaded, indexed, and downloaded but still pending indexing. | no |
+| `status [--offline]` | Books in the dataset (the 15 of the sample with `--offline`), downloaded, indexed, and downloaded but still pending indexing. | no |
 | `config` | The effective configuration, after applying the file, the environment and `-D` options. | no |
 
 The program's messages are in Spanish (`libros para`, `descargados`, `pendientes`...).
@@ -75,7 +77,7 @@ java -cp "$CP" es.ulpgc.bigdata.Main status
 ```
 
 ```
-datalake=time  index=monolithic
+datalake=book  index=monolithic
 DOWNLOADED 1342
 INDEXED 1342
 DOWNLOADED 84
@@ -98,6 +100,48 @@ The whole dataset takes 400 steps (200 downloads and 200 indexings):
 ```bash
 java -cp "$CP" es.ulpgc.bigdata.Main pipeline 400
 ```
+
+### Quick test without network
+
+[`../../sample_dataset/`](../../sample_dataset/) holds the first 15 books of the dataset, as raw
+files exactly as Gutenberg serves them. With `--offline` the pipeline reads them instead of
+downloading, so the whole module can be tried in about a second, with no network:
+
+```bash
+java -cp "$CP" es.ulpgc.bigdata.Main pipeline 30 --offline     # 15 downloads + 15 indexings
+java -cp "$CP" es.ulpgc.bigdata.Main search whale island
+java -cp "$CP" es.ulpgc.bigdata.Main status --offline
+```
+
+```
+offline: libros leídos de .../sample_dataset/raw
+datalake=book  index=monolithic
+DOWNLOADED 1342
+INDEXED 1342
+...
+```
+```
+3 libros para "whale island" (index=monolithic)
+  76  Adventures of Huckleberry Finn
+  84  Frankenstein; or, the modern prometheus
+  2701  Moby Dick; Or, The Whale
+```
+```
+dataset:     15 (sample_dataset)
+descargados: 15
+indexados:   15
+pendientes:  []
+```
+
+The `-D` options work as usual, so every structure can be tried offline, for example
+`-Ddatalake.structure=range -Dindex.structure=hierarchical`. Use `-Ddata.dir=/tmp/sample` to keep
+the sample run apart from `data/`. The data goes to the same `data/` as an online run otherwise; the
+raw files are byte-identical to what Gutenberg serves, so a later online `pipeline` finds those 15
+books already done and downloads only the other 185.
+
+`SampleDatasetTest` (run by `mvn package`) does the same thing and also checks what
+`sample_dataset/README.md` promises: the split of every raw file is byte-identical to
+`sample_dataset/book/<ID>/`, and the index has exactly 30,396 distinct terms and 89,727 postings.
 
 ### Step results
 
@@ -136,14 +180,20 @@ folder the program is started from. Relative paths are resolved from that folder
 |---|---|---|
 | `data.dir` | `data` | Where the datalake, datamarts and control files go |
 | `shared.dir` | `../../shared` | Where `book_ids.txt`, `stopwords.txt` and `queries.txt` are |
+| `sample.dir` | `../../sample_dataset` | The sample dataset used by `--offline` (`book_ids.txt` and `raw/`) |
 | `benchmarks.dir` | `benchmarks` | Benchmark results (`results/`) and scratch folders (`work/`) |
-| `datalake.structure` | `time` | `time`, `book` or `range` |
+| `datalake.structure` | `book` | `book`, `range` or `time` |
 | `index.structure` | `monolithic` | `monolithic`, `hierarchical`, `mongo`, or `memory` (not persisted; for tests) |
 | `mongo.uri` | `mongodb://localhost:27017` | Any MongoDB connection string |
 | `mongo.database` | `search_engine` | |
 | `mongo.collection` | `inverted_index` | |
 | `http.connect.timeout.seconds` | `10` | Gutenberg connection timeout |
 | `http.request.timeout.seconds` | `15` | Gutenberg request timeout |
+
+`book` and `monolithic` are the most efficient structures in the benchmarks (fastest write, lookup,
+index build, query and update with the 200 real books), so `config.properties` selects them; the
+reasons are in section 3.1 of the [report](docs/Stage1_Java_Report.pdf). Without a
+`config.properties`, `AppConfig` falls back to `time`.
 
 Later sources override earlier ones:
 
@@ -320,10 +370,8 @@ The committed runs are archived by hand into the folders of SPEC section 10.4:
 
 ## 8. Good to know
 
-* **No offline mode.** `pipeline` always downloads from Project Gutenberg. The 15 books of
-  `../../sample_dataset/book/` use the `book` layout, so they can be passed to the benchmarks
-  (`DatalakeBenchmark ../../sample_dataset/book`). There is no way yet to feed
-  `sample_dataset/raw/` to the pipeline, as the C++ module's `--offline` does.
+* **Sample dataset in the benchmarks.** The 15 books of `../../sample_dataset/book/` use the `book`
+  layout, so they can also be passed to the benchmarks (`DatalakeBenchmark ../../sample_dataset/book`).
 * **Starting over.** `rm -rf data` deletes the downloaded books, the indexes and the control files.
   It does not touch the Mongo collection; `docker compose down -v` at the repository root wipes it.
 * **Quoting.** `search` joins all its arguments, so `search whale island` and
