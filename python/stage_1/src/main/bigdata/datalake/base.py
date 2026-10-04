@@ -33,7 +33,7 @@ class Datalake(ABC):
     @staticmethod
     def _write_file(path: Path, content: str) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, 'w', encoding='utf-8', buffering=131072) as f:
+        with open(path, 'w', encoding='utf-8', newline='\n', buffering=131072) as f:
             f.write(content)
 
     @staticmethod

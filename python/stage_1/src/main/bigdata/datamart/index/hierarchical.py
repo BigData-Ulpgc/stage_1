@@ -40,16 +40,8 @@ class HierarchicalFolderIndex(InvertedIndex):
             path = self._get_path_for_term(term)
             path.parent.mkdir(parents=True, exist_ok=True)
             
-            all_ids = set(new_ids)
-            if path.exists():
-                with open(path, 'r', encoding='utf-8') as f:
-                    for line in f:
-                        line = line.strip()
-                        if line:
-                            all_ids.add(int(line))
-                            
-            with open(path, 'w', encoding='utf-8', buffering=131072) as f:
-                for book_id in sorted(all_ids):
+            with open(path, 'a', encoding='utf-8', newline='\n', buffering=131072) as f:
+                for book_id in sorted(new_ids):
                     f.write(f"{book_id}\n")
                     
         self._pending.clear()

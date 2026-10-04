@@ -62,6 +62,8 @@ class MongoInvertedIndex(InvertedIndex):
 
     def disk_usage_bytes(self) -> int:
         try:
+            # Flush WiredTiger buffers to disk so collStats reflects the real size
+            self._client.admin.command('fsync')
             stats = self._db.command("collStats", self._collection.name)
             return stats.get("storageSize", 0) + stats.get("totalIndexSize", 0)
         except Exception:

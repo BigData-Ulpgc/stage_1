@@ -2,7 +2,7 @@
 
 The Python implementation of the Stage 1 data layer. It downloads books from Project Gutenberg (or processes them locally via offline mode), splits each one into header and body, stores them in a datalake, extracts their metadata into SQLite, and builds an inverted index that answers AND searches. It also runs the comprehensive benchmarks that compare the storage structures.
 
-The rules shared with the Java and C++ modules (split markers, folder layouts, tokenizer, index formats, CSV format) are in `../../shared/SPEC.md`. The design and benchmark results are discussed in the report, `docs/Memoria_Stage1_Python.pdf`.
+The rules shared with the Java and C++ modules (split markers, folder layouts, tokenizer, index formats, CSV format) are in `../../shared/SPEC.md`.
 
 ## 1. Requirements
 

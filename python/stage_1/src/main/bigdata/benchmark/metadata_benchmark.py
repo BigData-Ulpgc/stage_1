@@ -96,21 +96,34 @@ def query(size: int, work_dir: Path, n_queries: int = DEFAULT_QUERY_COUNT) -> Li
         def setup():
             found[0] = 0
 
-        def task(r=repo):
+        def task_id(r=repo):
             for bid in query_ids:
-                result = r.find_by_id(bid)
-                if result:
+                if r.find_by_id(bid):
                     found[0] += 1
+
+        def task_author(r=repo):
             for author in query_authors:
                 found[0] += len(r.find_by_author(author))
+
+        def task_title(r=repo):
             for title in query_titles:
                 found[0] += len(r.find_by_title(title))
 
-        elapsed = measure('metadata_query', backend, size, setup=setup, task=task)
-        total_q = n_queries * 3
-        rows.extend(elapsed)
-        rows.extend(derived_rows(elapsed, 'per_query', 'us',
-                                 lambda ms, tq=total_q: ms * 1000.0 / tq))
+        for query_type, task_fn in [('find_by_id', task_id), ('find_by_author', task_author), ('find_by_title', task_title)]:
+            elapsed = measure('metadata_query', backend, size, setup=setup, task=task_fn)
+            for r in elapsed:
+                rows.append(BenchmarkRow(
+                    language=r.language,
+                    experiment=r.experiment,
+                    structure=r.structure,
+                    dataset_size=r.dataset_size,
+                    repetition=r.repetition,
+                    metric=query_type,
+                    value=r.value,
+                    unit=r.unit
+                ))
+            rows.extend(derived_rows(elapsed, f'{query_type}_avg', 'us',
+                                     lambda ms: ms * 1000.0 / n_queries))
         repo.close()
     return rows
 

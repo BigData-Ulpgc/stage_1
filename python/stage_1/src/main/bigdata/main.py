@@ -74,21 +74,55 @@ def load_book_ids(filepath: Path) -> list[int]:
 
 def main() -> None:
     # ── 0. CLI arguments ───────────────────────────────────────────────
-    parser = argparse.ArgumentParser(
-        description="Indexing pipeline — Stage 1",
-    )
-    parser.add_argument(
-        "--offline-source",
-        type=str,
-        default=None,
-        help="Path to a local directory with pg<ID>.txt files. "
-             "When provided, books are read from disk instead of "
-             "downloading from Project Gutenberg.",
-    )
+    parser = argparse.ArgumentParser(description="Indexing pipeline — Stage 1")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    pipeline_parser = subparsers.add_parser("pipeline", help="Run the pipeline for [steps] books.")
+    pipeline_parser.add_argument("steps", type=int, nargs="?", default=None, help="Number of books to process")
+    pipeline_parser.add_argument("--offline-source", type=str, default=None, help="Path to a local directory with pg<ID>.txt files.")
+
+    search_parser = subparsers.add_parser("search", help="AND search on the active index")
+    search_parser.add_argument("words", nargs="+", help="Words to search for")
+
+    status_parser = subparsers.add_parser("status", help="Displays current count of downloaded, indexed, and pending books.")
+
     args = parser.parse_args()
-    offline_source: str | None = args.offline_source
 
     # ── 1. Reading IDs ─────────────────────────────────────────────────
+    if not _BOOK_IDS_PATH.is_file():
+        print(f"[ERROR] Book IDs file not found: {_BOOK_IDS_PATH}")
+        sys.exit(1)
+
+    book_ids = load_book_ids(_BOOK_IDS_PATH)
+
+    if args.command == "status":
+        control = ControlLayer(base_dir=str(_CONTROL_DIR))
+        downloaded = sum(1 for bid in book_ids if control.is_downloaded(bid))
+        indexed = sum(1 for bid in book_ids if control.is_indexed(bid))
+        pending = len(book_ids) - indexed
+        print("=" * 65)
+        print("[INFO] System Status")
+        print(f"       Total books : {len(book_ids)}")
+        print(f"       Downloaded  : {downloaded}")
+        print(f"       Indexed     : {indexed}")
+        print(f"       Pending     : {pending}")
+        print("=" * 65)
+        return
+
+    if args.command == "search":
+        query = " ".join(args.words)
+        print(f"[INFO] Searching for: '{query}'")
+        mono_index = MonolithicJsonIndex(_DATAMARTS_DIR / "inverted_index.json")
+        from src.main.bigdata.query.search_service import search
+        results = search(mono_index, query)
+        print(f"[INFO] Found {len(results)} books: {results}")
+        mono_index.close()
+        return
+
+    # pipeline
+    offline_source: str | None = args.offline_source
+    steps: int | None = args.steps
+
     print("=" * 65)
     print("[INFO] Starting indexing pipeline")
     if offline_source is not None:
@@ -97,11 +131,6 @@ def main() -> None:
         print("[INFO] Online mode — downloading from Project Gutenberg")
     print("=" * 65)
 
-    if not _BOOK_IDS_PATH.is_file():
-        print(f"[ERROR] Book IDs file not found: {_BOOK_IDS_PATH}")
-        sys.exit(1)
-
-    book_ids = load_book_ids(_BOOK_IDS_PATH)
     print(f"[INFO] Books to process: {len(book_ids)} -> {book_ids}\n")
 
     # ── 2. Initialization ──────────────────────────────────────────────
@@ -136,6 +165,10 @@ def main() -> None:
     errors = 0
 
     for book_id in book_ids:
+        if steps is not None and processed >= steps:
+            print(f"[INFO] Reached requested step count ({steps}). Stopping.")
+            break
+
         print("-" * 55)
         print(f"[INFO] Processing book {book_id}...")
 
