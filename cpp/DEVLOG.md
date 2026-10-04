@@ -3428,3 +3428,19 @@ index: a flag forgotten on `search` would read another structure.
   section 7's offline check now uses `-Ddatalake.structure=book`.
 - The root README's "Implementation status" (the group's file) still says `book` and `monolithic`
   for C++. It should now say "one, chosen in the configuration", as for Java.
+
+---
+
+## Entry 69 – The root README's C++ parts brought up to date (2026-10-04)
+
+At the user's request, and only for this change, the C++ parts of the group's root `README.md` were
+updated (the rest is the teammates'):
+- the test count is now 232, with 11 Mongo tests;
+- the C++ section gains the `config` command and how to choose the structures (Entry 68);
+- in "Implementation status", the C++ cells now read "one, chosen in the configuration" for both the
+  datalake and the index, and "232, all passing" for the tests;
+- the "C++ test on Linux" known issue is gone, since Entry 67 fixed it. Linux was checked for that
+  test only, so the README makes no claim about the whole suite on Linux.
+
+The Python cells and the Python known issues were left as they are. They are still the
+2026-10-03 ones, and keeping them current is the Python teammate's part.

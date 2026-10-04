@@ -178,7 +178,7 @@ python -m unittest discover -s src/test -t .
 ```bash
 cd cpp
 make                 # Release build; the first run also downloads nlohmann/json and GoogleTest
-make test            # GoogleTest suite: 217 tests, the 10 Mongo ones skipped without a server
+make test            # GoogleTest suite: 232 tests, the 11 Mongo ones skipped without a server
 B=./build/release/search_engine_stage1
 ```
 
@@ -188,7 +188,18 @@ B=./build/release/search_engine_stage1
 | `$B pipeline <N> --offline` | The same pipeline, reading the 15 books of `sample_dataset/raw/` instead of the network |
 | `$B search <words...>` | AND search, with the titles |
 | `$B status` | Downloaded, indexed and pending books |
+| `$B config` | The configuration file used and the active structures |
 | `$B benchmark <experiment>` | Runs one of the 12 benchmark experiments (see below) |
+
+The pipeline's datalake and index are chosen in [`cpp/config.properties`](cpp/config.properties),
+with the same keys and defaults as Java: `datalake.structure` is `time` (default), `book` or `range`,
+and `index.structure` is `monolithic` (default), `hierarchical` or `mongo`. Any key can be changed for
+one run with `-Dkey=value` before the command. `pipeline` and `search` must use the same index:
+
+```bash
+$B -Dindex.structure=hierarchical pipeline 400
+$B -Dindex.structure=hierarchical search whale island
+```
 
 Quick try, with no network, in about a second:
 
@@ -278,17 +289,17 @@ implementations and storage structures is in the report submitted on the virtual
 
 ## Implementation status
 
-The three implementations are at different points. As of 2026-10-03:
+The three implementations are at different points. As of 2026-10-03 (the C++ column, 2026-10-04):
 
 | | Java | Python | C++ |
 |---|---|---|---|
 | Pipeline (crawler, datalake, metadata, index, control) | ✅ | ✅ | ✅ |
-| Datalake structure | one, chosen in the configuration | the three at once | `book` |
-| Index structure | one, chosen in the configuration | the three at once | `monolithic` for the pipeline, the three in the benchmarks |
+| Datalake structure | one, chosen in the configuration | the three at once | one, chosen in the configuration |
+| Index structure | one, chosen in the configuration | the three at once | one, chosen in the configuration |
 | Search command | ✅ | ❌ (`test_indices.py` only prints lookups) | ✅ |
 | Offline mode (`sample_dataset/raw/`) | ❌ | ❌ | ✅ |
 | Benchmarks in the SPEC CSV format | ✅ all 12 | ❌ 2 scripts, own format | ✅ all 12 |
-| Tests | 354, all passing | 17, all passing | 217, one failing on Linux (below) |
+| Tests | 354, all passing | 17, all passing | 232, all passing |
 
 Known issues, found while preparing this README:
 
@@ -301,7 +312,3 @@ Known issues, found while preparing this README:
 * **Python control layer:** the monolithic index is saved only once, at the end of the run, but each
   book is marked as indexed as soon as it is processed. If the run is interrupted, those books stay
   marked as indexed but are missing from `inverted_index.json`.
-* **C++ test on Linux:** `BenchmarkIndexMemory.ReportsHeapAfterBuildAndAfterOpenPerStructureLikeTheJavaModule`
-  expects the hierarchical index to use less memory than the monolithic one after reopening. With
-  glibc it measures 256 vs 224, so the test fails. The module was developed on macOS, where it
-  passes. The other 216 tests pass on Linux.
