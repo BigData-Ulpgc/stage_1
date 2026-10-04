@@ -64,7 +64,7 @@ def grouped(ax, data, experiment, structures, n, metric, title, ylabel, log=Fals
             drawn = True
     if not drawn:
         raise KeyError(f"{experiment} {metric}")
-    ax.set_xticks(range(len(structures)), structures)
+    ax.set_xticks(range(len(structures)), structures, rotation=20, ha="right")
     ax.set_title(title, loc="left", color=INK)
     ax.set_ylabel(ylabel)
     ax.grid(axis="x", visible=False)
@@ -85,9 +85,9 @@ def lang_datalake(data):
 def lang_index(data):
     st = ["monolithic", "hierarchical", "mongo"]
     fig, axes = plt.subplots(1, 3, figsize=(7.2, 2.6))
-    grouped(axes[0], data, "index_build", st, 200, "elapsed", "Build, N = 200 (log)", "seconds", log=True, scale=1 / 1000)
-    grouped(axes[1], data, "index_query", st, 200, "per_query", "AND query, N = 200 (log)", "µs per query", log=True)
-    grouped(axes[2], data, "index_update", st, 200, "per_book", "Add one book, N = 200 (log)", "ms per book", log=True)
+    grouped(axes[0], data, "index_build", st, 200, "elapsed", "Build (log scale)", "seconds", log=True, scale=1 / 1000)
+    grouped(axes[1], data, "index_query", st, 200, "per_query", "AND query (log scale)", "µs per query", log=True)
+    grouped(axes[2], data, "index_update", st, 200, "per_book", "Add one book (log scale)", "ms per book", log=True)
     for ax in axes:
         ax.tick_params(axis="x", labelsize=7.5)
     axes[0].legend(loc="upper left", fontsize=7.5)
@@ -97,12 +97,12 @@ def lang_index(data):
 def lang_metadata(data):
     st = ["sqlite", "sqlite_no_index"]
     fig, axes = plt.subplots(1, 3, figsize=(7.2, 2.6))
-    grouped(axes[0], data, "metadata_insert", st, 100000, "throughput", "Insert, N = 100k", "thousand rows / s",
+    grouped(axes[0], data, "metadata_insert", st, 100000, "throughput", "Insert (higher is better)", "thousand rows / s",
             scale=1 / 1000)
-    grouped(axes[1], data, "metadata_query", st, 100000, "find_by_id_avg", "find_by_id, N = 100k", "µs per query")
-    grouped(axes[2], data, "metadata_query", st, 100000, "find_by_author_avg", "find_by_author, N = 100k (log)",
+    grouped(axes[1], data, "metadata_query", st, 100000, "find_by_id_avg", "find_by_id", "µs per query")
+    grouped(axes[2], data, "metadata_query", st, 100000, "find_by_author_avg", "find_by_author (log scale)",
             "µs per query", log=True)
-    axes[0].legend(loc="lower left", fontsize=7.5)
+    axes[0].legend(loc="upper left", fontsize=7.5)
     save(fig, "lang_metadata")
 
 
