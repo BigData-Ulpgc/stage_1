@@ -107,7 +107,7 @@ Members & Daniel Perdomo Medina --- Python implementation, author of this report
  & Daniel Rodríguez Alonso --- Java implementation \\
  & Carlos Falcón Brito --- C++ implementation \\
 Repository & \url{https://github.com/BigData-Ulpgc/stage_1}, branch \code{main}, folder \code{python/stage\_1/} \\
-Status & Complete pipeline writing the three datalakes and the three indexes, offline mode with the sample dataset, 12 benchmark experiments, 28 tests passing \\
+Status & Complete pipeline writing the three datalakes and the three indexes, offline mode with the sample dataset, 12 benchmark experiments, 39 tests passing \\
 Date & 4 October 2026 \\
 \end{tabular}
 
@@ -218,7 +218,7 @@ The Python implementation delivers:
   \item The 12 benchmark experiments of the SPEC in its CSV format, with internal checks that stop a
         run that measures something wrong, and \code{verify\_results}, which checks the CSVs against
         the exact values of SPEC section 10.
-  \item 28 \code{pytest} tests.
+  \item 39 \code{pytest} tests.
 \end{itemize}
 
 % ================================================================ 2
@@ -361,7 +361,7 @@ stage_1/
         |   |-- control/       state_manager.py (ControlLayer)
         |   `-- benchmark/     benchmark_runner.py, datalake_/index_/metadata_benchmark.py,
         |                      runner.py, books.py, csv_results.py, verify_results.py
-        |-- src/test/          28 tests (pytest), one package per source package
+        |-- src/test/          39 tests (pytest), one package per source package
         |-- data/              (generated, ignored by git) datalake, datamarts, control
         `-- benchmarks/        results/{real,synthetic}/*.csv (committed), data/ (ignored)
 \end{lstlisting}
@@ -374,7 +374,7 @@ stage_1/
 Item & Amount \\
 \midrule
 Production modules & 26 (about 2,900 lines with comments and docstrings) \\
-Test modules & 11 (about 460 lines), 28 tests \\
+Test modules & 14 (about 630 lines), 39 tests \\
 External dependencies & \code{requests} 2.32, \code{pymongo} 4.18; \code{pytest} for the tests; \code{matplotlib} only for this report's charts \\
 \bottomrule
 \end{tabularx}
@@ -641,7 +641,7 @@ Checks the CSVs against the exact values of SPEC section 10 (Section~\ref{sec:ch
 
 % ================================================================ 5
 \section{Testing strategy}
-\code{pytest src/test} runs 28 tests in 11 modules, which mirror the packages of the code. They need
+\code{pytest src/test} runs 39 tests in 14 modules, which mirror the packages of the code. They need
 no network and no database server, and write only to temporary folders.
 
 \begin{table}[H]
@@ -656,6 +656,9 @@ Module & What it checks & Tests \\
 \code{datamart/test\_tokenizer} & Lowercasing, accented characters as separators, stopwords and the minimum length. & 4 \\
 \code{datamart/test\_metadata} & Title, author and language extracted; a missing release date is \code{None}; the four keys always present. & 3 \\
 \code{datamart/test\_hierarchical\_index} & A flush sorts out-of-order ids and removes duplicates. & 2 \\
+\code{datalake/test\_book\_and\_time\_based} & The \code{book} paths and content, \code{locate} and listing, a body left as \code{.tmp} not counted; the \code{time} layout with the simulated clock (10 books per hour) and a repeated book located in its newest folder and listed once. & 5 \\
+\code{benchmark/test\_java\_random} & \code{JavaRandom.next\_int} and \code{java\_shuffle} against values produced by the JDK with seed 42. & 3 \\
+\code{benchmark/test\_index\_verify} & \code{verify()} accepts a correct index and stops on an index that loses a posting or a book. & 3 \\
 Other five modules & Import checks of the runner, the metadata repository, the Mongo, monolithic and search modules. & 5 \\
 \bottomrule
 \end{tabularx}
@@ -715,7 +718,7 @@ From \code{python/stage\_1/}:
 python -m venv venv
 source venv/bin/activate              # Windows: venv\Scripts\activate
 pip install -r ../requirements.txt pytest
-pytest src/test                       # 28 passed
+pytest src/test                       # 39 passed
 \end{lstlisting}
 
 \subsection{Quick test without network: the sample dataset}\label{sec:quick}
@@ -977,9 +980,10 @@ conclusions from the results.}
   \item \textbf{Re-download on resume.} A book downloaded but not indexed when a run stops is
         downloaded again instead of being read from the datalake. Reading it back would match
         Java's ``index what is downloaded first'' and avoid a second copy in the \code{time} layout.
-  \item \textbf{More unit tests.} Several modules are only covered by the benchmark checks; unit
-        tests for \code{JavaRandom}, the \code{book} and \code{time} layouts and \code{verify()} would
-        catch regressions earlier.
+  \item \textbf{More unit tests.} The metadata repository, the monolithic and Mongo indexes and the
+        search are covered by the benchmark checks and the pipeline output, but their unit tests
+        only check the import; behavioural tests for them (Mongo ones skipped without a server)
+        would catch regressions earlier.
 \end{itemize}
 
 \end{document}

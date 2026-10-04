@@ -166,7 +166,7 @@ cd python/stage_1
 python -m venv venv
 source venv/bin/activate          # Windows: venv\Scripts\activate
 pip install -r ../requirements.txt pytest
-pytest src/test                   # 28 tests
+pytest src/test                   # 39 tests
 ```
 
 Then run the command-line interface with `python -m src.main.bigdata.main <command>`:
@@ -330,4 +330,4 @@ The three implementations are at different points. As of 2026-10-04:
 | Search command | ✅ | ✅ | ✅ |
 | Offline mode (`sample_dataset/raw/`) | ✅ | ✅ (`--offline-source`) | ✅ |
 | Benchmarks in the SPEC CSV format | ✅ all 12 | ✅ all 12 (run on Linux) | ✅ all 12 |
-| Tests | 357, all passing | 28, all passing | 232, all passing |
+| Tests | 357, all passing | 39, all passing | 232, all passing |

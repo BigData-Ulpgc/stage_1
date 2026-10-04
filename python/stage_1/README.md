@@ -41,7 +41,7 @@ pip install -r ../requirements.txt pytest
 pytest src/test
 ```
 
-`pytest` runs the 28 tests under `src/test/`, which mirrors the packages of `src/main/bigdata/`.
+`pytest` runs the 39 tests under `src/test/`, which mirrors the packages of `src/main/bigdata/`.
 They need neither network nor MongoDB, and they write only to temporary folders.
 
 ## 3. Commands
