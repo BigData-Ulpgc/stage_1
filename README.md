@@ -108,7 +108,7 @@ repository root.
 
 ```bash
 cd java/stage1
-mvn package                     # compile and run the 354 tests (the Mongo ones are skipped without a server)
+mvn package                     # compile and run the 357 tests (the Mongo ones are skipped without a server)
 mvn -q dependency:build-classpath -Dmdep.outputFile=target/classpath.txt
 CP="target/classes:$(cat target/classpath.txt)"
 ```
@@ -118,14 +118,22 @@ Then run the command-line interface with `java -cp "$CP" es.ulpgc.bigdata.Main <
 | Command | What it does |
 |---|---|
 | `pipeline [steps]` | Runs up to `steps` steps (default 10). Each step either downloads one book (split, datalake, metadata) or indexes one downloaded book. Indexing goes first. |
+| `pipeline [steps] --offline` | The same pipeline, reading the 15 books of `sample_dataset/raw/` instead of the network |
 | `search <words...>` | AND search on the active index. Prints the ids and titles. |
-| `status` | Books in the dataset, downloaded, indexed and still pending. |
+| `status [--offline]` | Books in the dataset (the sample's 15 with `--offline`), downloaded, indexed and still pending. |
 | `config` | The effective configuration. |
 
 ```bash
 java -cp "$CP" es.ulpgc.bigdata.Main pipeline 400    # the whole dataset: 200 downloads + 200 indexings
 java -cp "$CP" es.ulpgc.bigdata.Main search whale island
 java -cp "$CP" es.ulpgc.bigdata.Main status
+```
+
+Quick try, with no network, in about a second:
+
+```bash
+java -cp "$CP" es.ulpgc.bigdata.Main pipeline 30 --offline
+java -cp "$CP" es.ulpgc.bigdata.Main search whale island      # 76, 84 and 2701
 ```
 
 The configuration is in [`java/stage1/config.properties`](java/stage1/config.properties). Any key
@@ -135,8 +143,11 @@ can be overridden with `-Dkey=value`, so the structures change without touching 
 java -cp "$CP" -Ddatalake.structure=book -Dindex.structure=hierarchical es.ulpgc.bigdata.Main pipeline 400
 ```
 
-* `datalake.structure`: `time` (default), `book` or `range`
-* `index.structure`: `monolithic` (default), `hierarchical`, `mongo` or `memory`
+* `datalake.structure`: `book` (selected in `config.properties`), `range` or `time`
+* `index.structure`: `monolithic` (selected in `config.properties`), `hierarchical`, `mongo` or `memory`
+
+`book` and `monolithic` are the most efficient structures in the Java benchmarks; the report
+explains the choice.
 * The `MONGO_URI` environment variable overrides `mongo.uri`.
 
 `mvn -q exec:java -Dexec.mainClass=es.ulpgc.bigdata.Main -Dexec.args="status"` also works, without
@@ -146,7 +157,7 @@ experiments measure the heap of the JVM they run in.
 The Java module has its own detailed guide in [`java/stage1/README.md`](java/stage1/README.md)
 (configuration, where data goes, code structure, benchmarks). The design and the benchmark results
 are discussed in the Java report,
-[`java/stage1/docs/Memoria_Stage1_Java.pdf`](java/stage1/docs/Memoria_Stage1_Java.pdf).
+[`java/stage1/docs/Stage1_Java_Report.pdf`](java/stage1/docs/Stage1_Java_Report.pdf).
 
 ### 🐍 Python (`python/`)
 
@@ -209,7 +220,7 @@ resuming after an interruption, exit codes) and a development log in
 * `book/<ID>/header.txt` and `body.txt`: the same books after the split, the **expected output**.
 
 It lets instructors test the pipeline without downloading the full dataset (`pipeline --offline`
-in C++), and lets any implementation check its splitter against the expected files. See its
+in Java and C++), and lets any implementation check its splitter against the expected files. See its
 [README](sample_dataset/README.md).
 
 ## Benchmarks
@@ -278,7 +289,7 @@ implementations and storage structures is in the report submitted on the virtual
 
 ## Implementation status
 
-The three implementations are at different points. As of 2026-10-03:
+The three implementations are at different points. As of 2026-10-04:
 
 | | Java | Python | C++ |
 |---|---|---|---|
@@ -286,9 +297,9 @@ The three implementations are at different points. As of 2026-10-03:
 | Datalake structure | one, chosen in the configuration | the three at once | `book` |
 | Index structure | one, chosen in the configuration | the three at once | `monolithic` for the pipeline, the three in the benchmarks |
 | Search command | ✅ | ❌ (`test_indices.py` only prints lookups) | ✅ |
-| Offline mode (`sample_dataset/raw/`) | ❌ | ❌ | ✅ |
+| Offline mode (`sample_dataset/raw/`) | ✅ | ❌ | ✅ |
 | Benchmarks in the SPEC CSV format | ✅ all 12 | ❌ 2 scripts, own format | ✅ all 12 |
-| Tests | 354, all passing | 17, all passing | 217, one failing on Linux (below) |
+| Tests | 357, all passing | 17, all passing | 217, one failing on Linux (below) |
 
 Known issues, found while preparing this README:
 

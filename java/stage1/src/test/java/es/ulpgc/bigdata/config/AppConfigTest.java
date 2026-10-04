@@ -46,6 +46,8 @@ class AppConfigTest {
         assertEquals(Path.of("data/datamarts/inverted_index"), c.hierarchicalIndexDir());
         assertEquals(Path.of("data/control"), c.controlDir());
         assertEquals(Path.of("../../shared/book_ids.txt"), c.bookIdsFile());
+        assertEquals(Path.of("../../sample_dataset/book_ids.txt"), c.sampleBookIdsFile());
+        assertEquals(Path.of("../../sample_dataset/raw"), c.sampleRawDir());
         assertEquals(Path.of("benchmarks/results"), c.benchmarkResultsDir());
         assertEquals(Duration.ofSeconds(10), c.connectTimeout());
         assertEquals(Duration.ofSeconds(15), c.requestTimeout());

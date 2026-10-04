@@ -10,6 +10,7 @@ import es.ulpgc.bigdata.crawler.BookDownloader;
 import es.ulpgc.bigdata.crawler.BookSource;
 import es.ulpgc.bigdata.crawler.BookSplitter;
 import es.ulpgc.bigdata.crawler.GutenbergClient;
+import es.ulpgc.bigdata.crawler.LocalFileSource;
 import es.ulpgc.bigdata.datalake.Datalake;
 import es.ulpgc.bigdata.datamart.index.Indexer;
 import es.ulpgc.bigdata.datamart.index.InvertedIndex;
@@ -19,12 +20,14 @@ import es.ulpgc.bigdata.datamart.metadata.MetadataRepository;
 import es.ulpgc.bigdata.datamart.metadata.SqliteMetadataRepository;
 import es.ulpgc.bigdata.query.SearchService;
 
+import java.nio.file.Path;
+import java.util.List;
 import java.util.Objects;
 
 /**
  * The complete system assembled from an AppConfig: the ONLY place where the pieces
- * are connected. Main uses it with the real Gutenberg; the end-to-end test, with a fake
- * BookSource (no network). This way the test exercises exactly the same assembly as the program.
+ * are connected. Main uses it with the real Gutenberg, or with sample_dataset/ in offline mode;
+ * the end-to-end test, with a fake BookSource (no network). This way the test exercises exactly the same assembly as the program.
  *
  * Where each part of the state ends up (all under data.dir, see AppConfig):
  *   datalake   <data>/datalake/<structure>/...         header and body of each book
@@ -59,10 +62,25 @@ public final class SearchEngine implements AutoCloseable {
         return open(config, new GutenbergClient(config.connectTimeout(), config.requestTimeout()));
     }
 
+    /**
+     * Without network, with the sample dataset: the 15 books of <sample>/book_ids.txt, read from
+     * <sample>/raw/. The data goes to the same data.dir as online: the raw files are byte-identical
+     * to what Gutenberg serves, so a later online run simply finds those books already done.
+     */
+    public static SearchEngine openOffline(AppConfig config) {
+        return open(config, new LocalFileSource(config.sampleRawDir()), config.sampleBookIdsFile());
+    }
+
     /** With any book source (the tests pass one without network). */
     public static SearchEngine open(AppConfig config, BookSource source) {
+        return open(config, source, config.bookIdsFile());
+    }
+
+    /** With any book source and the list of ids the pipeline downloads. */
+    public static SearchEngine open(AppConfig config, BookSource source, Path bookIdsFile) {
         Objects.requireNonNull(config, "config");
         Objects.requireNonNull(source, "source");
+        List<Integer> dataset = BookIdList.load(bookIdsFile);   // before opening anything: a bad file leaks nothing
         Tokenizer tokenizer = Tokenizer.fromStopwordsFile(config.stopwordsFile());
         Datalake datalake = DatalakeFactory.create(config);
         MetadataRepository metadata = new SqliteMetadataRepository(config.metadataDb());
@@ -76,8 +94,7 @@ public final class SearchEngine implements AutoCloseable {
         ControlFiles control = new ControlFiles(config.controlDir());
         BookDownloader downloader = new BookDownloader(source, new BookSplitter(), datalake);
         Indexer indexer = new Indexer(datalake, new MetadataParser(), metadata, tokenizer, index);
-        PipelineController pipeline = new PipelineController(control, downloader, indexer,
-                BookIdList.load(config.bookIdsFile()));
+        PipelineController pipeline = new PipelineController(control, downloader, indexer, dataset);
         return new SearchEngine(datalake, metadata, index, control, pipeline,
                 new SearchService(tokenizer, index));
     }

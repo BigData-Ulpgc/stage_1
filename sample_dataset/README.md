@@ -37,9 +37,9 @@ pipeline").
 
 - **Testing the whole pipeline without network:** use `raw/`. An offline run reads
   `raw/pg<ID>.txt` instead of the URL, for each id in `book_ids.txt`. Everything after the download
-  (split, datalake, metadata, index, control files) stays exactly the same. The C++ module has this
-  offline mode: `pipeline <N> --offline` (see `cpp/README.md`). Java and Python do not have it yet
-  (2026-10-03).
+  (split, datalake, metadata, index, control files) stays exactly the same. The Java and C++
+  modules have this offline mode: `pipeline <N> --offline` (see `java/stage1/README.md` and
+  `cpp/README.md`). Python does not have it yet (2026-10-04).
 - **Benchmarks, or any step that starts from books already split:** use `book/`. It is a ready-made
   `book` datalake. For example, Java's `DatalakeBenchmark` and `IndexBenchmark` accept a book
   datalake path such as `sample_dataset/book`.
@@ -54,7 +54,8 @@ means a split or a tokenizer that does not follow the SPEC.
 
 Verified on 2026-10-03. An independent script split every file in `raw/` into a header and body
 byte-identical to what the C++ pipeline had stored for the same books. `book/` is that output. The
-counts above were also obtained by the C++ pipeline and by its `index_disk` benchmark.
+counts above were also obtained by the C++ pipeline and by its `index_disk` benchmark. The Java
+module checks both things in its `SampleDatasetTest`, run by `mvn package` (2026-10-04).
 
 ## Checking a copy
 
