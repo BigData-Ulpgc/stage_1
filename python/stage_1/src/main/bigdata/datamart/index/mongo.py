@@ -9,15 +9,20 @@ except ImportError:
     HAS_PYMONGO = False
 
 class MongoInvertedIndex(InvertedIndex):
-    def __init__(self, uri='mongodb://localhost:27017', db_name='search_engine_bench', collection='inverted_index'):
+    def __init__(self, uri='mongodb://localhost:27017', db_name='search_engine', collection='inverted_index'):
         if not HAS_PYMONGO:
             raise ImportError("pymongo is required for MongoInvertedIndex")
         
+        # If Mongo is not running, fail in 3 s instead of waiting 30 s (as Java does)
         self._client = MongoClient(uri, serverSelectionTimeoutMS=3000)
         self._db = self._client[db_name]
         self._collection = self._db[collection]
-        
-        self._collection.create_index("term", unique=True)
+
+        try:
+            self._collection.create_index("term", unique=True)  # also checks that Mongo answers
+        except Exception:
+            self._client.close()
+            raise
         self._pending: dict[str, set[int]] = {}
 
     def name(self) -> str:
@@ -63,10 +68,10 @@ class MongoInvertedIndex(InvertedIndex):
     def disk_usage_bytes(self) -> int:
         try:
             # Flush WiredTiger buffers to disk so collStats reflects the real size
-            try:
-                self._client.admin.command('fsync')
-            except Exception:
-                pass
+            self._client.admin.command('fsync')
+        except Exception:
+            pass  # No permission for fsync (e.g. a managed Mongo): the number may lag behind
+        try:
             stats = self._db.command("collStats", self._collection.name)
             return stats.get("storageSize", 0) + stats.get("totalIndexSize", 0)
         except Exception:

@@ -186,7 +186,7 @@ def lookup(books: List[RawBook], work_dir: Path) -> List[BenchmarkRow]:
 
         elapsed = measure('datalake_lookup', struct_name, n, setup=setup, task=task)
         if found_count[0] != len(ids):
-            raise RuntimeError(f'{struct_name}: lookup missed some ids')
+            raise RuntimeError(f'{struct_name}: locate did not find every book')
         rows.extend(elapsed)
         rows.extend(derived_rows(elapsed, 'per_lookup', 'us',
                                  lambda ms, nn=len(ids): ms * 1000.0 / nn))
@@ -222,8 +222,8 @@ def incremental(books: List[RawBook], work_dir: Path) -> List[BenchmarkRow]:
             detected[0] = all_ids - known_ids
 
         elapsed = measure('datalake_incremental', struct_name, n, setup=setup, task=task)
-        if len(detected[0]) != len(fresh):
-            raise RuntimeError(f'{struct_name}: detected count does not match fresh books')
+        if detected[0] != _ids_of(fresh):
+            raise RuntimeError(f'{struct_name}: did not detect exactly the new books')
         rows.extend(elapsed)
         rows.extend(derived_rows(elapsed, 'detected', 'books',
                                  lambda ms, d=detected: len(d[0])))
@@ -268,14 +268,15 @@ def recovery(books: List[RawBook], work_dir: Path) -> List[BenchmarkRow]:
                     recovered_count[0] += 1
 
         elapsed = measure('datalake_recovery', struct_name, n, setup=setup, task=task)
-        
+        # Check on the final state (all repetitions are identical), as Java does
         listed = set(dl_holder[0].list_book_ids())
         lost = len(expected_ids - listed)
-        duplicates = sum(1 for p in d.rglob('*') if p.is_file() and p.name.endswith('body.txt')) - n
-
-        if recovered_count[0] != len(damaged) or lost != 0 or duplicates != 0:
+        duplicates = sum(1 for p in d.rglob('*')
+                         if p.is_file() and p.name.endswith('body.txt')) - n  # extra complete bodies
+        if recovered_count[0] != len(damaged):
+            raise RuntimeError(f'{struct_name}: did not recover every damaged book')
+        if lost != 0 or duplicates != 0:
             raise RuntimeError(f'{struct_name}: recovery left lost or duplicated books')
-
         rows.extend(elapsed)
         rows.append(single_row('datalake_recovery', struct_name, n,
                                'recovered', recovered_count[0], 'books'))

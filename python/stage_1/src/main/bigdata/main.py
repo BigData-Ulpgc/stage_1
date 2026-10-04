@@ -199,6 +199,7 @@ def main() -> None:
         book_loc = book_dl.save(raw_book)
         time_dl.save(raw_book)
         range_dl.save(raw_book)
+        control.mark_as_downloaded(book_id)
         print(f"[INFO] [{book_id}] Datalake -> OK.")
 
         # 3d. Metadata — parse header and insert into SQLite
@@ -233,12 +234,13 @@ def main() -> None:
         else:
             print(f"[WARN] [{book_id}] MongoDB index skipped (no connection).")
 
-        # 3g. Confirmation in control layer
+        # Persist this book's terms BEFORE marking it (SPEC section 8)
         mono_index.flush()
         hier_index.flush()
         if mongo_index is not None:
             mongo_index.flush()
-        control.mark_as_downloaded(book_id)
+
+        # 3g. Confirmation in control layer
         control.mark_as_indexed(book_id)
         print(f"[INFO] [{book_id}] [OK] Book processed successfully.")
 
@@ -246,21 +248,12 @@ def main() -> None:
 
     # ── 4. Shutdown ────────────────────────────────────────────────────
     print("\n" + "=" * 65)
-    print("[INFO] Flushing monolithic index to disk...")
-    mono_index.flush()
-    print("[INFO] Monolithic index saved.")
-
-    print("[INFO] Flushing hierarchical index to disk...")
-    hier_index.flush()
-    print("[INFO] Hierarchical index saved.")
-
     metadata.close()
     print("[INFO] SQLite connection closed.")
 
     if mongo_index is not None:
-        mongo_index.flush()
         mongo_index.close()
-        print("[INFO] MongoDB index flushed and connection closed.")
+        print("[INFO] MongoDB connection closed.")
 
     # ── 5. Final summary ───────────────────────────────────────────────
     print("=" * 65)

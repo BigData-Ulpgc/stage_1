@@ -8,7 +8,7 @@ The rules shared with the Java and C++ modules (split markers, folder layouts, t
 
 | Tool | Version | Notes |
 | :--- | :--- | :--- |
-| **Python** | 3.9 or newer | Tested with Python 3.10+ |
+| **Python** | 3.10 or newer | Tested with Python 3.10+ |
 | **pip** | Latest | For installing dependencies |
 | **MongoDB** | 6.0+ | Optional, only for the mongo index structure |
 
@@ -49,9 +49,9 @@ The main entry point for the application is the `main.py` orchestrator.
 
 | Command | What it does | Network |
 | --- | --- | --- |
-| `pipeline [steps]` | Runs up to *steps* books (counts books: download and index together, not actions). Downloads a new book from Gutenberg if needed, splits it, and indexes it. | Yes |
+| `pipeline [steps]` | Processes up to *steps* new books. Each step downloads one book from Gutenberg, splits it, and indexes it. | Yes |
 | `search <words...>` | AND search on the active index: returns books containing every word. | No |
-| `status` | Displays the current count of downloaded, indexed, and pending books ('Pending' means 'not indexed'). | No |
+| `status` | Displays the current count of downloaded, indexed, and pending (not yet indexed) books. | No |
 | `--offline-source` | Skips Gutenberg network requests and loads books directly from a local folder. | No |
 
 **Examples:**
@@ -136,7 +136,8 @@ python -m src.main.bigdata.main pipeline 15 --offline-source ../../sample_datase
 ```
 
 
+* **Differences from Java/C++**: `pipeline [steps]` counts *books* (download and index are done together for each book), not separate actions; and `status` reports "Pending" as books that are *not indexed* yet.
 * **Starting Over**: Running `rm -rf data` deletes downloaded books, indexes, and control files. It does *not* touch the MongoDB collection. To clear Mongo, run `docker compose down -v` at the repository root.
-* **Benchmark Teardown**: The benchmark suite creates a temporary database (`search_engine_benchmark`) during its run. It automatically cleans and drops this database upon completion to prevent disk bloat. Your production `search_engine` database remains untouched.
+* **Benchmark Teardown**: The benchmark suite creates a temporary database (`search_engine_bench`) during its run. Every experiment empties its collection when it finishes, so nothing is left behind. Your production `search_engine` database remains untouched.
 
 ```

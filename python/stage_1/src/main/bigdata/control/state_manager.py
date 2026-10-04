@@ -35,7 +35,7 @@ class ControlLayer:
 
     def _add_id(self, filepath: str, book_id: int):
         """Safely appends an ID to the specified file."""
-        with open(filepath, "a", encoding="utf-8") as f:
+        with open(filepath, "a", encoding="utf-8", newline="\n") as f:
             f.write(f"{book_id}\n")
 
     def get_downloaded_books(self) -> Set[int]:

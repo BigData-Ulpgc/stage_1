@@ -47,35 +47,28 @@ def insert(size: int, work_dir: Path) -> List[BenchmarkRow]:
 
     for backend in ('sqlite', 'sqlite_no_index'):
         db_path = work_dir / 'insert' / f'{backend}.db'
-
         repo_holder = [None]
 
         def setup(p=db_path, b=backend):
+            # Untimed: close the previous repository and open an empty one, as Java does
             if repo_holder[0] is not None:
                 repo_holder[0].close()
             p.parent.mkdir(parents=True, exist_ok=True)
-            if p.exists():
-                p.unlink()
-            # Pre-create DB schema and indexes outside of timed task
-            with_idx = (b == 'sqlite')
-            repo_holder[0] = MetadataRepository(p, with_indexes=with_idx)
+            p.unlink(missing_ok=True)
+            Path(f'{p}-journal').unlink(missing_ok=True)
+            repo_holder[0] = MetadataRepository(p, with_indexes=(b == 'sqlite'))
 
         def task():
-            repo = repo_holder[0]
-            # Insert in batches of 1000
+            # Only the batches are timed: one transaction per batch of 1000
             for i in range(0, size, 1000):
-                repo.save_all(data[i:i+1000])
+                repo_holder[0].save_all(data[i:i + 1000])
 
         elapsed = measure('metadata_insert', backend, size, setup=setup, task=task)
-        if repo_holder[0] is not None:
-            repo_holder[0].close()
-        
-        import sqlite3
-        with sqlite3.connect(db_path) as conn:
-            count = conn.execute("SELECT COUNT(*) FROM books").fetchone()[0]
-            if count != size:
-                raise RuntimeError(f"Expected {size} rows, got {count}")
-                
+        count = repo_holder[0].count()
+        repo_holder[0].close()
+        if count != size:
+            raise RuntimeError(f"Expected {size} rows, got {count}")
+
         rows.extend(elapsed)
         rows.extend(derived_rows(elapsed, 'throughput', 'rows_per_s',
                                  lambda ms, n=size: n / (ms / 1000.0)))

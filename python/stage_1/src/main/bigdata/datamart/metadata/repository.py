@@ -66,6 +66,9 @@ class MetadataRepository:
         cursor.execute('SELECT * FROM books WHERE title = ? ORDER BY book_id', (title,))
         return [self._row_to_metadata(row) for row in cursor.fetchall()]
 
+    def count(self) -> int:
+        return self._conn.execute('SELECT COUNT(*) FROM books').fetchone()[0]
+
     def close(self):
         self._conn.close()
 

@@ -23,7 +23,7 @@ from .csv_results import write_experiment
 
 
 DEFAULT_QUERY_ROUNDS = 100
-BENCH_DATABASE = 'search_engine_benchmark'
+BENCH_DATABASE = 'search_engine_bench'
 
 
 # ------------------------------------------------------------------ #
@@ -88,6 +88,22 @@ def _add_all(index: InvertedIndex, books: List[TokenizedBook]):
         index.add_document(book.id, book.terms)
 
 
+def verify(index: InvertedIndex, books: List[TokenizedBook], queries: List[str], what: str) -> None:
+    """Java's IndexBenchmark.verify: the structure must match an in-memory index built from
+    the same books, for the query terms, the first 20 sorted terms of the first and last
+    book, and the answer of every query."""
+    reference = InMemoryInvertedIndex()
+    _add_all(reference, books)
+    terms = [t for q in queries for t in sorted(tokenize(q))]
+    terms += sorted(books[0].terms)[:20] + sorted(books[-1].terms)[:20]
+    for term in dict.fromkeys(terms):
+        if index.postings(term) != reference.postings(term):
+            raise RuntimeError(f'{what}: different postings for "{term}"')
+    for q in queries:
+        if search(index, q) != search(reference, q):
+            raise RuntimeError(f'{what}: different result for "{q}"')
+
+
 def _fresh_index(name: str, open_fn: Callable, d: Path, previous=None):
     """Close previous, clear, reopen empty."""
     if previous is not None:
@@ -134,20 +150,6 @@ def _allocated_bytes(root: Path) -> int:
 
 
 # ================================================================== #
-def verify(index, books, queries, what: str) -> None:
-    reference = InMemoryInvertedIndex()
-    _add_all(reference, books)
-    terms = [t for q in queries for t in sorted(tokenize(q))]
-    terms += sorted(books[0].terms)[:20] + sorted(books[-1].terms)[:20]
-    for term in dict.fromkeys(terms):
-        if index.postings(term) != reference.postings(term):
-            raise RuntimeError(f'{what}: different postings for "{term}"')
-    for q in queries:
-        if search(index, q) != search(reference, q):
-            raise RuntimeError(f'{what}: different result for "{q}"')
-
-
-# ================================================================== #
 # Experiment 1: index_build                                           #
 # ================================================================== #
 
@@ -167,7 +169,7 @@ def build(books: List[TokenizedBook], work_dir: Path, backends, queries: List[st
             idx.flush()
 
         elapsed = measure('index_build', name, n, setup=setup, task=task)
-        verify(idx_holder[0], books, queries, f'build {name}')
+        verify(idx_holder[0], books, queries, f'{name} build')
         rows.extend(elapsed)
         rows.extend(derived_rows(elapsed, 'throughput', 'books_per_s',
                                  lambda ms, nn=n: nn / (ms / 1000.0)))
@@ -201,7 +203,7 @@ def query(
         built.close()
 
         idx = open_fn(d)
-        verify(idx, books, queries, f'query {name}')
+        verify(idx, books, queries, f'{name} query')  # same results as the reference
         found = [0]
 
         def setup():
@@ -249,7 +251,7 @@ def update(books: List[TokenizedBook], work_dir: Path, backends, queries: List[s
                 idx.flush()
 
         elapsed = measure('index_update', name, n, setup=setup, task=task)
-        verify(idx_holder[0], books, queries, f'update {name}')
+        verify(idx_holder[0], books, queries, f'{name} update')  # N-k + k == building N
         if idx_holder[0]:
             idx_holder[0].clear()
             idx_holder[0].close()
@@ -291,16 +293,16 @@ def memory(books: List[TokenizedBook], work_dir: Path, backends, queries: List[s
 
         snap_before_open = tracemalloc.take_snapshot()
         reopened = open_fn(d)
-        verify(reopened, books, queries, f'memory {name}')
         gc.collect()
         snap_after_open = tracemalloc.take_snapshot()
         heap_before_open = sum(s.size for s in snap_before_open.statistics('filename'))
         heap_after_open_val = sum(s.size for s in snap_after_open.statistics('filename'))
         open_mem = heap_after_open_val - heap_before_open
+        tracemalloc.stop()
 
+        verify(reopened, books, queries, f'{name} memory')
         reopened.clear()
         reopened.close()
-        tracemalloc.stop()
 
         rows.append(single_row('index_memory', name, n, 'heap_after_build', max(0, build_mem), 'bytes'))
         rows.append(single_row('index_memory', name, n, 'heap_after_open', max(0, open_mem), 'bytes'))
@@ -326,7 +328,7 @@ def disk(books: List[TokenizedBook], work_dir: Path, backends, queries: List[str
         idx = _fresh_index(name, open_fn, d)
         _add_all(idx, books)
         idx.flush()
-        verify(idx, books, queries, f'disk {name}')
+        verify(idx, books, queries, f'{name} disk')
 
         disk_bytes = idx.disk_usage_bytes()
         rows.append(single_row('index_disk', name, n, 'bytes', disk_bytes, 'bytes'))
