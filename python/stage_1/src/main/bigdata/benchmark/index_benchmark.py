@@ -104,14 +104,21 @@ def verify(index: InvertedIndex, books: List[TokenizedBook], queries: List[str],
             raise RuntimeError(f'{what}: different result for "{q}"')
 
 
-def _fresh_index(name: str, open_fn: Callable, d: Path, previous=None):
-    """Close previous, clear, reopen empty."""
+def _fresh_index(name: str, open_fn: Callable, d: Path, queries: List[str], previous=None):
+    """Close previous, clear, reopen empty, and check that it really is empty, as Java's
+    IndexBenchmark.freshIndex: no file in the folder and no postings for the query terms."""
     if previous is not None:
         previous.close()
     old = open_fn(d)
     old.clear()
     old.close()
-    return open_fn(d)
+    index = open_fn(d)
+    if _disk_stats(d)['files'] != 0:
+        raise RuntimeError(f'{name}: clear left files in {d}')
+    for term in dict.fromkeys(t for q in queries for t in sorted(tokenize(q))):
+        if index.postings(term):
+            raise RuntimeError(f'{name}: clear left postings for "{term}"')
+    return index
 
 
 def _dir_for(work_dir: Path, experiment: str, backend_name: str) -> Path:
@@ -161,7 +168,7 @@ def build(books: List[TokenizedBook], work_dir: Path, backends, queries: List[st
         idx_holder = [None]
 
         def setup(n_=name, o_=open_fn, d_=d):
-            idx_holder[0] = _fresh_index(n_, o_, d_, idx_holder[0])
+            idx_holder[0] = _fresh_index(n_, o_, d_, queries, idx_holder[0])
 
         def task():
             idx = idx_holder[0]
@@ -197,7 +204,7 @@ def query(
     for name, open_fn in backends:
         d = _dir_for(work_dir, 'query', name)
         # Build + flush + close, then reopen for querying
-        built = _fresh_index(name, open_fn, d)
+        built = _fresh_index(name, open_fn, d, queries)
         _add_all(built, books)
         built.flush()
         built.close()
@@ -238,7 +245,7 @@ def update(books: List[TokenizedBook], work_dir: Path, backends, queries: List[s
         idx_holder = [None]
 
         def setup(n_=name, o_=open_fn, d_=d):
-            prev = _fresh_index(n_, o_, d_, idx_holder[0])
+            prev = _fresh_index(n_, o_, d_, queries, idx_holder[0])
             _add_all(prev, base_books)
             prev.flush()
             prev.close()
@@ -271,7 +278,7 @@ def memory(books: List[TokenizedBook], work_dir: Path, backends, queries: List[s
     for name, open_fn in backends:
         d = _dir_for(work_dir, 'memory', name)
         # Ensure clean start
-        _fresh_index(name, open_fn, d).close()
+        _fresh_index(name, open_fn, d, queries).close()
 
         tracemalloc.start()
         gc.collect()
@@ -304,8 +311,8 @@ def memory(books: List[TokenizedBook], work_dir: Path, backends, queries: List[s
         reopened.clear()
         reopened.close()
 
-        rows.append(single_row('index_memory', name, n, 'heap_after_build', max(0, build_mem), 'bytes'))
-        rows.append(single_row('index_memory', name, n, 'heap_after_open', max(0, open_mem), 'bytes'))
+        rows.append(single_row('index_memory', name, n, 'heap_after_build', build_mem, 'bytes'))
+        rows.append(single_row('index_memory', name, n, 'heap_after_open', open_mem, 'bytes'))
     return rows
 
 
@@ -325,7 +332,7 @@ def disk(books: List[TokenizedBook], work_dir: Path, backends, queries: List[str
     n = len(books)
     for name, open_fn in backends:
         d = _dir_for(work_dir, 'disk', name)
-        idx = _fresh_index(name, open_fn, d)
+        idx = _fresh_index(name, open_fn, d, queries)
         _add_all(idx, books)
         idx.flush()
         verify(idx, books, queries, f'{name} disk')

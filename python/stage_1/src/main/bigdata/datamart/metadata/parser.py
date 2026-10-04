@@ -9,15 +9,19 @@ _RE_LANGUAGE = re.compile(r'^Language:\s*(.+)$', re.MULTILINE)
 
 
 def _first_match(pattern: re.Pattern, text: str) -> Optional[str]:
+    """Group 1 of the first match, stripped; None if there is none or it ends up empty."""
     m = pattern.search(text)
-    return m.group(1).strip() if m else None
+    if not m:
+        return None
+    value = m.group(1).strip()
+    return value or None
 
 
 def parse_metadata(header_text: str) -> dict:
     """Extract metadata fields from a Gutenberg header.
-    
+
     Returns dict with keys: title, author, release_date, language.
-    Values are None when the field is not found.
+    Values are None when the field is not found or is empty, as in Java.
     """
     return {
         'title': _first_match(_RE_TITLE, header_text),

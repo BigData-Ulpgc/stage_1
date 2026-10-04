@@ -104,9 +104,9 @@ Sources are inside `src/main/bigdata/`, and all unit tests faithfully mirror thi
 
 **Design Decisions & Python specifics:**
 
-* **Tokenizer Parity**: The Python tokenizer strictly uses regex `[a-zA-Z0-9]+` and outputs lowercase ASCII to guarantee 100% term parity with the Java and C++ implementations.
+* **Tokenizer Parity**: The Python tokenizer uses no regex. It is a loop over the body, character by character, as SPEC section 5 describes: `A-Z` is lowered to `a-z`, `a-z` and `0-9` extend the current token, and any other character (including every non-ASCII one) ends it. Tokens shorter than 2 characters and the stopwords in `shared/stopwords.txt` are dropped. This guarantees the same terms as the Java and C++ implementations.
 * **Seed Synchronization**: Python's native `random` module does not match Java's output. To ensure our synthetic benchmarks process the exact same virtual data as our teammates, we implemented a custom `JavaRandom(42)` generator.
-* **Atomic Writes**: Local files (JSON and hierarchical text) are written carefully to avoid corruption during unexpected shutdowns.
+* **Atomic Writes**: As in Java, every file is first written to `<name>.tmp` and then moved over `<name>` with `os.replace`: the datalake headers and bodies, the monolithic `inverted_index.json` and each hierarchical term file. A crash halfway never leaves a half-written file under its final name; a leftover `.tmp` never counts as a saved book. The control files are append-only: a last line left without `\n` by an interrupted append is ignored and trimmed when the control layer starts.
 
 ## 6. Benchmarks
 

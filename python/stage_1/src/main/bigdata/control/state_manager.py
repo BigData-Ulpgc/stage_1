@@ -1,10 +1,20 @@
 import os
+import re
 from typing import Set
+
+# Same criterion as the datalake: "0" or no leading zeros, at most 9 digits
+_VALID_ID = re.compile(r'^(0|[1-9][0-9]{0,8})$')
+
 
 class ControlLayer:
     """
     Manages the state of processed books (downloaded and indexed),
     as defined in Section 8 of the common contract (SPEC.md).
+
+    Only COMPLETE lines (ending in \\n) count, as in Java's ControlFiles: if the program
+    died halfway through writing "1342\\n" and "13" was left, that fragment is ignored,
+    and it is trimmed from the file when the layer is created, so the next append
+    does not glue it to another id ("13" + "84\\n" = "1384").
     """
 
     def __init__(self, base_dir: str = "../data/control"):
@@ -12,7 +22,9 @@ class ControlLayer:
         self.downloaded_file = os.path.join(self.base_dir, "downloaded_books.txt")
         self.indexed_file = os.path.join(self.base_dir, "indexed_books.txt")
         self._ensure_dir()
-        
+        self._truncate_partial_line(self.downloaded_file)
+        self._truncate_partial_line(self.indexed_file)
+
     def _ensure_dir(self):
         """Ensures the control directory exists."""
         os.makedirs(self.base_dir, exist_ok=True)
@@ -22,15 +34,31 @@ class ControlLayer:
         if not os.path.exists(self.indexed_file):
             open(self.indexed_file, 'a').close()
 
+    @staticmethod
+    def _complete_part(content: bytes) -> bytes:
+        """The content up to its last \\n (b"" if there is none)."""
+        return content[:content.rfind(b"\n") + 1]
+
+    @classmethod
+    def _truncate_partial_line(cls, filepath: str) -> None:
+        """Cuts a last line left without \\n by an interrupted append."""
+        with open(filepath, "rb") as f:
+            content = f.read()
+        complete = cls._complete_part(content)
+        if len(complete) < len(content):
+            with open(filepath, "r+b") as f:
+                f.truncate(len(complete))
+
     def _read_ids(self, filepath: str) -> Set[int]:
-        """Reads a file and returns a set of IDs."""
+        """Reads the complete lines of a file and returns its set of IDs."""
         ids = set()
         if os.path.exists(filepath):
-            with open(filepath, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if line.isdigit():
-                        ids.add(int(line))
+            with open(filepath, "rb") as f:
+                complete = self._complete_part(f.read())
+            for line in complete.decode("utf-8").split("\n"):
+                line = line.strip()  # also removes a Windows \r
+                if _VALID_ID.match(line):
+                    ids.add(int(line))
         return ids
 
     def _add_id(self, filepath: str, book_id: int):

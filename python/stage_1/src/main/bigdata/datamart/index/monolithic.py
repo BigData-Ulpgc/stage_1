@@ -28,22 +28,29 @@ class MonolithicJsonIndex(InvertedIndex):
 
     def flush(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = self._path.with_suffix('.tmp')
-        
+        tmp_path = self._tmp_path()
+
         export_data = {
             term: sorted(list(ids))
             for term, ids in sorted(self._index.items())
         }
-        
-        with open(tmp_path, 'w', encoding='utf-8', buffering=131072) as f:
-            json.dump(export_data, f, separators=(',', ':'))
-            
-        os.replace(tmp_path, self._path)
+
+        try:
+            with open(tmp_path, 'w', encoding='utf-8', newline='\n') as f:
+                f.write(json.dumps(export_data, separators=(',', ':')))
+            os.replace(tmp_path, self._path)
+        except BaseException:
+            tmp_path.unlink(missing_ok=True)
+            raise
 
     def clear(self) -> None:
         self._index.clear()
-        if self._path.exists():
-            self._path.unlink()
+        self._path.unlink(missing_ok=True)
+        self._tmp_path().unlink(missing_ok=True)
+
+    def _tmp_path(self) -> Path:
+        """inverted_index.json.tmp, the same name Java uses."""
+        return self._path.with_name(self._path.name + '.tmp')
 
     def disk_usage_bytes(self) -> int:
         if self._path.exists():

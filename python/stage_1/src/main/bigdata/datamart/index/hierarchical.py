@@ -4,6 +4,9 @@ from pathlib import Path
 from typing import List, Set
 from .base import InvertedIndex
 
+TMP_SUFFIX = '.tmp'
+
+
 class HierarchicalFolderIndex(InvertedIndex):
     def __init__(self, root: Path):
         self._root = Path(root)
@@ -11,7 +14,7 @@ class HierarchicalFolderIndex(InvertedIndex):
 
     def name(self) -> str:
         return "hierarchical"
-        
+
     def _get_path_for_term(self, term: str) -> Path:
         first_char = term[0].upper()
         return self._root / first_char / f"{term}.txt"
@@ -21,43 +24,20 @@ class HierarchicalFolderIndex(InvertedIndex):
             self._pending.setdefault(term, set()).add(book_id)
 
     def postings(self, term: str) -> List[int]:
-        ids = set(self._pending.get(term, set()))
-        path = self._get_path_for_term(term)
-        
-        if path.exists():
-            with open(path, 'r', encoding='utf-8') as f:
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        ids.add(int(line))
-                        
+        ids = self._read_ids(self._get_path_for_term(term))
+        ids.update(self._pending.get(term, set()))
         return sorted(ids)
 
     def flush(self) -> None:
+        """For each changed term: read its file, merge the new ids and, only if something
+        changed, rewrite that file with temp file + move, as Java's HierarchicalFolderIndex."""
         for term, new_ids in self._pending.items():
             path = self._get_path_for_term(term)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            
-            existing_ids = []
-            if path.exists():
-                with open(path, 'r', encoding='utf-8') as f:
-                    for line in f:
-                        line = line.strip()
-                        if line:
-                            existing_ids.append(int(line))
-            
-            sorted_new = sorted(new_ids)
-            
-            if not existing_ids or sorted_new[0] > max(existing_ids):
-                with open(path, 'a', encoding='utf-8', newline='\n', buffering=131072) as f:
-                    for book_id in sorted_new:
-                        f.write(f"{book_id}\n")
-            else:
-                merged_ids = sorted(set(existing_ids).union(new_ids))
-                with open(path, 'w', encoding='utf-8', newline='\n', buffering=131072) as f:
-                    for book_id in merged_ids:
-                        f.write(f"{book_id}\n")
-                        
+            ids = self._read_ids(path)
+            before = len(ids)
+            ids.update(new_ids)
+            if len(ids) != before:  # nothing new: the file is not touched
+                self._write_ids(path, ids)
         self._pending.clear()
 
     def clear(self) -> None:
@@ -74,3 +54,30 @@ class HierarchicalFolderIndex(InvertedIndex):
                     if not os.path.islink(fp):
                         total += os.path.getsize(fp)
         return total
+
+    @staticmethod
+    def _read_ids(path: Path) -> set[int]:
+        """Ids of a term file; empty if it does not exist. A corrupt file raises
+        ValueError instead of being treated as empty, so a flush never overwrites it."""
+        ids: set[int] = set()
+        if path.exists():
+            with open(path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        ids.add(int(line))
+        return ids
+
+    @staticmethod
+    def _write_ids(path: Path, ids: set[int]) -> None:
+        """One id per line, sorted, in a single write to <term>.txt.tmp, then moved."""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + TMP_SUFFIX)
+        content = ''.join(f"{book_id}\n" for book_id in sorted(ids))
+        try:
+            with open(tmp, 'w', encoding='utf-8', newline='\n') as f:
+                f.write(content)
+            os.replace(tmp, path)
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
