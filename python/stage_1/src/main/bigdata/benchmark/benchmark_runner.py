@@ -119,6 +119,11 @@ def main() -> None:
     _DATALAKE_DIR.mkdir(parents=True, exist_ok=True)
     _DATAMARTS_DIR.mkdir(parents=True, exist_ok=True)
 
+    if '--force' in sys.argv:
+        sys.argv.remove('--force')
+        for csv_file in _RESULTS_DIR.glob('python_*.csv'):
+            csv_file.unlink()
+
     # -------------------------------------------------------------- #
     # 3. Skip logic — avoid re-running if CSVs already exist         #
     # -------------------------------------------------------------- #
@@ -129,7 +134,7 @@ def main() -> None:
 
     print('=' * 70)
     print('  Python Benchmark Suite')
-    print('  Generating 12 CSV files (SPEC section 9)')
+    print('  Generating CSV files (SPEC section 9)')
     print(f'  Mode      : {mode}')
     print(f'  Results   : {_RESULTS_DIR}')
     print('=' * 70)
@@ -164,12 +169,15 @@ def main() -> None:
     # -------------------------------------------------------------- #
     # 6. Metadata benchmarks (2 CSVs) -> writes to data/<mode>/datamarts
     # -------------------------------------------------------------- #
-    print('\n--- Metadata Benchmarks (2 experiments) ---')
-    metadata_benchmark.run_all(
-        work_dir=_DATAMARTS_DIR,
-        results_dir=_RESULTS_DIR,
-        sizes=[1000, 10000, 100000],
-    )
+    if mode == 'synthetic':
+        print('\n--- Metadata Benchmarks (2 experiments) ---')
+        metadata_benchmark.run_all(
+            work_dir=_DATAMARTS_DIR,
+            results_dir=_RESULTS_DIR,
+            sizes=[1000, 10000, 100000],
+        )
+    else:
+        print('\n--- Metadata Benchmarks (Skipped in real mode) ---')
 
     # -------------------------------------------------------------- #
     # 7. Index benchmarks (5 CSVs) -> writes to data/<mode>/datamarts

@@ -14,8 +14,6 @@ class HierarchicalFolderIndex(InvertedIndex):
         
     def _get_path_for_term(self, term: str) -> Path:
         first_char = term[0].upper()
-        if '0' <= first_char <= '9':
-            first_char = '#'
         return self._root / first_char / f"{term}.txt"
 
     def add_document(self, book_id: int, terms: Set[str]) -> None:
@@ -40,10 +38,26 @@ class HierarchicalFolderIndex(InvertedIndex):
             path = self._get_path_for_term(term)
             path.parent.mkdir(parents=True, exist_ok=True)
             
-            with open(path, 'a', encoding='utf-8', newline='\n', buffering=131072) as f:
-                for book_id in sorted(new_ids):
-                    f.write(f"{book_id}\n")
-                    
+            existing_ids = []
+            if path.exists():
+                with open(path, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            existing_ids.append(int(line))
+            
+            sorted_new = sorted(new_ids)
+            
+            if not existing_ids or sorted_new[0] > existing_ids[-1]:
+                with open(path, 'a', encoding='utf-8', newline='\n', buffering=131072) as f:
+                    for book_id in sorted_new:
+                        f.write(f"{book_id}\n")
+            else:
+                merged_ids = sorted(set(existing_ids).union(new_ids))
+                with open(path, 'w', encoding='utf-8', newline='\n', buffering=131072) as f:
+                    for book_id in merged_ids:
+                        f.write(f"{book_id}\n")
+                        
         self._pending.clear()
 
     def clear(self) -> None:

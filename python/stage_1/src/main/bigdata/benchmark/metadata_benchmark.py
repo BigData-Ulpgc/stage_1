@@ -31,8 +31,8 @@ def _synthetic_metadata(size: int) -> List[tuple]:
         author = f'Author {i // 10}'
         language = 'English'
         release_date = 'January 1, 2000'
-        body_path = f'/data/datalake/book/{book_id}/body.txt'
-        header_path = f'/data/datalake/book/{book_id}/header.txt'
+        body_path = f'datalake/book/{book_id}/body.txt'
+        header_path = f'datalake/book/{book_id}/header.txt'
         rows.append((book_id, title, author, language, release_date, body_path, header_path))
     return rows
 
@@ -52,17 +52,29 @@ def insert(size: int, work_dir: Path) -> List[BenchmarkRow]:
             p.parent.mkdir(parents=True, exist_ok=True)
             if p.exists():
                 p.unlink()
-            # Pre-create to ensure clean state
+            # Pre-create DB schema and indexes outside of timed task
+            with_idx = (b == 'sqlite')
+            repo = MetadataRepository(p, with_indexes=with_idx)
+            repo.close()
 
         def task(p=db_path, b=backend):
             with_idx = (b == 'sqlite')
             repo = MetadataRepository(p, with_indexes=with_idx)
-            repo.save_all(data)
+            # Insert in batches of 1000
+            for i in range(0, size, 1000):
+                repo.save_all(data[i:i+1000])
             repo.close()
 
         elapsed = measure('metadata_insert', backend, size, setup=setup, task=task)
+        
+        import sqlite3
+        with sqlite3.connect(db_path) as conn:
+            count = conn.execute("SELECT COUNT(*) FROM books").fetchone()[0]
+            if count != size:
+                raise RuntimeError(f"Expected {size} rows, got {count}")
+                
         rows.extend(elapsed)
-        rows.extend(derived_rows(elapsed, 'throughput', 'books_per_s',
+        rows.extend(derived_rows(elapsed, 'throughput', 'rows_per_s',
                                  lambda ms, n=size: n / (ms / 1000.0)))
     return rows
 
@@ -74,7 +86,14 @@ def insert(size: int, work_dir: Path) -> List[BenchmarkRow]:
 def query(size: int, work_dir: Path, n_queries: int = DEFAULT_QUERY_COUNT) -> List[BenchmarkRow]:
     data = _synthetic_metadata(size)
     rows = []
+    
     rnd = JavaRandom(42)
+    query_ids, query_authors, query_titles = [], [], []
+    for _ in range(n_queries):
+        pick = data[rnd.next_int(len(data))]
+        query_ids.append(pick[0])
+        query_titles.append(pick[1])
+        query_authors.append(pick[2])
 
     for backend in ('sqlite', 'sqlite_no_index'):
         db_path = work_dir / 'query' / f'{backend}.db'
@@ -85,11 +104,6 @@ def query(size: int, work_dir: Path, n_queries: int = DEFAULT_QUERY_COUNT) -> Li
         with_idx = (backend == 'sqlite')
         repo = MetadataRepository(db_path, with_indexes=with_idx)
         repo.save_all(data)
-
-        # Pre-generate query targets using JavaRandom for cross-language parity
-        query_ids = [rnd.next_int(size) + 1 for _ in range(n_queries)]
-        query_authors = [f'Author {rnd.next_int(size // 10 + 1)}' for _ in range(n_queries)]
-        query_titles = [f'Title {rnd.next_int(size // 2 + 1)}' for _ in range(n_queries)]
 
         found = [0]
 
@@ -111,19 +125,26 @@ def query(size: int, work_dir: Path, n_queries: int = DEFAULT_QUERY_COUNT) -> Li
 
         for query_type, task_fn in [('find_by_id', task_id), ('find_by_author', task_author), ('find_by_title', task_title)]:
             elapsed = measure('metadata_query', backend, size, setup=setup, task=task_fn)
-            for r in elapsed:
+            
+            if found[0] < 1000:
+                raise RuntimeError(f"Expected >= 1000 found, got {found[0]} for {query_type}")
+                
+            avg_rows = derived_rows(elapsed, f'{query_type}_avg', 'us',
+                                     lambda ms: ms * 1000.0 / n_queries)
+                                     
+            for r_el, r_avg in zip(elapsed, avg_rows):
                 rows.append(BenchmarkRow(
-                    language=r.language,
-                    experiment=r.experiment,
-                    structure=r.structure,
-                    dataset_size=r.dataset_size,
-                    repetition=r.repetition,
+                    language=r_el.language,
+                    experiment=r_el.experiment,
+                    structure=r_el.structure,
+                    dataset_size=r_el.dataset_size,
+                    repetition=r_el.repetition,
                     metric=query_type,
-                    value=r.value,
-                    unit=r.unit
+                    value=r_el.value,
+                    unit=r_el.unit
                 ))
-            rows.extend(derived_rows(elapsed, f'{query_type}_avg', 'us',
-                                     lambda ms: ms * 1000.0 / n_queries))
+                rows.append(r_avg)
+                
         repo.close()
     return rows
 
