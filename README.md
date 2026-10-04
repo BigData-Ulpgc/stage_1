@@ -19,7 +19,7 @@ in each language, with the same methodology everywhere.
 
 ## Architecture
 
-```
+```text
 shared/book_ids.txt
        │
        ▼
@@ -61,7 +61,7 @@ Control layer: data/control/downloaded_books.txt and indexed_books.txt
 
 ## Repository layout
 
-```
+```text
 .
 ├── shared/              the common contract and inputs, read by the three implementations
 │   ├── SPEC.md          rules all implementations follow (in Spanish, sections 1-9; English, section 10)
