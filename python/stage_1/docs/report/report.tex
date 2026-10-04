@@ -135,8 +135,13 @@ The Python pipeline writes every book to the three datalake layouts (\code{book}
 (\code{shared/SPEC.md}): with the 200 books of the dataset its indexes are byte-for-byte identical
 to Java's, and its random sequences reproduce Java's exactly. A 15-book sample dataset lets the
 whole pipeline run offline. The 12 benchmark experiments were run on the 200 real books, on the
-same Linux machine as the Java ones. \pending{one or two sentences with the main results, once the
-CSVs are committed.}
+same Linux machine as the Java ones. The \code{monolithic} index is the fastest to build (1.4~s for 200 books), to query
+(30\us{} per AND query) and to update (0.67~s per book), but it is the only one whose memory grows
+with the index (147~MB of Python objects for an 8.9~MB JSON). \code{hierarchical} spends 73 times its
+data size in file-system blocks, and the \code{time} datalake pays for its arrival-order layout with
+lookups 14 times slower than \code{book}. Next to Java, on the same machine, Python writes and
+builds at a similar speed but is 6--8 times slower wherever an interpreted loop runs per query or
+per term.
 
 \tableofcontents
 \newpage
@@ -406,12 +411,19 @@ Benchmark results & \code{benchmarks/results/\{real,synthetic\}/} \code{python\_
 The Python pipeline keeps every structure up to date, so choosing one does not change what is
 stored; it decides which structure a search engine built on this layer should rely on.
 
-\textbf{Datalake.} \pending{the layout chosen and why, from the datalake results of
-Section~\ref{sec:bench}: write throughput, lookup cost, incremental detection, recovery and storage
-overhead.}
+\textbf{Datalake.} \code{book}. Its lookup is the fastest (27.8\us{} per book, against 30.0 for \code{range} and
+377.9 for \code{time}), because the path is computed from the id; its write throughput (1,398
+books/s) is within 5\% of the fastest layout; it detects new books and recovers from an interrupted
+write as well as the others (20 recovered, 0 lost, 0 duplicated); and its storage overhead
+(1.5\% of allocated blocks) is negligible. It is also the layout the benchmarks read (SPEC 10.1), and the one Java and C++ chose.
 
-\textbf{Inverted index.} \pending{the index chosen and why, from the index results of
-Section~\ref{sec:bench}: build, query, update, memory and disk.}
+\textbf{Inverted index.} \code{monolithic}, at the scale of this stage. With 200 books it is the fastest to build (1.4~s,
+against 15.2 for \code{mongo} and 20.1 for \code{hierarchical}), to query (29.6\us{} against 171 and
+988) and to update (674~ms per book against 1,723 and 3,230), and the smallest on disk (8.9~MB). Its
+weak point is that it lives in memory: 147~MB of Python objects after reopening, growing with the
+index, and every flush rewrites the whole file, so its update cost grows linearly with N. For a much
+larger collection, \code{mongo} is the alternative: it keeps almost nothing in the client and
+answers several processes at once.
 
 \subsection{Implementation decisions}
 \begin{description}[style=nextline,leftmargin=0pt,itemsep=6pt]
@@ -804,7 +816,7 @@ official results were therefore produced on Linux.
 
 \begin{note}
 \textbf{Environment.} Same Linux machine as the Java run (12 threads, 15~GB RAM, NVMe SSD), Python
-\pending{version}, MongoDB~8.2 in Docker (local). Absolute values depend on the machine; what
+Python~3, MongoDB~8.2 in Docker (local). Absolute values depend on the machine; what
 matters are the ratios and how they change as N grows.
 \end{note}
 
@@ -853,7 +865,14 @@ Experiment & What exactly is measured & Metrics \\
 \caption{Datalake with the 200 real books (median of 5 runs).}
 \end{table}
 
-\pending{comment on the datalake results.}
+The three layouts store exactly the same 129.0~MB in 400 files, with 0.9--1.5\% of allocated overhead,
+and all three recover the 20 interrupted books with no losses or duplicates. Writing costs about the
+same in all of them (137--143~ms for 200 books); \code{book} is slightly slower because it creates
+200 folders. The difference is in lookups: \code{book} and \code{range} compute the path from the
+id (28--30\us), while \code{time} has to walk its hour folders, newest first, and takes 378\us{}
+per book, 14 times more, a cost that grows with the hours of ingestion. \code{time}, in exchange,
+keeps every folder small (20 entries, against 200 in the root of \code{book} and 220 in the busiest
+range), which matters when ids are concentrated.
 
 \subsection{Metadata benchmark}
 Data: the generated rows of SPEC 10.2. \code{metadata\_insert} times inserting N rows in batches of
@@ -874,7 +893,12 @@ indexes).
 \caption{Metadata: insert throughput and average time per query (median of 5 runs).}
 \end{table}
 
-\pending{comment on the metadata results.}
+With the SPEC indexes, every query stays flat as the table grows from 1,000 to 100,000 rows
+(13--17\us{} by id, 40--49 by author, 18--22 by title): SQLite walks a B-tree whatever N is. Without
+them, the queries by author and title become full scans and grow linearly with N, up to 8.8~ms per
+query with 100,000 rows, about 180 times slower. The price of the two indexes is on the insert side:
+75,000 rows/s with them against 90,000 without (17\% less). The indexes pay for themselves as soon as
+a table is queried more than it is written, which is the case of a search engine.
 
 \subsection{Inverted-index benchmark}
 Data: the prefixes of 50, 100 and 200 real books, tokenized once before any measurement, so the
@@ -905,7 +929,18 @@ tokenizer is not in any timing.
 heap: \code{tracemalloc}, after building and after reopening.}
 \end{table}
 
-\pending{comment on the index results.}
+\textbf{Build and query.} \code{monolithic} only fills dictionaries and writes one JSON, 1.4~s for
+200 books; \code{hierarchical} creates 129,356 files (20.1~s) and \code{mongo} sends one upsert per
+term (15.2~s). Queries follow the same order: memory (30\us), one small file per term (171\us), one
+round trip to the server per term (988\us).
+\textbf{Update.} Adding one book with a flush costs 674~ms in \code{monolithic}, which rewrites the
+whole 8.9~MB file and grows with N (158~ms at N = 50); \code{hierarchical} rewrites one file per term of the book,
+about 7,900 on average (3.2~s); \code{mongo} 1.7~s.
+\textbf{Disk and memory.} The data take 7.3--13.1~MB in every structure, but the 129,356 small term
+files of \code{hierarchical} occupy 530~MB of 4~KB blocks, 73 times their size. \code{monolithic}
+holds 117--147~MB of Python objects for 200 books (a set of Python \code{int}s is far larger than the
+JSON), while \code{hierarchical} and \code{mongo} keep only the pending book and need almost nothing
+($<$50~KB).
 
 \subsection{Comparison with Java and C++}\label{sec:lang}
 The three implementations follow the same SPEC, measure the same books and write the same CSV
@@ -944,11 +979,45 @@ Python results were taken on Linux, on the same machine as Java's.
 identical; the times are not expected to be.}
 \end{table}
 
-\pending{comment on the comparison: what is a difference of language and what is a difference of
-machine.}
+\textbf{Same output.} The three languages report the same 129,356 terms, 1,581,064 postings and
+8,893,537 JSON bytes, and the same storage counts: the differences below are of speed only.
+
+\textbf{Java and Python (same Linux machine): differences of language.} Where the work happens in
+the operating system or in C code, Python is as fast as Java or faster: datalake writes (1,398 against
+1,031 books/s), the monolithic build (1.4 against 1.7~s, where \code{json.dumps} runs in C), the Mongo
+build (15.2 against 14.3~s, bound by the server), SQLite inserts (75,000 against 50,000 rows/s,
+\code{executemany} in C against JDBC) and SQLite queries (49 against 52\us). Where an interpreted
+loop runs per call, Python is clearly slower: lookups (27.8 against 3.3\us, the cost of building
+\code{Path} objects and calling the file system from Python), AND queries (6.6 times slower on
+\code{monolithic}: sorting the set of each posting list and intersecting in Python), updates
+(674 against 85~ms per book: every flush sorts the ids of all 129,356 terms before writing) and the
+hierarchical build (1.8 times, a Python loop over every term file).
+
+\textbf{C++ (macOS on Apple Silicon): differences of machine and design.} C++ is fastest in most
+experiments, but part of that gap comes from a different machine and operating system, so it cannot
+be read as a language difference alone. Some numbers also reflect design choices: its \code{time}
+lookup of 0.1\us{} comes from keeping a map of the books it has written instead of walking the hour
+folders, and its SQLite inserts (455,000 rows/s) depend on the SQLite build and the disk of that
+machine.
 
 \subsection{Summary: which structure to choose}
-\pending{summary table and choice of structures, once all the results are in.}
+\begin{table}[H]
+\centering\small
+\begin{tabularx}{\linewidth}{@{}Y l l@{}}
+\toprule
+If the priority is\ldots & Datalake & Index \\
+\midrule
+Looking books up by id & \code{book} or \code{range} & --- \\
+Processing in arrival order, small folders & \code{time} & --- \\
+Fastest build, queries and updates at this scale (200 books) & --- & \code{monolithic} \\
+Index larger than memory, several processes querying & --- & \code{mongo} \\
+Little disk space & any & \code{monolithic} \\
+Avoiding many small files & \code{range} or \code{time} & not \code{hierarchical} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+The structures chosen for the Python module are \code{book} and \code{monolithic}, the same as in
+Java and C++ (Section~\ref{sec:decisions}).
 
 % ================================================================ 8
 \section{Conclusions and future improvements}
@@ -958,8 +1027,11 @@ The Python implementation delivers the complete Stage~1 data layer: crawler, dat
 inverted-index datamarts, AND search and a control layer that survives interruptions. One pipeline
 run fills the three datalake layouts and the three indexes, and its output matches the Java
 implementation byte for byte. The 12 benchmark experiments run with the methodology of the SPEC,
-check their own results, and are checked again by \code{verify\_results}. \pending{the main
-conclusions from the results.}
+check their own results, and are checked again by \code{verify\_results}. The results agree with Java's: \code{book} and \code{monolithic} are the best choices at this scale,
+\code{mongo} is the way to grow, and \code{hierarchical} pays heavily for its thousands of small
+files. Compared with Java on the same machine, Python is competitive wherever the work is done by
+the operating system, SQLite, JSON or MongoDB, and several times slower in its own per-term loops,
+which is where a future version should spend its effort.
 
 \subsection{Limitations and future improvements}
 \begin{itemize}

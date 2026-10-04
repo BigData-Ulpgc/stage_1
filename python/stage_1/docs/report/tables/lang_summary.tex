@@ -2,24 +2,24 @@
 \toprule
 Median of 5 runs & Java & Python & C++ \\
 \midrule
-Datalake write, \code{book} (books/s) & 1,031 & --- & 876 \\
-Datalake lookup, \code{book} (\us/book) & 3.3 & --- & 2.5 \\
-Datalake lookup, \code{time} (\us/book) & 94.5 & --- & 0.1 \\
-Detect new books, \code{book} (ms) & 1.24 & --- & 0.98 \\
-Recovery, \code{book} (ms) & 23.8 & --- & 19.1 \\
-Index build, \code{monolithic}, N = 200 (ms) & 1,686 & --- & 1,849 \\
-Index build, \code{hierarchical}, N = 200 (ms) & 11,339 & --- & 6,546 \\
-Index build, \code{mongo}, N = 200 (ms) & 14,286 & --- & 3,359 \\
-AND query, \code{monolithic}, N = 200 (\us) & 4.5 & --- & 1.4 \\
-AND query, \code{hierarchical}, N = 200 (\us) & 48.3 & --- & 22.0 \\
-AND query, \code{mongo}, N = 200 (\us) & 344.8 & --- & 314.6 \\
-Update, \code{monolithic}, N = 200 (ms/book) & 85.4 & --- & 300.0 \\
-Update, \code{hierarchical}, N = 200 (ms/book) & 1,239 & --- & 482.0 \\
-Update, \code{mongo}, N = 200 (ms/book) & 1,053 & --- & 921.8 \\
-Monolithic JSON, N = 200 (bytes) & 8,893,537 & --- & 8,893,537 \\
-Index terms, N = 200 & 129,356 & --- & 129,356 \\
-Metadata insert, \code{sqlite}, N = 100k (rows/s) & 50,036 & --- & 454,570 \\
-find\_by\_author, \code{sqlite}, N = 100k (\us) & 52.0 & --- & 15.4 \\
-find\_by\_author, \code{sqlite\_no\_index}, N = 100k (\us) & 8,460 & --- & 5,869 \\
+Datalake write, \code{book} (books/s) & 1,031 & 1,398 & 876 \\
+Datalake lookup, \code{book} (\us/book) & 3.3 & 27.8 & 2.5 \\
+Datalake lookup, \code{time} (\us/book) & 94.5 & 377.9 & 0.1 \\
+Detect new books, \code{book} (ms) & 1.24 & 6.28 & 0.98 \\
+Recovery, \code{book} (ms) & 23.8 & 22.5 & 19.1 \\
+Index build, \code{monolithic}, N = 200 (ms) & 1,686 & 1,395 & 1,849 \\
+Index build, \code{hierarchical}, N = 200 (ms) & 11,339 & 20,103 & 6,546 \\
+Index build, \code{mongo}, N = 200 (ms) & 14,286 & 15,232 & 3,359 \\
+AND query, \code{monolithic}, N = 200 (\us) & 4.5 & 29.6 & 1.4 \\
+AND query, \code{hierarchical}, N = 200 (\us) & 48.3 & 171.1 & 22.0 \\
+AND query, \code{mongo}, N = 200 (\us) & 344.8 & 987.7 & 314.6 \\
+Update, \code{monolithic}, N = 200 (ms/book) & 85.4 & 674.0 & 300.0 \\
+Update, \code{hierarchical}, N = 200 (ms/book) & 1,239 & 3,230 & 482.0 \\
+Update, \code{mongo}, N = 200 (ms/book) & 1,053 & 1,723 & 921.8 \\
+Monolithic JSON, N = 200 (bytes) & 8,893,537 & 8,893,537 & 8,893,537 \\
+Index terms, N = 200 & 129,356 & 129,356 & 129,356 \\
+Metadata insert, \code{sqlite}, N = 100k (rows/s) & 50,036 & 75,256 & 454,570 \\
+find\_by\_author, \code{sqlite}, N = 100k (\us) & 52.0 & 48.8 & 15.4 \\
+find\_by\_author, \code{sqlite\_no\_index}, N = 100k (\us) & 8,460 & 8,834 & 5,869 \\
 \bottomrule
 \end{tabular}

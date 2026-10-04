@@ -1,0 +1,12 @@
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+Structure & N & Insert (rows/s) & by id (\us) & by author (\us) & by title (\us) \\
+\midrule
+\code{sqlite} & 1,000 & 73,045 & 15.2 & 40.4 & 17.5 \\
+\code{sqlite} & 10,000 & 78,095 & 13.4 & 40.7 & 21.8 \\
+\code{sqlite} & 100,000 & 75,256 & 17.2 & 48.8 & 21.8 \\
+\code{sqlite\_no\_index} & 1,000 & 88,487 & 13.4 & 88.8 & 64.8 \\
+\code{sqlite\_no\_index} & 10,000 & 96,128 & 16.1 & 597.2 & 610.6 \\
+\code{sqlite\_no\_index} & 100,000 & 90,399 & 19.7 & 8,834 & 8,490 \\
+\bottomrule
+\end{tabular}
